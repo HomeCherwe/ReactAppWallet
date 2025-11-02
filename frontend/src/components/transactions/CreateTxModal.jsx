@@ -5,6 +5,7 @@ import { createTransaction } from '../../api/transactions'
 import { txBus } from '../../utils/txBus'
 import useMonoRates from '../../hooks/useMonoRates'
 import BaseModal from '../BaseModal'
+import { getApiUrl } from '../../utils.jsx'
 
 export default function CreateTxModal({ open, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
@@ -115,7 +116,11 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
     const fd = new FormData()
     fd.append('image', blob, 'receipt.jpg')
     fd.append('cardCurrency', cardCurrency || '')
-    const res = await fetch('/api/parse-receipt', { method: 'POST', body: fd })
+    // Use full URL for production, relative for dev (via Vite proxy)
+    const apiEndpoint = import.meta.env.PROD 
+      ? `${getApiUrl()}/api/parse-receipt`
+      : '/api/parse-receipt'
+    const res = await fetch(apiEndpoint, { method: 'POST', body: fd })
     if (!res.ok) throw new Error('Парсинг чека не вдалось')
     return await res.json()
   }

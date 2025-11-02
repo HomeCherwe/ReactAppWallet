@@ -9,7 +9,6 @@ ReactAppWallet/
 ├── .github/
 │   └── workflows/
 │       └── deploy.yml
-├── vercel.json
 └── README.md
 ```
 
@@ -35,7 +34,7 @@ git push -u origin main
 
 ### 3. Vercel
 1. [vercel.com](https://vercel.com) → Import Project
-2. **Root Directory: `backend`** ⚠️
+2. **Root Directory: `backend`** ⚠️ (ЦЕ ВАЖЛИВО!)
 3. Environment Variables:
    ```
    MONO_TOKEN=...

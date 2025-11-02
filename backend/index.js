@@ -11,7 +11,17 @@ dotenv.config()
 const app = express()
 const upload = multer()
 
-app.use(cors());
+// CORS configuration for Vercel
+const corsOptions = {
+  origin: '*', // Allow all origins for now
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Token'],
+  credentials: false
+}
+app.use(cors(corsOptions));
+
+// Handle preflight requests
+app.options('*', cors(corsOptions));
 
 // allow JSON bodies
 app.use(express.json())

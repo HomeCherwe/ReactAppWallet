@@ -9,6 +9,7 @@ import DetailsModal from './DetailsModal'
 import CreateTxModal from './CreateTxModal'
 import EditTxModal from './EditTxModal'
 import TransferModal from './TransferModal'
+import { getApiUrl } from '../../utils.jsx'
 import { listTransactions, deleteTransaction } from '../../api/transactions'
 import { txBus } from '../../utils/txBus'
 
@@ -153,9 +154,8 @@ export default function MonthlyPayment() {
                 setSyncLoading(true)
                 const toastId = toast.loading('Синхронізація виконується...')
                 try {
-                  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8787'
                   const monoToken = import.meta.env.VITE_MONO_TOKEN || ''
-                  const resp = await fetch(`${apiUrl}/api/syncMonoBank`, {
+                  const resp = await fetch(`${getApiUrl()}/api/syncMonoBank`, {
                     method: 'POST',
                     headers: {
                       'Content-Type': 'application/json',

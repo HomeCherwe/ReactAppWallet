@@ -7,6 +7,7 @@ import TotalsCard from './components/totals/TotalsCard'
 import MonthlyPayment from './components/transactions/MonthlyPayment'
 import EarningsChart from './charts/EarningsChart.jsx'
 import { txBus } from './utils/txBus'
+import { getApiUrl } from './utils.jsx'
 
 export default function App(){
   const [loading, setLoading] = useState(true)
@@ -15,8 +16,7 @@ export default function App(){
   useEffect(() => {
     const syncBinance = async () => {
       try {
-        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8787'
-        const response = await fetch(`${apiUrl}/api/syncBinance`, {
+        const response = await fetch(`${getApiUrl()}/api/syncBinance`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' }
         })
