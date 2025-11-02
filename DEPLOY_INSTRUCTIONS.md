@@ -47,6 +47,8 @@ Settings → Secrets and variables → Actions → New repository secret
 - `VITE_API_URL` - залиште пустим поки (додасте після деплою бекенду)
 - `VITE_MONO_TOKEN` - ваш Monobank токен
 - `VITE_EXCHANGE_RATE_API` - `https://open.er-api.com/v6/latest/USD`
+- `VITE_SUPABASE_URL` - URL вашого Supabase проекту
+- `VITE_SUPABASE_ANON_KEY` - Anon key з Supabase
 
 ### 2.3 Запустити деплой
 

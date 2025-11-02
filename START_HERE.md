@@ -30,6 +30,8 @@ git push -u origin main
   - `VITE_API_URL` (поки пустий)
   - `VITE_MONO_TOKEN`
   - `VITE_EXCHANGE_RATE_API` = `https://open.er-api.com/v6/latest/USD`
+  - `VITE_SUPABASE_URL`
+  - `VITE_SUPABASE_ANON_KEY`
 
 ### 3. Vercel
 1. [vercel.com](https://vercel.com) → Import Project

@@ -44,6 +44,8 @@ jobs:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
           VITE_MONO_TOKEN: ${{ secrets.VITE_MONO_TOKEN }}
           VITE_EXCHANGE_RATE_API: ${{ secrets.VITE_EXCHANGE_RATE_API }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

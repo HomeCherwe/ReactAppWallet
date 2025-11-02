@@ -18,7 +18,16 @@ app.use(express.json())
 
 // server-side Supabase client (use service role key when available)
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY
+
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.error('❌ Помилка: Відсутні змінні середовища Supabase!')
+  console.error('Додайте в backend/.env:')
+  console.error('  SUPABASE_URL=your_supabase_url')
+  console.error('  SUPABASE_SERVICE_ROLE_KEY=your_service_key (або SUPABASE_ANON_KEY)')
+  process.exit(1)
+}
+
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
 app.post('/api/parse-receipt', upload.single('image'), async (req, res) => {
