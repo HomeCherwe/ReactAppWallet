@@ -35,7 +35,8 @@ git push -u origin main
 ### 3. Vercel
 1. [vercel.com](https://vercel.com) → Import Project
 2. **Root Directory: `backend`** ⚠️ (ЦЕ ВАЖЛИВО!)
-3. Environment Variables:
+3. **Regions:** Франкфурт (fra1) — вже налаштовано в `backend/vercel.json` для Binance API
+4. Environment Variables:
    ```
    MONO_TOKEN=...
    MONO_CARD_ID_BLACK=...
