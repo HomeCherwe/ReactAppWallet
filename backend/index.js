@@ -6,25 +6,24 @@ import axios from 'axios'
 import cors from 'cors'
 import crypto from 'crypto'
 import { createClient } from '@supabase/supabase-js'
-dotenv.config()
+dotenv.config();
 
-const app = express()
-const upload = multer()
+const app = express();
+const upload = multer();
 
-// CORS configuration for Vercel
+// ✅ CORS configuration for Vercel
 const corsOptions = {
-  origin: 'https://homecherwe.github.io', // Allow all origins for now
+  origin: 'https://homecherwe.github.io',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Token'],
-  credentials: false
-}
-app.use(cors(corsOptions));
+  credentials: false,
+};
 
-// Handle preflight requests
-app.options('(.*)', cors(corsOptions));
+app.use(cors(corsOptions)); // цього достатньо!
 
-// allow JSON bodies
-app.use(express.json())
+// ✅ Allow JSON bodies
+app.use(express.json());
+
 
 // server-side Supabase client (use service role key when available)
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
