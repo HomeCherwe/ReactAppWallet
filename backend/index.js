@@ -13,7 +13,7 @@ const upload = multer()
 
 // CORS configuration for Vercel
 const corsOptions = {
-  origin: '*', // Allow all origins for now
+  origin: 'https://homecherwe.github.io', // Allow all origins for now
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Token'],
   credentials: false
@@ -21,7 +21,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 // Handle preflight requests
-app.options('*', cors(corsOptions));
+app.options('(.*)', cors(corsOptions));
 
 // allow JSON bodies
 app.use(express.json())
