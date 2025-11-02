@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --card: #ffffff;
+  --muted:  #8b8ea1;
+  --ring:   0 0% 0%;
+}
+
+* { box-sizing: border-box; }
+body { font-family: theme('fontFamily.inter'); }
+
+@layer base {
+  /* Mobile-first base font sizing; scale up on larger screens */
+  html { font-size: 14px; }
+  @screen md { html { font-size: 16px; } }
+
+  /* Slightly larger line-height for readability on mobile */
+  body { line-height: 1.45; }
+}
+
+@layer components {
+  /* A consistent app container you can use in layouts: centers content and
+     adjusts horizontal padding for phone/desktop */
+  .app-container {
+    @apply container mx-auto px-4;
+  }
+
+  /* Responsive button sizes */
+  .btn {
+    @apply px-3 py-2 rounded-xl font-semibold transition shadow-soft text-sm;
+  }
+  @screen md { .btn { @apply px-4 py-2 text-base } }
+}
+
+/* Glassy container */
+.glass {
+  backdrop-filter: blur(12px);
+  background: rgba(255,255,255,0.75);
+}
+
+.btn {
+  @apply px-4 py-2 rounded-xl font-semibold transition shadow-soft;
+}
+.btn-primary {
+  @apply bg-black text-white hover:opacity-90 active:scale-[0.98];
+}
+.btn-soft {
+  @apply bg-white hover:bg-gray-50 border border-gray-200;
+}
