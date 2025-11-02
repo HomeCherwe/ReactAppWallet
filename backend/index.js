@@ -313,8 +313,8 @@ function createBinanceSignature(queryString, apiSecret) {
 // POST /api/syncBinance
 app.post('/api/syncBinance', async function (req, res) {
   try {
-    const apiKey = req.body.apiKey || process.env.BINANCE_API_KEY
-    const apiSecret = req.body.apiSecret || process.env.BINANCE_API_SECRET
+    const apiKey = process.env.BINANCE_API_KEY
+    const apiSecret = process.env.BINANCE_API_SECRET
 
     if (!apiKey || !apiSecret) {
       console.log('Binance API keys not configured, skipping sync')
