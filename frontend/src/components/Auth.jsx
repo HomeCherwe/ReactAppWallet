@@ -9,13 +9,30 @@ export default function Auth() {
   const signInWithGoogle = async () => {
     try {
       setLoading(true)
-      // Get full URL including pathname and hash for GitHub Pages
-      const redirectTo = window.location.origin + window.location.pathname
+      
+      // Determine redirect URL based on environment
+      let redirectTo
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        // Local development
+        redirectTo = window.location.origin + window.location.pathname
+      } else {
+        // Production (GitHub Pages or other hosting)
+        // Get the base URL without hash
+        redirectTo = window.location.origin + window.location.pathname.replace(/\/$/, '') || window.location.origin
+      }
+      
+      // Remove any trailing slashes and hash
+      redirectTo = redirectTo.split('#')[0].replace(/\/$/, '') || redirectTo
+      
+      console.log('Redirecting to:', redirectTo) // Debug log
       
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: redirectTo
+          redirectTo: redirectTo,
+          queryParams: {
+            redirect_to: redirectTo
+          }
         }
       })
       

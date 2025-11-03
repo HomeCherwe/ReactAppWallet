@@ -41,8 +41,14 @@ https://YOUR_PROJECT_ID.supabase.co/auth/v1/callback
 1. Перейдіть до **Authentication** → **URL Configuration**
 2. Додайте **Redirect URLs**:
    - `http://localhost:5173` (для локальної розробки)
+   - `http://localhost:5173/*` (для всіх локальних шляхів)
    - `https://YOUR_USERNAME.github.io` (для GitHub Pages)
+   - `https://YOUR_USERNAME.github.io/*` (для всіх шляхів на GitHub Pages)
+   - `https://YOUR_USERNAME.github.io/YOUR_REPO_NAME` (якщо репозиторій не на root)
+   - `https://YOUR_USERNAME.github.io/YOUR_REPO_NAME/*` (якщо репозиторій не на root)
    - `https://YOUR_CUSTOM_DOMAIN.com` (якщо є)
+   
+**ВАЖЛИВО:** Додайте всі варіанти з `/*` в кінці, щоб Supabase приймав redirect на будь-який шлях вашего сайту!
 
 ## Крок 3: Row Level Security (RLS) - ВАЖЛИВО! 🔒
 

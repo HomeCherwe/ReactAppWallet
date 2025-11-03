@@ -13,8 +13,36 @@ export default function App(){
   const [loading, setLoading] = useState(true)
   const [syncLoading, setSyncLoading] = useState(false)
 
-  // Check authentication state
+  // Check authentication state and handle OAuth callback
   useEffect(() => {
+    // Handle OAuth callback (if redirected from OAuth provider)
+    const handleAuthCallback = async () => {
+      const hashParams = window.location.hash
+      if (hashParams.includes('access_token') || hashParams.includes('error')) {
+        try {
+          // Exchange the code/token for a session
+          const { data: { session }, error } = await supabase.auth.getSession()
+          
+          if (error) {
+            console.error('Auth callback error:', error)
+            // Clean up URL hash
+            window.history.replaceState(null, '', window.location.pathname)
+            return
+          }
+
+          if (session) {
+            setSession(session)
+            // Clean up URL hash after successful auth
+            window.history.replaceState(null, '', window.location.pathname)
+          }
+        } catch (err) {
+          console.error('Error handling auth callback:', err)
+        }
+      }
+    }
+
+    handleAuthCallback()
+
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
@@ -27,6 +55,10 @@ export default function App(){
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
       setLoading(false)
+      // Clean up URL hash if present
+      if (session && window.location.hash.includes('access_token')) {
+        window.history.replaceState(null, '', window.location.pathname)
+      }
     })
 
     return () => subscription.unsubscribe()
