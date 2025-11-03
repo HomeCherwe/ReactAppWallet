@@ -9,10 +9,13 @@ export default function Auth() {
   const signInWithGoogle = async () => {
     try {
       setLoading(true)
+      // Get full URL including pathname and hash for GitHub Pages
+      const redirectTo = window.location.origin + window.location.pathname
+      
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}`
+          redirectTo: redirectTo
         }
       })
       
