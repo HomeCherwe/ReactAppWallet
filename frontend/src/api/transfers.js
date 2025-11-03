@@ -11,11 +11,19 @@ function genUUID() {
 }
 
 export async function createTransfer({ fromCardId = null, toCardId = null, amount = 0, amountTo = null, note = '' }) {
+  // Get current user
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+
   const transferId = genUUID()
   const ids = [...new Set([fromCardId, toCardId].filter(Boolean))]
   let cards = []
   if (ids.length) {
-    const { data } = await supabase.from('cards').select('id, bank, name, currency').in('id', ids)
+    const { data } = await supabase
+      .from('cards')
+      .select('id, bank, name, currency')
+      .eq('user_id', user.id) // Only user's cards
+      .in('id', ids)
     cards = data || []
   }
 
@@ -58,9 +66,13 @@ export async function createTransfer({ fromCardId = null, toCardId = null, amoun
     note: note || null,
   }
 
+  // Add user_id to both transactions
+  const srcWithUser = { ...src, user_id: user.id }
+  const tgtWithUser = { ...tgt, user_id: user.id }
+
   const { data, error } = await supabase
     .from('transactions')
-    .insert([src, tgt])
+    .insert([srcWithUser, tgtWithUser])
     .select()
 
   if (error) throw error
@@ -74,10 +86,15 @@ export async function markExistingAsTransfer({ fromTxId, toTxId, note = '' }) {
 
   const transferId = genUUID()
 
-  // Load both transactions
+  // Get current user
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+
+  // Load both transactions (only user's transactions)
   const { data: txs, error: loadErr } = await supabase
     .from('transactions')
     .select('id, amount, card_id, card, created_at')
+    .eq('user_id', user.id)
     .in('id', [fromTxId, toTxId])
 
   if (loadErr) throw loadErr
@@ -115,6 +132,7 @@ export async function markExistingAsTransfer({ fromTxId, toTxId, note = '' }) {
     .from('transactions')
     .update(srcUpdate)
     .eq('id', src.id)
+    .eq('user_id', user.id) // Ensure user can only update their own transactions
     .select()
     .single()
   if (errSrc) throw errSrc
@@ -123,6 +141,7 @@ export async function markExistingAsTransfer({ fromTxId, toTxId, note = '' }) {
     .from('transactions')
     .update(tgtUpdate)
     .eq('id', tgt.id)
+    .eq('user_id', user.id) // Ensure user can only update their own transactions
     .select()
     .single()
   if (errTgt) throw errTgt

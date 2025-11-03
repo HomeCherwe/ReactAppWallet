@@ -4,9 +4,14 @@ import { supabase } from '../lib/supabase'
 const notArchived = (q) => q.or('archives.is.null,archives.eq.false')
 
 export async function listTransactions({ from = 0, to = 9, search = '' } = {}) {
+  // Get current user
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return [] // Return empty if not authenticated
+
   let q = supabase
     .from('transactions')
     .select('id, created_at, amount, category, note, archives, card, card_id')
+    .eq('user_id', user.id) // Filter by current user
     .order('created_at', { ascending: false })
     .range(from, to)
 
@@ -27,9 +32,12 @@ export async function listTransactions({ from = 0, to = 9, search = '' } = {}) {
 }
 
 export async function createTransaction(payload) {
+  // Get current user
+  const { data: { user } } = await supabase.auth.getUser()
+  
   const { data, error } = await supabase
     .from('transactions')
-    .insert([payload])
+    .insert([{ ...payload, user_id: user?.id }])
     .select()
     .single()
   if (error) throw error
@@ -37,12 +45,41 @@ export async function createTransaction(payload) {
 }
 
 export async function updateTransaction(id, payload) {
-  const { error } = await supabase.from('transactions').update(payload).eq('id', id)
+  // Get current user
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+  
+  const { error } = await supabase
+    .from('transactions')
+    .update(payload)
+    .eq('id', id)
+    .eq('user_id', user.id) // Ensure user can only update their own transactions
   if (error) throw error
 }
 
 export async function deleteTransaction(id) {
-  const { error } = await supabase.from('transactions').delete().eq('id', id)
+  // Get current user
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+  
+  const { error } = await supabase
+    .from('transactions')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', user.id) // Ensure user can only delete their own transactions
+  if (error) throw error
+}
+
+export async function archiveTransaction(id) {
+  // Get current user
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+  
+  const { error } = await supabase
+    .from('transactions')
+    .update({ archives: true })
+    .eq('id', id)
+    .eq('user_id', user.id) // Ensure user can only archive their own transactions
   if (error) throw error
 }
 
@@ -67,7 +104,12 @@ export async function sumTransactionsByCard() {
 
   // Fallback: query transactions and aggregate by card_id
   try {
+    // Get current user
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return {} // Return empty if not authenticated
+
     let q = supabase.from('transactions').select('id, amount, card_id, archives')
+    q = q.eq('user_id', user.id) // Filter by current user
     q = notArchived(q)
     const { data, error } = await q
     if (error) throw error

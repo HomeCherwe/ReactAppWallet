@@ -4,13 +4,14 @@ import { supabase } from '../../lib/supabase'
 import { X, Plus } from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
 import ConfirmModal from '../ConfirmModal'
+import DeleteTxModal from './DeleteTxModal'
 import Row from './Row'
 import DetailsModal from './DetailsModal'
 import CreateTxModal from './CreateTxModal'
 import EditTxModal from './EditTxModal'
 import TransferModal from './TransferModal'
 import { getApiUrl } from '../../utils.jsx'
-import { listTransactions, deleteTransaction } from '../../api/transactions'
+import { listTransactions, deleteTransaction, archiveTransaction } from '../../api/transactions'
 import { txBus } from '../../utils/txBus'
 
 export default function MonthlyPayment() {
@@ -58,9 +59,12 @@ export default function MonthlyPayment() {
     const from = append ? offset : 0
     const to   = from + PAGE - 1
 
+    // Get current user
+    const { data: { user } } = await supabase.auth.getUser()
+    
     const [txs, cardsResp] = await Promise.all([
       listTransactions({ from, to, search }),
-      supabase.from('cards').select('id, bank, name, currency')
+      user ? supabase.from('cards').select('id, bank, name, currency').eq('user_id', user.id) : { data: [] }
     ])
 
   const cards = cardsResp.data || []
@@ -121,9 +125,29 @@ export default function MonthlyPayment() {
         // inform other components: deleted tx reduces balance
         txBus.emit({ card_id: pendingDelete.card_id || null, delta: Number(pendingDelete.amount || 0) * -1 })
       } catch (e) { console.error('emit delete event failed', e) }
+      toast.success('Транзакцію видалено')
     } catch (e) {
       console.error('Delete tx error:', e)
-      alert('Не вдалося видалити транзакцію')
+      toast.error('Не вдалося видалити транзакцію')
+    } finally {
+      setConfirmOpen(false)
+      setPendingDelete(null)
+    }
+  }
+
+  const handleArchive = async () => {
+    if (!pendingDelete) return
+    try {
+      await archiveTransaction(pendingDelete.id)
+      setRows(prev => prev.filter(r => r.id !== pendingDelete.id))
+      try {
+        // inform other components: archived tx reduces balance
+        txBus.emit({ card_id: pendingDelete.card_id || null, delta: Number(pendingDelete.amount || 0) * -1 })
+      } catch (e) { console.error('emit archive event failed', e) }
+      toast.success('Транзакцію архівовано')
+    } catch (e) {
+      console.error('Archive tx error:', e)
+      toast.error('Не вдалося архівувати транзакцію')
     } finally {
       setConfirmOpen(false)
       setPendingDelete(null)
@@ -306,18 +330,11 @@ export default function MonthlyPayment() {
         }}
       />
 
-      <ConfirmModal
+      <DeleteTxModal
         open={confirmOpen}
-        danger
-        title="Видалити транзакцію?"
-        message={
-          pendingDelete
-            ? `Ви справді хочете видалити транзакцію на суму ${pendingDelete.amount}?`
-            : 'Видалити цей запис?'
-        }
-        confirmLabel="Видалити"
-        cancelLabel="Скасувати"
-        onConfirm={handleDelete}
+        transaction={pendingDelete}
+        onDelete={handleDelete}
+        onArchive={handleArchive}
         onCancel={() => { setConfirmOpen(false); setPendingDelete(null) }}
       />
       <Toaster position="top-right" />

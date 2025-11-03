@@ -3,9 +3,10 @@ import { motion } from 'framer-motion'
 import Row from '../components/transactions/Row'
 import DetailsModal from '../components/transactions/DetailsModal'
 import ConfirmModal from '../components/ConfirmModal'
+import DeleteTxModal from '../components/transactions/DeleteTxModal'
 import EditTxModal from '../components/transactions/EditTxModal'
 import BaseModal from '../components/BaseModal'
-import { deleteTransaction } from '../api/transactions'
+import { deleteTransaction, archiveTransaction } from '../api/transactions'
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from '../lib/supabase'
@@ -319,9 +320,17 @@ export default function EarningsChart(){
         ? 'id, amount, created_at, category, note, is_transfer, count_as_income, transfer_role, card_id, currency, card, archives'
         : 'id, amount, created_at, category, note, is_transfer, count_as_income, transfer_role, card_id, card, archives'
 
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        setTxs([])
+        return
+      }
+
       let resp = await supabase
         .from('transactions')
         .select(cols)
+        .eq('user_id', user.id) // Filter by current user
         .gte('created_at', fromTs)
         .lte('created_at', toTs)
         .order('created_at', { ascending: true })
@@ -336,6 +345,7 @@ export default function EarningsChart(){
         const { data, error } = await supabase
           .from('transactions')
           .select('id, amount, created_at, category, note, is_transfer, count_as_income, transfer_role, card_id, card, archives')
+          .eq('user_id', user.id) // Filter by current user
           .gte('created_at', fromTs)
           .lte('created_at', toTs)
           .order('created_at', { ascending: true })
@@ -349,6 +359,7 @@ export default function EarningsChart(){
           const { data: cards } = await supabase
             .from('cards')
             .select('id, currency, bank, name')
+            .eq('user_id', user.id) // Filter by current user
             .in('id', cardIds)
           for (const c of cards || []) {
             const bank = (c?.bank || '') + ' ' + (c?.name || '')
@@ -371,11 +382,13 @@ export default function EarningsChart(){
 
       // If transactions were returned but some don't have currency, fetch card currencies and enrich.
       const data = resp.data || []
+      
       const cardIds = Array.from(new Set((data || []).map(t => t.card_id).filter(Boolean)))
       if (cardIds.length) {
         const { data: cards } = await supabase
           .from('cards')
           .select('id, currency, bank, name')
+          .eq('user_id', user.id) // Filter by current user (user already declared above)
           .in('id', cardIds)
         const cardsMap = new Map()
         for (const c of cards || []) {
@@ -610,18 +623,10 @@ export default function EarningsChart(){
         setTxs(prev => prev.map(r => r.id === updated.id ? updated : r))
         setDayTxs(prev => prev.map(r => r.id === updated.id ? updated : r))
       }} />
-      <ConfirmModal
+      <DeleteTxModal
         open={confirmOpen}
-        danger
-        title="Видалити транзакцію?"
-        message={
-          pendingDelete
-            ? `Ви справді хочете видалити транзакцію на суму ${pendingDelete.amount}?`
-            : 'Видалити цей запис?'
-        }
-        confirmLabel="Видалити"
-        cancelLabel="Скасувати"
-        onConfirm={async () => {
+        transaction={pendingDelete}
+        onDelete={async () => {
           if (!pendingDelete) return
           try {
             await deleteTransaction(pendingDelete.id)
@@ -631,6 +636,21 @@ export default function EarningsChart(){
           } catch (e) {
             console.error('Delete tx error:', e)
             alert('Не вдалося видалити транзакцію')
+          } finally {
+            setConfirmOpen(false)
+            setPendingDelete(null)
+          }
+        }}
+        onArchive={async () => {
+          if (!pendingDelete) return
+          try {
+            await archiveTransaction(pendingDelete.id)
+            setTxs(prev => prev.filter(r => r.id !== pendingDelete.id))
+            setDayTxs(prev => prev.filter(r => r.id !== pendingDelete.id))
+            try { txBus.emit({ card_id: pendingDelete.card_id || null, delta: Number(pendingDelete.amount || 0) * -1 }) } catch(e){}
+          } catch (e) {
+            console.error('Archive tx error:', e)
+            alert('Не вдалося архівувати транзакцію')
           } finally {
             setConfirmOpen(false)
             setPendingDelete(null)

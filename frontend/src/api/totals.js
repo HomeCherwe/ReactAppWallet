@@ -1,67 +1,76 @@
 import { supabase } from '../lib/supabase'
+import { listCards } from './cards'
+import { sumTransactionsByCard } from './transactions'
 
 function emptyOut() { return { cash: {}, cards: {}, savings: {} } }
 
+// Helper to determine bucket type
+function getBucket(card) {
+  if (!card) return 'cash'
+  const bank = (card.bank || '').toLowerCase()
+  const name = (card.name || '').toLowerCase()
+  const full = `${bank} ${name}`
+  
+  if (full.includes('збер') || full.includes('savings')) return 'savings'
+  if (full.includes('гот') || full.includes('cash')) return 'cash'
+  return 'cards'
+}
+
 export async function fetchTotalsByBucket() {
-  const { data, error } = await supabase.rpc('totals_by_bucket')
-  if (error) throw error
+  // Get current user
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return emptyOut()
 
   try {
-    const d = data
-    if (!d) return emptyOut()
+    // Fetch all user's cards
+    const cards = await listCards()
+    const cardMap = new Map(cards.map(c => [c.id, c]))
 
-    // If RPC returned a single object (common case)
-    if (!Array.isArray(d) && typeof d === 'object') {
-      return d
-    }
+    // Get sums by card_id (already filtered by user_id in sumTransactionsByCard)
+    const sumsByCard = await sumTransactionsByCard()
 
-    // If RPC returned an array with one object that contains buckets
-    if (Array.isArray(d) && d.length === 1 && typeof d[0] === 'object') {
-      const candidate = d[0]
-      if (candidate.cash || candidate.cards || candidate.savings) return candidate
-    }
-
-    // If RPC returned rows, try to normalize several possible shapes.
-    // Possibility A: rows like [{ bucket: 'cash', totals: { UAH: 123 } }, ...]
-    // Possibility B: rows like [{ bucket: 'cash', currency: 'UAH', total: 123 }, ...]
+    // Initialize output
     const out = emptyOut()
 
-    // Detect per-row currency totals
-    const looksLikeCurrencyRows = d.every(r => r && (r.currency || r.total || r.amount))
-    if (looksLikeCurrencyRows) {
-      for (const row of d) {
-        const bucket = (row.bucket || row.type || 'cards').toString()
-        const cur = (row.currency || row.curr || row.code || 'UAH').toString().toUpperCase()
-        const val = Number(row.total ?? row.amount ?? row.sum ?? row.value ?? 0)
-        if (!out[bucket]) out[bucket] = {}
-        out[bucket][cur] = (out[bucket][cur] || 0) + val
+    // Process each card
+    for (const card of cards) {
+      const bucket = getBucket(card)
+      const currency = (card.currency || 'UAH').toUpperCase()
+      const initialBalance = Number(card.initial_balance || 0)
+      const transactionSum = Number(sumsByCard[card.id] || 0)
+      const total = initialBalance + transactionSum
+
+      // Only add currency if total is not zero
+      if (total !== 0) {
+        if (!out[bucket][currency]) {
+          out[bucket][currency] = 0
+        }
+        out[bucket][currency] += total
       }
-      return out
     }
 
-    // Otherwise, try rows with a totals field (object or JSON string)
-    for (const row of d) {
-      const bucket = (row.bucket || row.type || row.name || 'cards').toString()
-      let totals = row.totals ?? row.data ?? row.value ?? null
-      if (!totals && typeof row === 'object' && Object.keys(row).length > 1) {
-        // maybe the row itself is the totals object
-        totals = { ...row }
-        delete totals.bucket
-      }
+    // Also handle cash (cards without card_id in transactions)
+    // Transactions with card_id = null are considered cash
+    const { data: cashTransactions } = await supabase
+      .from('transactions')
+      .select('amount, created_at, archives')
+      .eq('user_id', user.id)
+      .is('card_id', null)
+      .or('archives.is.null,archives.eq.false')
 
-      if (typeof totals === 'string') {
-        try { totals = JSON.parse(totals) } catch { /* ignore parse error */ }
+    if (cashTransactions && cashTransactions.length > 0) {
+      // Group by currency - for cash we'll default to UAH
+      // (since cash transactions don't have currency directly)
+      const cashSum = cashTransactions.reduce((sum, tx) => sum + Number(tx.amount || 0), 0)
+      // Only add if sum is not zero
+      if (cashSum !== 0) {
+        out.cash['UAH'] = (out.cash['UAH'] || 0) + cashSum
       }
-
-      if (!totals || typeof totals !== 'object') continue
-      if (!out[bucket]) out[bucket] = {}
-      for (const [k,v] of Object.entries(totals)) out[bucket][k.toUpperCase()] = Number(v || 0)
     }
 
     return out
   } catch (e) {
-    // On any parsing error, return empty structure to avoid crashes
-    console.error('fetchTotalsByBucket parse error', e)
+    console.error('fetchTotalsByBucket error', e)
     return emptyOut()
   }
 }

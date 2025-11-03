@@ -323,7 +323,11 @@ export default function CardsManager() {
   const handleDelete = async (c) => {
     if (!confirm(`Видалити картку «${c.bank} — ${c.name}»?`)) return
     try {
-      await supabase.from('transactions').update({ card_id: null, card: null }).eq('card_id', c.id)
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        await supabase.from('transactions').update({ card_id: null, card: null }).eq('card_id', c.id).eq('user_id', user.id)
+      }
       await deleteCard(c.id); await load()
     } catch (e) {
       console.error('Delete card error:', e); alert(`Не вдалося видалити картку: ${e.message || e}`)

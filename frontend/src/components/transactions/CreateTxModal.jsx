@@ -35,13 +35,18 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
   useEffect(() => {
     if (!open) return
     ;(async () => {
-      const { data } = await supabase.from('cards').select('id, bank, name, currency').order('created_at', { ascending: false })
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const { data } = await supabase.from('cards').select('id, bank, name, currency').eq('user_id', user.id).order('created_at', { ascending: false })
       setCards(data || [])
       
       // Fetch popular categories
       const { data: txData } = await supabase
         .from('transactions')
         .select('category')
+        .eq('user_id', user.id)
         .not('category', 'is', null)
       
       // Count categories and sort by frequency

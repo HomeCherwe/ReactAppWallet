@@ -1,21 +1,44 @@
 import { useEffect, useState } from 'react'
+import { Routes, Route, Navigate } from 'react-router-dom'
+import { supabase } from './lib/supabase'
 import Sidebar from './components/Sidebar.jsx'
-import StatCard from './components/StatCard.jsx'
-import EarningsStatCard from './components/EarningsStatCard'
-import CardsManager from './components/CardsManager'
-import TotalsCard from './components/totals/TotalsCard'
-import MonthlyPayment from './components/transactions/MonthlyPayment'
-import EarningsChart from './charts/EarningsChart.jsx'
+import DashboardPage from './pages/DashboardPage'
+import ProfilePage from './pages/ProfilePage'
+import Auth from './components/Auth'
 import { txBus } from './utils/txBus'
 import { getApiUrl } from './utils.jsx'
 
 export default function App(){
+  const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [syncLoading, setSyncLoading] = useState(false)
 
-  // Auto-sync Binance on app load
+  // Check authentication state
   useEffect(() => {
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
+      setLoading(false)
+    })
+
+    // Listen for auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+      setLoading(false)
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
+
+  // Auto-sync Binance on app load (only when authenticated)
+  useEffect(() => {
+    if (!session) return
+
     const syncBinance = async () => {
       try {
+        setSyncLoading(true)
         const response = await fetch(`${getApiUrl()}/api/syncBinance`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' }
@@ -38,16 +61,35 @@ export default function App(){
       } catch (error) {
         console.error('Binance sync failed:', error.message)
       } finally {
-        // Hide loader after sync completes (success or failure)
-        setLoading(false)
+        setSyncLoading(false)
       }
     }
 
     syncBinance()
-  }, [])
+  }, [session])
 
-  // Show fullscreen loader while syncing
+  // Show loader while checking auth
   if (loading) {
+    return (
+      <div className="fixed inset-0 flex items-center justify-center bg-gradient-to-br from-pink-400 via-fuchsia-500 to-sky-500">
+        <div className="text-center">
+          <div className="relative w-16 h-16 mx-auto mb-4">
+            <div className="absolute inset-0 border-4 border-white/20 rounded-full"></div>
+            <div className="absolute inset-0 border-4 border-white rounded-full border-t-transparent animate-spin"></div>
+          </div>
+          <div className="text-white font-medium">Завантаження...</div>
+        </div>
+      </div>
+    )
+  }
+
+  // Show auth screen if not authenticated
+  if (!session) {
+    return <Auth />
+  }
+
+  // Show sync loader while syncing Binance
+  if (syncLoading) {
     return (
       <div className="fixed inset-0 flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50">
         <div className="text-center">
@@ -69,21 +111,17 @@ export default function App(){
       
       <div className="max-w-[1300px] mx-auto grid grid-cols-1 lg:grid-cols-[220px_1fr_360px] gap-4 sm:gap-4">
         <div className="hidden sm:block"><Sidebar /></div>
-        {/* Middle column */}
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 [&>*:last-child]:col-span-full md:[&>*:last-child]:col-span-1">
-            <EarningsStatCard title="Earning" mode="earning" />
-            <EarningsStatCard title="Spending" mode="spending" />
-            <TotalsCard title="Total balance" />
-          </div>
-          <EarningsChart />
-          <MonthlyPayment />
-        </div>
-
-        {/* Right column */}
-        <div className="space-y-4 sticky top-6 self-start">
-          <CardsManager />
-        </div>
+        
+        <Routes>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/profile" element={
+            <div className="lg:col-span-2">
+              <ProfilePage />
+            </div>
+          } />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </div>
     </div>
   )

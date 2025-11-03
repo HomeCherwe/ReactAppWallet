@@ -34,10 +34,14 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
   useEffect(() => {
     if (!open || !tx) return
     ;(async () => {
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
       const [{ data: cardRows }, { data: freshTx }, { data: txData }] = await Promise.all([
-        supabase.from('cards').select('id, bank, name, currency').order('created_at', { ascending: false }),
-        supabase.from('transactions').select('id, amount, category, note, card_id, card, created_at').eq('id', tx.id).single(),
-        supabase.from('transactions').select('category').not('category', 'is', null)
+        supabase.from('cards').select('id, bank, name, currency').eq('user_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('transactions').select('id, amount, category, note, card_id, card, created_at').eq('id', tx.id).eq('user_id', user.id).single(),
+        supabase.from('transactions').select('category').eq('user_id', user.id).not('category', 'is', null)
       ])
       setCards(cardRows || [])
       

@@ -40,10 +40,19 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
         const firstDayPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
         const firstDayNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1)
 
+        // Get current user
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          setValue(0)
+          setPrevValue(0)
+          return
+        }
+
         // Fetch card info first to determine savings accounts and currencies
         const cardsResponse = await supabase
           .from('cards')
           .select('id, bank, name, currency')
+          .eq('user_id', user.id)
 
         if (cardsResponse.error) throw cardsResponse.error
         const cards = cardsResponse.data || []
@@ -69,6 +78,7 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
             card,
             card_id
           `)
+          .eq('user_id', user.id)
           .gte('created_at', firstDayThisMonth.toISOString())
           .lt('created_at', firstDayNextMonth.toISOString())
 

@@ -24,12 +24,17 @@ export default function TransferModal({ open, onClose, onDone }) {
   useEffect(() => {
     if (!open) return
     ;(async () => {
-      const { data } = await supabase.from('cards').select('id, bank, name, currency').order('created_at', { ascending: false })
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const { data } = await supabase.from('cards').select('id, bank, name, currency').eq('user_id', user.id).order('created_at', { ascending: false })
       setCards(data || [])
       // Load recent transactions for selection (last 200)
       const { data: txs } = await supabase
         .from('transactions')
         .select('id, amount, card, created_at, note')
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(200)
       const opts = (txs || []).map(t => {

@@ -164,7 +164,7 @@ export default function TotalsCard({ title = 'Total balance' }) {
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
-        <div className="min-h-[80px]">
+        <div className="min-h-[120px]">
           <AnimatePresence mode="wait">
             <motion.div
               key={current?.key || 'empty'}
@@ -172,13 +172,16 @@ export default function TotalsCard({ title = 'Total balance' }) {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2 }}
+              className="flex flex-col"
             >
               {loading ? (
-                <div className="flex items-center justify-center py-4">
+                <div className="flex items-center justify-center py-4 flex-1">
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600"></div>
                 </div>
               ) : (
-                <TotalsGrid totals={current?.totals || {}} sectionType={current?.key} isVisible={isVisible} />
+                <div className="flex-1 flex flex-col justify-center">
+                  <TotalsGrid totals={current?.totals || {}} sectionType={current?.key} isVisible={isVisible} />
+                </div>
               )}
             </motion.div>
           </AnimatePresence>
