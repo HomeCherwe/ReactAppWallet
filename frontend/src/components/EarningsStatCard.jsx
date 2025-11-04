@@ -3,6 +3,8 @@ import { motion } from 'framer-motion'
 import { supabase } from '../lib/supabase'
 import { txBus } from '../utils/txBus'
 import useMonoRates from '../hooks/useMonoRates'
+import { listCards } from '../api/cards'
+import { apiFetch } from '../utils.jsx'
 
 export default function EarningsStatCard({ title, mode, currency: initialCurrency }) {
   // mode: 'earning' or 'spending'
@@ -40,22 +42,8 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
         const firstDayPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
         const firstDayNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1)
 
-        // Get current user
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) {
-          setValue(0)
-          setPrevValue(0)
-          return
-        }
-
-        // Fetch card info first to determine savings accounts and currencies
-        const cardsResponse = await supabase
-          .from('cards')
-          .select('id, bank, name, currency')
-          .eq('user_id', user.id)
-
-        if (cardsResponse.error) throw cardsResponse.error
-        const cards = cardsResponse.data || []
+        // Fetch card info first to determine savings accounts and currencies (using cached API)
+        const cards = await listCards()
 
         const cardMap = new Map()
         cards.forEach(c => {
@@ -64,29 +52,14 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
           cardMap.set(c.id, { isSavings, currency: (c.currency || 'UAH').toUpperCase() })
         })
 
-        // Fetch transactions from this month (without currency field)
-        const txsResponse = await supabase
-          .from('transactions')
-          .select(`
-            id, 
-            amount, 
-            created_at, 
-            is_transfer, 
-            transfer_role,
-            transfer_id,
-            archives,
-            card,
-            card_id
-          `)
-          .eq('user_id', user.id)
-          .gte('created_at', firstDayThisMonth.toISOString())
-          .lt('created_at', firstDayNextMonth.toISOString())
-
-        if (txsResponse.error) throw txsResponse.error
+        // Fetch transactions from this month
+        const fields = 'id,amount,created_at,is_transfer,transfer_role,transfer_id,archives,card,card_id'
+        const allTxs = await apiFetch(
+          `/api/transactions?start_date=${firstDayThisMonth.toISOString()}&end_date=${firstDayNextMonth.toISOString()}&fields=${fields}&order_by=created_at&order_asc=true`
+        ) || []
 
         // Apply filters: no archived, no transfers, no savings
         const included = new Set()
-        const allTxs = txsResponse.data || []
 
         for (const tx of allTxs) {
           if (tx.archives) continue
@@ -126,22 +99,12 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
         }
 
         // Calculate previous month total
-        const prevMonthResponse = await supabase
-          .from('transactions')
-          .select(`
-            id, 
-            amount, 
-            created_at, 
-            is_transfer, 
-            archives,
-            card_id
-          `)
-          .gte('created_at', firstDayPrevMonth.toISOString())
-          .lt('created_at', firstDayThisMonth.toISOString())
-
+        const prevMonthFields = 'id,amount,created_at,is_transfer,archives,card_id'
         let prevMonthTotal = 0
-        if (!prevMonthResponse.error) {
-          const prevTxs = prevMonthResponse.data || []
+        try {
+          const prevTxs = await apiFetch(
+            `/api/transactions?start_date=${firstDayPrevMonth.toISOString()}&end_date=${firstDayThisMonth.toISOString()}&fields=${prevMonthFields}&order_by=created_at&order_asc=true`
+          ) || []
           for (const tx of prevTxs) {
             if (tx.archives) continue
             if (tx.is_transfer) continue
@@ -166,6 +129,8 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
               prevMonthTotal += addAmt
             }
           }
+        } catch (e) {
+          console.error('Failed to fetch previous month transactions:', e)
         }
 
         if (!mounted) return

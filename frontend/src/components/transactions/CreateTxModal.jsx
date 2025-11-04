@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
-import { createTransaction } from '../../api/transactions'
+import { createTransaction, getTransactionCategories } from '../../api/transactions'
 import { txBus } from '../../utils/txBus'
 import useMonoRates from '../../hooks/useMonoRates'
 import BaseModal from '../BaseModal'
 import { getApiUrl } from '../../utils.jsx'
+import { listCards } from '../../api/cards'
 
 export default function CreateTxModal({ open, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
@@ -35,33 +36,12 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
   useEffect(() => {
     if (!open) return
     ;(async () => {
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      const { data } = await supabase.from('cards').select('id, bank, name, currency').eq('user_id', user.id).order('created_at', { ascending: false })
-      setCards(data || [])
+      const cards = await listCards()
+      setCards(cards || [])
       
       // Fetch popular categories
-      const { data: txData } = await supabase
-        .from('transactions')
-        .select('category')
-        .eq('user_id', user.id)
-        .not('category', 'is', null)
-      
-      // Count categories and sort by frequency
-      const categoryCounts = {}
-      txData?.forEach(tx => {
-        if (tx.category) {
-          categoryCounts[tx.category] = (categoryCounts[tx.category] || 0) + 1
-        }
-      })
-      
-      const sortedCategories = Object.entries(categoryCounts)
-        .sort((a, b) => b[1] - a[1])
-        .map(([category]) => category)
-      
-      setCategories(sortedCategories)
+      const categories = await getTransactionCategories()
+      setCategories(categories || [])
     })()
   }, [open])
 

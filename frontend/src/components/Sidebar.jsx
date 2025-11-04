@@ -1,7 +1,7 @@
 import { Home, CreditCard, BarChart3, Settings, Wallet, ReceiptText, LogOut, User } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
+import { supabase, invalidateUserCache, cacheUser } from '../lib/supabase'
 import { useState, useEffect } from 'react'
 
 const NavItem = ({ icon:Icon, label, active=false, onClick }) => (
@@ -24,10 +24,12 @@ export default function Sidebar({ className = '' }){
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       setUser(user)
+      if (user) cacheUser(user) // Кешувати user
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
+      if (session?.user) cacheUser(session.user) // Кешувати при зміні
     })
 
     return () => subscription.unsubscribe()
@@ -35,6 +37,7 @@ export default function Sidebar({ className = '' }){
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
+    invalidateUserCache() // Очистити кеш користувача
   }
 
   const handleProfileClick = () => {

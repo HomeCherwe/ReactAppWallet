@@ -7,6 +7,7 @@ import { CreditCard, Plus, X, Pencil, Trash2, Filter, Copy } from 'lucide-react'
 import { txBus } from '../utils/txBus'
 import toast from 'react-hot-toast'
 import BaseModal from './BaseModal'
+import { getUserPreferences, updatePreferencesSection } from '../api/preferences'
 
 const GRADS = [
   'from-indigo-500 via-fuchsia-500 to-amber-400',
@@ -235,23 +236,38 @@ export default function CardsManager() {
 
   const [filterOpen, setFilterOpen] = useState(false)
   const [selectedBanks, setSelectedBanks] = useState([])
-  const FILTER_KEY = 'wallet:selectedBanks'
+  const [prefsLoaded, setPrefsLoaded] = useState(false)
 
-  // load persisted filter
+  // load persisted filter from DB
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(FILTER_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        if (Array.isArray(parsed)) setSelectedBanks(parsed)
+    const loadFilter = async () => {
+      try {
+        const prefs = await getUserPreferences()
+        if (prefs && prefs.cards && prefs.cards.selectedBanks) {
+          const banks = prefs.cards.selectedBanks
+          if (Array.isArray(banks)) setSelectedBanks(banks)
+        }
+        setPrefsLoaded(true)
+      } catch (e) {
+        console.error('Failed to load cards preferences:', e)
+        setPrefsLoaded(true)
       }
-    } catch (e) { /* ignore */ }
+    }
+    loadFilter()
   }, [])
 
-  // persist filter changes
+  // persist filter changes to DB (з debounce)
   useEffect(() => {
-    try { localStorage.setItem(FILTER_KEY, JSON.stringify(selectedBanks || [])) } catch (e) {}
-  }, [selectedBanks])
+    if (!prefsLoaded) return
+    
+    const timeoutId = setTimeout(() => {
+      updatePreferencesSection('cards', {
+        selectedBanks
+      })
+    }, 500) // Debounce 500ms
+    
+    return () => clearTimeout(timeoutId)
+  }, [selectedBanks, prefsLoaded])
 
   const load = async () => {
     setLoading(true)
@@ -268,7 +284,8 @@ export default function CardsManager() {
       const withBalances = (base || []).map(c => {
         const initial = Number(c.initial_balance || 0)
         const txSum = Number(sums[c.id] || 0)
-        return { ...c, _balance: initial + txSum }
+        const balance = initial + txSum
+        return { ...c, _balance: balance }
       })
 
       setCards(withBalances)
@@ -323,14 +340,11 @@ export default function CardsManager() {
   const handleDelete = async (c) => {
     if (!confirm(`Видалити картку «${c.bank} — ${c.name}»?`)) return
     try {
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        await supabase.from('transactions').update({ card_id: null, card: null }).eq('card_id', c.id).eq('user_id', user.id)
-      }
-      await deleteCard(c.id); await load()
+      await deleteCard(c.id)
+      await load()
     } catch (e) {
-      console.error('Delete card error:', e); alert(`Не вдалося видалити картку: ${e.message || e}`)
+      console.error('Delete card error:', e)
+      alert(`Не вдалося видалити картку: ${e.message || e}`)
     }
   }
 

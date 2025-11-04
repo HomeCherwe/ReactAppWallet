@@ -5,6 +5,7 @@ import { fetchTotalsByBucket } from '../../api/totals'
 import { txBus } from '../../utils/txBus'
 import BalanceCard from './BalanceCard'
 import TotalsGrid from './TotalsGrid'
+import { getUserPreferences, updatePreferencesSection } from '../../api/preferences'
 
 const ORDER = ['UAH','EUR','USD','PLN','GBP','CHF','CZK','HUF']
 
@@ -14,27 +15,47 @@ export default function TotalsCard({ title = 'Total balance' }) {
   const [isVisible, setIsVisible] = useState(true)
   const [data, setData] = useState({ cash:{}, cards:{}, savings:{} })
   const rootRef = useRef(null)
-  const SECTION_KEY = 'wallet:totals:section'
+  const [prefsLoaded, setPrefsLoaded] = useState(false)
   
   // Touch swipe state
   const touchStartX = useRef(0)
   const touchStartY = useRef(0)
 
-  // load saved section
+  // load saved section from DB
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(SECTION_KEY)
-      if (raw != null) {
-        const n = Number(raw)
-        if (!Number.isNaN(n)) setIdx(Math.max(0, Math.min(2, n)))
+    const loadSection = async () => {
+      try {
+        const prefs = await getUserPreferences()
+        if (prefs && prefs.totals) {
+          if (typeof prefs.totals.section === 'number') {
+            setIdx(Math.max(0, Math.min(2, prefs.totals.section)))
+          }
+          if (typeof prefs.totals.isVisible === 'boolean') {
+            setIsVisible(prefs.totals.isVisible)
+          }
+        }
+        setPrefsLoaded(true)
+      } catch (e) {
+        console.error('Failed to load totals preferences:', e)
+        setPrefsLoaded(true)
       }
-    } catch (e) {}
+    }
+    loadSection()
   }, [])
 
-  // persist section changes
+  // persist section changes to DB (з debounce)
   useEffect(() => {
-    try { localStorage.setItem(SECTION_KEY, String(idx)) } catch (e) {}
-  }, [idx])
+    if (!prefsLoaded) return
+    
+    const timeoutId = setTimeout(() => {
+      updatePreferencesSection('totals', {
+        section: idx,
+        isVisible
+      })
+    }, 500) // Debounce 500ms
+    
+    return () => clearTimeout(timeoutId)
+  }, [idx, isVisible, prefsLoaded])
 
   // Перехоплюємо колесо лише всередині картки
   useEffect(() => {

@@ -10,7 +10,10 @@ import { deleteTransaction, archiveTransaction } from '../api/transactions'
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from '../lib/supabase'
+import { apiFetch } from '../utils.jsx'
 import { txBus } from '../utils/txBus'
+import { getUserPreferences, updatePreferencesSection, saveUserPreferences } from '../api/preferences'
+import { listCards } from '../api/cards'
 
 const CustomTooltip = ({ active, payload, label, onPointClick, isMobile, currency, mode }) => {
   if (active && payload && payload.length) {
@@ -225,6 +228,7 @@ export default function EarningsChart(){
       return true
     } catch { return true }
   })
+  const [prefsLoaded, setPrefsLoaded] = useState(false)
   const [animKey, setAnimKey] = useState(0)
   const prevAnimKeyRef = useRef(animKey)
   // determine small/mobile-like viewport so tooltip/bar behavior follows viewport size
@@ -238,6 +242,28 @@ export default function EarningsChart(){
     }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  // Завантажити налаштування з БД
+  useEffect(() => {
+    const loadPreferences = async () => {
+      try {
+        const prefs = await getUserPreferences()
+        if (prefs && prefs.chart) {
+          if (prefs.chart.currency) setCurrency(prefs.chart.currency)
+          if (prefs.chart.mode) setMode(prefs.chart.mode)
+          if (prefs.chart.from) setFrom(prefs.chart.from)
+          // to - завжди сьогоднішня дата, не зберігаємо
+          if (prefs.chart.appliedFrom) setAppliedFrom(prefs.chart.appliedFrom)
+          // appliedTo - завжди сьогоднішня дата, не зберігаємо
+        }
+        setPrefsLoaded(true)
+      } catch (e) {
+        console.error('Failed to load preferences:', e)
+        setPrefsLoaded(true) // Продовжуємо навіть при помилці
+      }
+    }
+    loadPreferences()
   }, [])
 
   // displayData is what is currently visible. We render a single chart and
@@ -316,97 +342,52 @@ export default function EarningsChart(){
       // Select column list depending on whether we've previously detected
       // that `transactions.currency` exists. Cache negative detection in
       // localStorage to avoid repeated 400s.
-      const cols = hasTxCurrency
-        ? 'id, amount, created_at, category, note, is_transfer, count_as_income, transfer_role, card_id, currency, card, archives'
-        : 'id, amount, created_at, category, note, is_transfer, count_as_income, transfer_role, card_id, card, archives'
+      const fields = hasTxCurrency
+        ? 'id,amount,created_at,category,note,is_transfer,count_as_income,transfer_role,card_id,currency,card,archives'
+        : 'id,amount,created_at,category,note,is_transfer,count_as_income,transfer_role,card_id,card,archives'
 
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        setTxs([])
-        return
-      }
+      let data
+      try {
+        data = await apiFetch(
+          `/api/transactions?start_date=${fromTs}&end_date=${toTs}&fields=${fields}&order_by=created_at&order_asc=true`
+        ) || []
+      } catch (e) {
+        // If the DB complains about missing `currency` column, remember it and retry
+        if (hasTxCurrency && e.message?.includes('42703')) {
+          console.warn('transactions.currency column missing, disabling currency column for future queries')
+          try { localStorage.setItem('wallet:hasTxCurrency', 'false') } catch {}
+          setHasTxCurrency(false)
 
-      let resp = await supabase
-        .from('transactions')
-        .select(cols)
-        .eq('user_id', user.id) // Filter by current user
-        .gte('created_at', fromTs)
-        .lte('created_at', toTs)
-        .order('created_at', { ascending: true })
-
-      // If the DB complains about missing `currency` column, remember it and
-      // retry without that column. This prevents repeated 400 requests.
-      if (resp.error && resp.error.code === '42703') {
-        console.warn('transactions.currency column missing, disabling currency column for future queries')
-        try { localStorage.setItem('wallet:hasTxCurrency', 'false') } catch {}
-        setHasTxCurrency(false)
-
-        const { data, error } = await supabase
-          .from('transactions')
-          .select('id, amount, created_at, category, note, is_transfer, count_as_income, transfer_role, card_id, card, archives')
-          .eq('user_id', user.id) // Filter by current user
-          .gte('created_at', fromTs)
-          .lte('created_at', toTs)
-          .order('created_at', { ascending: true })
-
-        if (error) throw error
-
-        // fetch cards to get currency and detect savings accounts per card
-        const cardIds = Array.from(new Set((data || []).map(t => t.card_id).filter(Boolean)))
-        let cardsMap = new Map()
-        if (cardIds.length) {
-          const { data: cards } = await supabase
-            .from('cards')
-            .select('id, currency, bank, name')
-            .eq('user_id', user.id) // Filter by current user
-            .in('id', cardIds)
-          for (const c of cards || []) {
-            const bank = (c?.bank || '') + ' ' + (c?.name || '')
-            const isSavings = String(bank).toLowerCase().includes('збер') || String(bank).toLowerCase().includes('savings')
-            cardsMap.set(c.id, { currency: (c.currency || 'UAH').toUpperCase(), isSavings })
-          }
+          // Retry without currency column
+          const retryFields = 'id,amount,created_at,category,note,is_transfer,count_as_income,transfer_role,card_id,card,archives'
+          data = await apiFetch(
+            `/api/transactions?start_date=${fromTs}&end_date=${toTs}&fields=${retryFields}&order_by=created_at&order_asc=true`
+          ) || []
+        } else {
+          throw e
         }
-
-        // attach derived currency and is_savings to each tx record — prefer txn.currency if present, otherwise card currency, otherwise undefined
-        const enriched = (data || []).map(t => ({
-          ...t,
-          currency: (t.currency || cardsMap.get(t.card_id)?.currency || undefined),
-          is_savings: (cardsMap.get(t.card_id)?.isSavings || false)
-        }))
-        setTxs(enriched)
-        return
       }
 
-      if (resp.error) throw resp.error
-
-      // If transactions were returned but some don't have currency, fetch card currencies and enrich.
-      const data = resp.data || []
-      
+      // fetch cards to get currency and detect savings accounts per card (using cached API)
       const cardIds = Array.from(new Set((data || []).map(t => t.card_id).filter(Boolean)))
+      let cardsMap = new Map()
       if (cardIds.length) {
-        const { data: cards } = await supabase
-          .from('cards')
-          .select('id, currency, bank, name')
-          .eq('user_id', user.id) // Filter by current user (user already declared above)
-          .in('id', cardIds)
-        const cardsMap = new Map()
+        const allCards = await listCards() // Get all cards from cache
+        const cards = allCards.filter(c => cardIds.includes(c.id)) // Filter to needed IDs
         for (const c of cards || []) {
           const bank = (c?.bank || '') + ' ' + (c?.name || '')
           const isSavings = String(bank).toLowerCase().includes('збер') || String(bank).toLowerCase().includes('savings')
-          cardsMap.set(c.id, { currency: (c.currency || undefined), isSavings })
+          cardsMap.set(c.id, { currency: (c.currency || 'UAH').toUpperCase(), isSavings })
         }
-        const enriched = data.map(t => ({
-          ...t,
-          currency: (t.currency || cardsMap.get(t.card_id)?.currency || undefined),
-          is_savings: (cardsMap.get(t.card_id)?.isSavings || false)
-        }))
-        setTxs(enriched)
-      } else {
-        // no card ids — still attach default flags
-        const enriched = data.map(t => ({ ...t, is_savings: false }))
-        setTxs(enriched)
       }
+
+      // attach derived currency and is_savings to each tx record
+      const enriched = (data || []).map(t => ({
+        ...t,
+        currency: (t.currency || cardsMap.get(t.card_id)?.currency || undefined),
+        is_savings: (cardsMap.get(t.card_id)?.isSavings || false)
+      }))
+      setTxs(enriched)
     } catch (e) {
       console.error('fetch chart txs failed', e)
       setTxs([])
@@ -416,6 +397,23 @@ export default function EarningsChart(){
   }
 
   useEffect(() => { fetchData() }, [])
+
+  // Зберегти налаштування в БД при зміні (з debounce)
+  useEffect(() => {
+    if (!prefsLoaded) return // Не зберігаємо налаштування поки вони не завантажились
+    
+    const timeoutId = setTimeout(() => {
+      updatePreferencesSection('chart', {
+        currency,
+        mode,
+        from,
+        appliedFrom
+        // to та appliedTo не зберігаємо - завжди сьогоднішня дата
+      })
+    }, 500) // Debounce 500ms
+    
+    return () => clearTimeout(timeoutId)
+  }, [currency, mode, from, appliedFrom, prefsLoaded])
 
   // handler for clicking a bar (desktop) — open day modal for clicked iso
   const handleBarClick = (data) => {
@@ -488,8 +486,8 @@ export default function EarningsChart(){
     <motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} className="bg-white rounded-2xl p-3 md:p-5 shadow-soft">
       <div className="flex flex-col sm:flex-row items-center sm:items-center gap-2 sm:gap-3 mb-2">
           <div className="flex items-center gap-2 justify-center w-full sm:w-auto">
-          <button onClick={() => { setMode('earning'); setAnimKey(k => k + 1); }} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${mode==='earning' ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}>Earning</button>
-          <button onClick={() => { setMode('spending'); setAnimKey(k => k + 1); }} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${mode==='spending' ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}>Spending</button>
+          <button onClick={() => { setMode('earning'); setAnimKey(k => k + 1); }} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${mode==='earning' ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}>Дохід</button>
+          <button onClick={() => { setMode('spending'); setAnimKey(k => k + 1); }} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${mode==='spending' ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}>Витрата</button>
         </div>
         <div className="ml-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 text-xs w-full sm:w-auto">
           {/* Currency selector with icon */}
@@ -497,7 +495,7 @@ export default function EarningsChart(){
             <select aria-label="Currency" className="appearance-none bg-transparent text-sm font-semibold w-full sm:w-auto" value={currency} onChange={e=>{
               const v = e.target.value
               setCurrency(v)
-              try{ localStorage.setItem('wallet:chart:currency', v) }catch{}
+              // Збереження в БД відбувається через useEffect
               setAnimKey(k => k + 1)
               fetchData({ showLoading: false })
             }}>

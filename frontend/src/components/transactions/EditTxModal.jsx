@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { supabase } from '../../lib/supabase'
-import { updateTransaction } from '../../api/transactions'
+import { updateTransaction, getTransaction, getTransactionCategories } from '../../api/transactions'
 import { txBus } from '../../utils/txBus'
 import BaseModal from '../BaseModal'
+import { listCards } from '../../api/cards'
 
 export default function EditTxModal({ open, tx, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
@@ -34,44 +34,31 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
   useEffect(() => {
     if (!open || !tx) return
     ;(async () => {
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      try {
+        const [cardRows, freshTx, categoriesData] = await Promise.all([
+          listCards(),
+          getTransaction(tx.id),
+          getTransactionCategories()
+        ])
+        setCards(cardRows || [])
+        setCategories(categoriesData || [])
 
-      const [{ data: cardRows }, { data: freshTx }, { data: txData }] = await Promise.all([
-        supabase.from('cards').select('id, bank, name, currency').eq('user_id', user.id).order('created_at', { ascending: false }),
-        supabase.from('transactions').select('id, amount, category, note, card_id, card, created_at').eq('id', tx.id).eq('user_id', user.id).single(),
-        supabase.from('transactions').select('category').eq('user_id', user.id).not('category', 'is', null)
-      ])
-      setCards(cardRows || [])
-      
-      // Count categories and sort by frequency
-      const categoryCounts = {}
-      txData?.forEach(t => {
-        if (t.category) {
-          categoryCounts[t.category] = (categoryCounts[t.category] || 0) + 1
-        }
-      })
-      
-      const sortedCategories = Object.entries(categoryCounts)
-        .sort((a, b) => b[1] - a[1])
-        .map(([category]) => category)
-      
-      setCategories(sortedCategories)
-
-  const base = freshTx || tx
-      const isExp = Number(base.amount) < 0
-      const abs = Math.abs(Number(base.amount || 0))
-      setForm({
-        kind: isExp ? 'expense' : 'income',
-        amount: String(abs || ''),
-        category: base.category || '',
-        cardId: base.card_id || '',
-        note: base.note || '',
-        rateToUAH: 1,
-      })
-      // keep original transaction for delta calculations
-      originalRef.current = base
+        const base = freshTx || tx
+        const isExp = Number(base.amount) < 0
+        const abs = Math.abs(Number(base.amount || 0))
+        setForm({
+          kind: isExp ? 'expense' : 'income',
+          amount: String(abs || ''),
+          category: base.category || '',
+          cardId: base.card_id || '',
+          note: base.note || '',
+          rateToUAH: 1,
+        })
+        // keep original transaction for delta calculations
+        originalRef.current = base
+      } catch (error) {
+        console.error('Failed to load transaction data:', error)
+      }
     })()
   }, [open, tx?.id])
 

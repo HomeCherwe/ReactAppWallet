@@ -11,9 +11,25 @@ dotenv.config();
 const app = express();
 const upload = multer();
 
-// ✅ CORS configuration for Vercel
+// ✅ CORS configuration for Vercel and local development
 const corsOptions = {
-  origin: 'https://homecherwe.github.io',
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, Postman, etc.)
+    if (!origin) return callback(null, true)
+    
+    // Allow localhost for development
+    if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+      return callback(null, true)
+    }
+    
+    // Allow production domain
+    if (origin === 'https://homecherwe.github.io') {
+      return callback(null, true)
+    }
+    
+    // Reject other origins
+    callback(new Error('Not allowed by CORS'))
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Token'],
   credentials: false,
@@ -37,7 +53,717 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
   process.exit(1)
 }
 
+// Check if using service role key (which bypasses RLS)
+const isServiceRole = !!process.env.SUPABASE_SERVICE_ROLE_KEY
+if (!isServiceRole) {
+  console.warn('⚠️  Використовується ANON key замість SERVICE_ROLE_KEY. RLS політики будуть застосовуватись!')
+}
+
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
+
+// Middleware для отримання user_id з JWT токену
+async function getUserFromToken(req, res, next) {
+  try {
+    const authHeader = req.headers.authorization
+    const token = authHeader?.replace('Bearer ', '') || req.body?.token || req.query?.token
+    
+    if (!token) {
+      // Якщо токен не передано, перевіряємо чи передано user_id напряму (для спрощення)
+      if (req.body?.user_id) {
+        req.user_id = req.body.user_id
+        console.log(`[getUserFromToken] Using user_id from body: ${req.user_id}`)
+        return next()
+      }
+      console.warn(`[getUserFromToken] No token found for ${req.method} ${req.path}`)
+      return res.status(401).json({ error: 'No authentication token provided' })
+    }
+    
+    // Валідуємо JWT токен через Supabase
+    const { data: { user }, error } = await supabase.auth.getUser(token)
+    
+    if (error || !user) {
+      console.error(`[getUserFromToken] Invalid token:`, error?.message || 'No user')
+      return res.status(401).json({ error: 'Invalid or expired token' })
+    }
+    
+    req.user_id = user.id
+    req.user = user
+    console.log(`[getUserFromToken] Extracted user_id: ${req.user_id} for ${req.method} ${req.path}`)
+    next()
+  } catch (error) {
+    console.error('Auth middleware error:', error)
+    return res.status(401).json({ error: 'Authentication failed' })
+  }
+}
+
+// Опціональна middleware (для endpoints що не потребують авторизації)
+async function optionalAuth(req, res, next) {
+  try {
+    const authHeader = req.headers.authorization
+    const token = authHeader?.replace('Bearer ', '') || req.body?.token || req.query?.token
+    
+    if (token) {
+      const { data: { user }, error } = await supabase.auth.getUser(token)
+      if (!error && user) {
+        req.user_id = user.id
+        req.user = user
+      }
+    }
+    
+    next()
+  } catch (error) {
+    // Продовжуємо без авторизації
+    next()
+  }
+}
+
+// ========================================
+// API ENDPOINTS FOR DATABASE OPERATIONS
+// ========================================
+
+// Cards API
+app.get('/api/cards', getUserFromToken, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('cards')
+      .select('id, bank, name, currency, initial_balance, bg_url, card_number, created_at')
+      .eq('user_id', req.user_id)
+      .order('created_at', { ascending: false })
+    
+    if (error) throw error
+    res.json(data || [])
+  } catch (error) {
+    console.error('GET /api/cards error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.post('/api/cards', getUserFromToken, async (req, res) => {
+  try {
+    const { bank, name, card_number, currency, initial_balance = 0, bg_url } = req.body
+    const payload = { bank, name, card_number, currency, initial_balance, bg_url, user_id: req.user_id }
+    
+    const { data, error } = await supabase
+      .from('cards')
+      .insert([payload])
+      .select()
+      .single()
+    
+    if (error) throw error
+    res.json(data)
+  } catch (error) {
+    console.error('POST /api/cards error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.put('/api/cards/:id', getUserFromToken, async (req, res) => {
+  try {
+    const { id } = req.params
+    const patch = { ...req.body }
+    delete patch.id // Не дозволяємо змінювати id
+    delete patch.user_id // Не дозволяємо змінювати user_id
+    
+    const { data, error } = await supabase
+      .from('cards')
+      .update(patch)
+      .eq('id', id)
+      .eq('user_id', req.user_id) // Тільки свої картки
+      .select()
+      .single()
+    
+    if (error) throw error
+    if (!data) return res.status(404).json({ error: 'Card not found' })
+    res.json(data)
+  } catch (error) {
+    console.error('PUT /api/cards/:id error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.delete('/api/cards/:id', getUserFromToken, async (req, res) => {
+  try {
+    const { id } = req.params
+    
+    // Update transactions to remove card reference
+    await supabase
+      .from('transactions')
+      .update({ card_id: null, card: null })
+      .eq('card_id', id)
+      .eq('user_id', req.user_id)
+    
+    const { error } = await supabase
+      .from('cards')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', req.user_id) // Тільки свої картки
+    
+    if (error) throw error
+    res.json({ success: true })
+  } catch (error) {
+    console.error('DELETE /api/cards/:id error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Transactions API
+// Get transaction categories (must be before /api/transactions/:id)
+app.get('/api/transactions/categories', getUserFromToken, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('category')
+      .eq('user_id', req.user_id)
+      .not('category', 'is', null)
+    
+    if (error) throw error
+    
+    const categories = [...new Set((data || []).map(t => t.category).filter(Boolean))]
+    res.json(categories)
+  } catch (error) {
+    console.error('GET /api/transactions/categories error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Sum transactions by card (must be before /api/transactions/:id)
+app.get('/api/transactions/sum-by-card', getUserFromToken, async (req, res) => {
+  try {
+    // Use RPC function from database (it was working correctly before)
+    const { data, error } = await supabase.rpc('sum_tx_by_card', { user_id_param: req.user_id })
+    
+    if (error) {
+      console.error('[sum-by-card] RPC error:', error)
+      // Fallback to client-side aggregation if RPC fails
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from('transactions')
+        .select('id, amount, card_id, archives')
+        .eq('user_id', req.user_id)
+        .or('archives.is.null,archives.eq.false')
+      
+      if (fallbackError) throw fallbackError
+      
+      const out = {}
+      for (const row of fallbackData || []) {
+        if (!row.card_id) continue
+        out[row.card_id] = (out[row.card_id] || 0) + Number(row.amount || 0)
+      }
+      
+      console.log(`[sum-by-card] Using fallback, result: ${Object.keys(out).length} cards`)
+      return res.json(out)
+    }
+    
+    // RPC returned data - format it as { card_id: sum }
+    const out = {}
+    for (const row of data || []) {
+      if (!row.card_id) continue
+      out[row.card_id] = Number(row.total || 0)
+    }
+    
+    console.log(`[sum-by-card] RPC result: ${Object.keys(out).length} cards for user ${req.user_id}`)
+    res.json(out)
+  } catch (error) {
+    console.error('GET /api/transactions/sum-by-card error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Totals by bucket (cash, cards, savings)
+app.get('/api/totals/by-bucket', getUserFromToken, async (req, res) => {
+  try {
+    // Use RPC function from database (it was working correctly before)
+    const { data, error } = await supabase.rpc('totals_by_bucket', { user_id_param: req.user_id })
+    
+    if (error) {
+      console.error('[totals-by-bucket] RPC error:', error)
+      // Fallback to client-side calculation if RPC fails
+      // This would require fetching cards and transactions, which is complex
+      // So we return empty structure
+      return res.json({ cash: {}, cards: {}, savings: {} })
+    }
+    
+    // RPC should return data in format: { cash: {}, cards: {}, savings: {} }
+    // If it returns array or different format, we need to transform it
+    let result = data
+    
+    // If data is an array, transform it to object format
+    if (Array.isArray(data)) {
+      result = { cash: {}, cards: {}, savings: {} }
+      for (const row of data) {
+        const bucket = row.bucket || 'cards'
+        const currency = (row.currency || 'UAH').toUpperCase()
+        const total = Number(row.total || 0)
+        if (total !== 0) {
+          result[bucket][currency] = (result[bucket][currency] || 0) + total
+        }
+      }
+    }
+    
+    console.log(`[totals-by-bucket] RPC result for user ${req.user_id}`)
+    res.json(result || { cash: {}, cards: {}, savings: {} })
+  } catch (error) {
+    console.error('GET /api/totals/by-bucket error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Get list of transactions with flexible filtering
+app.get('/api/transactions', getUserFromToken, async (req, res) => {
+  try {
+    const { 
+      from: rangeFrom, 
+      to: rangeTo, 
+      search = '',
+      start_date,
+      end_date,
+      card_id,
+      limit,
+      fields = 'id, created_at, amount, category, note, archives, card, card_id'
+    } = req.query
+    
+    let q = supabase
+      .from('transactions')
+      .select(fields)
+      .eq('user_id', req.user_id)
+    
+    // Date range filter
+    if (start_date) {
+      q = q.gte('created_at', start_date)
+    }
+    if (end_date) {
+      q = q.lte('created_at', end_date)
+    }
+    
+    // Card filter (including null for cash)
+    if (card_id !== undefined) {
+      if (card_id === 'null' || card_id === '') {
+        q = q.is('card_id', null)
+      } else {
+        q = q.eq('card_id', card_id)
+      }
+    }
+    
+    // Archive filter
+    q = q.or('archives.is.null,archives.eq.false')
+    
+    // Search filter
+    if (search) {
+      const isNumeric = !isNaN(parseFloat(search)) && isFinite(search)
+      if (isNumeric) {
+        q = q.or(`amount.eq.${search},category.ilike.%${search}%,card.ilike.%${search}%`)
+      } else {
+        q = q.or(`category.ilike.%${search}%,card.ilike.%${search}%`)
+      }
+    }
+    
+    // Ordering
+    const orderBy = req.query.order_by || 'created_at'
+    const orderAsc = req.query.order_asc === 'true'
+    q = q.order(orderBy, { ascending: orderAsc })
+    
+    // Pagination (if range provided) - only apply if NOT using date filters
+    // When using start_date/end_date, we want all transactions in that range
+    if (start_date || end_date) {
+      // No pagination for date-filtered queries - return all matching results
+      // But still apply limit if explicitly provided
+      if (limit) {
+        q = q.limit(Number(limit))
+      }
+    } else {
+      // Apply pagination only when NOT using date filters
+      // Only apply range if both from and to are explicitly provided
+      if (rangeFrom !== undefined && rangeTo !== undefined) {
+        q = q.range(Number(rangeFrom), Number(rangeTo))
+      } else if (limit) {
+        // If no range but limit is provided, use limit
+        q = q.limit(Number(limit))
+      } else {
+        // Default: no pagination, return all results
+      }
+    }
+    
+    const { data, error } = await q
+    if (error) {
+      console.error('[GET /api/transactions] Query error:', error)
+      console.error('[GET /api/transactions] Query params:', { start_date, end_date, fields, card_id, limit, rangeFrom, rangeTo })
+      throw error
+    }
+    
+    console.log(`[GET /api/transactions] Returning ${data?.length || 0} transactions for user ${req.user_id}`)
+    res.json(data || [])
+  } catch (error) {
+    console.error('GET /api/transactions error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Get single transaction by ID
+app.get('/api/transactions/:id', getUserFromToken, async (req, res) => {
+  try {
+    const { id } = req.params
+    
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('id, amount, category, note, card_id, card, created_at')
+      .eq('id', id)
+      .eq('user_id', req.user_id)
+      .single()
+    
+    if (error) throw error
+    if (!data) return res.status(404).json({ error: 'Transaction not found' })
+    res.json(data)
+  } catch (error) {
+    console.error('GET /api/transactions/:id error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.post('/api/transactions', getUserFromToken, async (req, res) => {
+  try {
+    const payload = { ...req.body, user_id: req.user_id }
+    
+    const { data, error } = await supabase
+      .from('transactions')
+      .insert([payload])
+      .select()
+      .single()
+    
+    if (error) throw error
+    res.json(data)
+  } catch (error) {
+    console.error('POST /api/transactions error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.put('/api/transactions/:id', getUserFromToken, async (req, res) => {
+  try {
+    const { id } = req.params
+    const patch = { ...req.body }
+    delete patch.id
+    delete patch.user_id
+    
+    const { error } = await supabase
+      .from('transactions')
+      .update(patch)
+      .eq('id', id)
+      .eq('user_id', req.user_id)
+    
+    if (error) throw error
+    res.json({ success: true })
+  } catch (error) {
+    console.error('PUT /api/transactions/:id error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.delete('/api/transactions/:id', getUserFromToken, async (req, res) => {
+  try {
+    const { id } = req.params
+    
+    const { error } = await supabase
+      .from('transactions')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', req.user_id)
+    
+    if (error) throw error
+    res.json({ success: true })
+  } catch (error) {
+    console.error('DELETE /api/transactions/:id error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.patch('/api/transactions/:id/archive', getUserFromToken, async (req, res) => {
+  try {
+    const { id } = req.params
+    
+    const { error } = await supabase
+      .from('transactions')
+      .update({ archives: true })
+      .eq('id', id)
+      .eq('user_id', req.user_id)
+    
+    if (error) throw error
+    res.json({ success: true })
+  } catch (error) {
+    console.error('PATCH /api/transactions/:id/archive error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Transfers API
+app.post('/api/transfers', getUserFromToken, async (req, res) => {
+  try {
+    const { fromCardId, toCardId, amount, amountTo, note } = req.body
+    
+    // Get cards info
+    const ids = [...new Set([fromCardId, toCardId].filter(Boolean))]
+    let cards = []
+    if (ids.length) {
+      const { data, error } = await supabase
+        .from('cards')
+        .select('id, bank, name, currency')
+        .eq('user_id', req.user_id)
+        .in('id', ids)
+      
+      if (error) throw error
+      cards = data || []
+    }
+    
+    const findCard = (id) => cards.find(c => c.id === id)
+    const fromCard = findCard(fromCardId)
+    const toCard = findCard(toCardId)
+    
+    const isSavings = (c) => ((c?.bank||'').toLowerCase().includes('збер') || (c?.bank||'').toLowerCase().includes('savings'))
+    const fromBucket = fromCard ? (isSavings(fromCard) ? 'savings' : (fromCard.bank && fromCard.bank.toLowerCase().includes('гот') ? 'cash' : 'cards')) : 'cash'
+    const toBucket   = toCard   ? (isSavings(toCard)   ? 'savings' : (toCard.bank   && toCard.bank.toLowerCase().includes('гот') ? 'cash' : 'cards')) : 'cash'
+    
+    const countAsIncome = (fromBucket === 'savings' && toBucket !== 'savings')
+    
+    // Generate transfer ID
+    const transferId = crypto.randomUUID()
+    
+    const now = new Date().toISOString()
+    const fromAmountAbs = Math.abs(Number(amount || 0))
+    const toAmountAbs = Math.abs(Number((amountTo ?? amount) || 0))
+    
+    const src = {
+      amount: -fromAmountAbs,
+      card_id: fromCardId || null,
+      card: fromCard ? `${fromCard.bank} ${fromCard.name}` : null,
+      created_at: now,
+      is_transfer: true,
+      transfer_role: 'from',
+      transfer_id: transferId,
+      archives: false,
+      category: 'ТРАНСФЕР',
+      note: note || null,
+      user_id: req.user_id
+    }
+    
+    const tgt = {
+      amount: toAmountAbs,
+      card_id: toCardId || null,
+      card: toCard ? `${toCard.bank} ${toCard.name}` : null,
+      created_at: now,
+      is_transfer: true,
+      transfer_role: 'to',
+      transfer_id: transferId,
+      count_as_income: countAsIncome,
+      archives: false,
+      category: 'ТРАНСФЕР',
+      note: note || null,
+      user_id: req.user_id
+    }
+    
+    const { data, error } = await supabase
+      .from('transactions')
+      .insert([src, tgt])
+      .select()
+    
+    if (error) throw error
+    res.json(data || [])
+  } catch (error) {
+    console.error('POST /api/transfers error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.post('/api/transfers/mark-existing', getUserFromToken, async (req, res) => {
+  try {
+    const { fromTxId, toTxId, note } = req.body
+    
+    if (!fromTxId || !toTxId) {
+      return res.status(400).json({ error: 'Необхідно вибрати дві транзакції' })
+    }
+    
+    const transferId = crypto.randomUUID()
+    
+    // Load both transactions
+    const { data: txs, error: loadErr } = await supabase
+      .from('transactions')
+      .select('id, amount, card_id, card, created_at')
+      .eq('user_id', req.user_id)
+      .in('id', [fromTxId, toTxId])
+    
+    if (loadErr) throw loadErr
+    if (!txs || txs.length !== 2) {
+      return res.status(404).json({ error: 'Не знайдено обидві транзакції' })
+    }
+    
+    const t1 = txs.find(t => t.id === fromTxId)
+    const t2 = txs.find(t => t.id === toTxId)
+    if (!t1 || !t2) {
+      return res.status(404).json({ error: 'Не знайдено обидві транзакції' })
+    }
+    
+    const a1 = Number(t1.amount || 0)
+    const a2 = Number(t2.amount || 0)
+    
+    // Determine roles by sign
+    const src = a1 <= 0 ? t1 : t2
+    const tgt = a1 <= 0 ? t2 : t1
+    
+    const srcUpdate = {
+      is_transfer: true,
+      transfer_role: 'from',
+      transfer_id: transferId,
+      category: 'ТРАНСФЕР',
+      ...(note ? { note } : {}),
+    }
+    
+    const tgtUpdate = {
+      is_transfer: true,
+      transfer_role: 'to',
+      transfer_id: transferId,
+      category: 'ТРАНСФЕР',
+      ...(note ? { note } : {}),
+    }
+    
+    const { data: updatedSrc, error: errSrc } = await supabase
+      .from('transactions')
+      .update(srcUpdate)
+      .eq('id', src.id)
+      .eq('user_id', req.user_id)
+      .select()
+      .single()
+    if (errSrc) throw errSrc
+    
+    const { data: updatedTgt, error: errTgt } = await supabase
+      .from('transactions')
+      .update(tgtUpdate)
+      .eq('id', tgt.id)
+      .eq('user_id', req.user_id)
+      .select()
+      .single()
+    if (errTgt) throw errTgt
+    
+    res.json([updatedSrc, updatedTgt])
+  } catch (error) {
+    console.error('POST /api/transfers/mark-existing error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// User Preferences API
+app.get('/api/preferences', getUserFromToken, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('user_preferences')
+      .select('preferences, apis')
+      .eq('user_id', req.user_id)
+      .single()
+    
+    if (error && error.code !== 'PGRST116') throw error // PGRST116 = no rows
+    
+    const result = data?.preferences || {}
+    // Merge apis field into preferences if it exists as separate field
+    if (data?.apis) {
+      result.apis = data.apis
+    }
+    
+    res.json(result)
+  } catch (error) {
+    console.error('GET /api/preferences error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.post('/api/preferences', getUserFromToken, async (req, res) => {
+  try {
+    const { preferences } = req.body
+    
+    // Don't save APIs in preferences - they go to separate column
+    const prefsWithoutAPIs = { ...preferences }
+    if (prefsWithoutAPIs.APIs) {
+      delete prefsWithoutAPIs.APIs
+    }
+    
+    // Check if exists
+    const { data: existing } = await supabase
+      .from('user_preferences')
+      .select('id')
+      .eq('user_id', req.user_id)
+      .single()
+    
+    if (existing) {
+      // Update
+      const { error } = await supabase
+        .from('user_preferences')
+        .update({ preferences: prefsWithoutAPIs })
+        .eq('user_id', req.user_id)
+      
+      if (error) throw error
+    } else {
+      // Insert
+      const { error } = await supabase
+        .from('user_preferences')
+        .insert([{ user_id: req.user_id, preferences: prefsWithoutAPIs }])
+      
+      if (error) throw error
+    }
+    
+    res.json({ success: true })
+  } catch (error) {
+    console.error('POST /api/preferences error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// APIs endpoints (separate column)
+app.get('/api/preferences/apis', getUserFromToken, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('user_preferences')
+      .select('apis')
+      .eq('user_id', req.user_id)
+      .single()
+    
+    if (error && error.code !== 'PGRST116') throw error // PGRST116 = no rows
+    
+    res.json(data?.apis || {})
+  } catch (error) {
+    console.error('GET /api/preferences/apis error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.post('/api/preferences/apis', getUserFromToken, async (req, res) => {
+  try {
+    const { apis } = req.body
+    
+    // Check if exists
+    const { data: existing } = await supabase
+      .from('user_preferences')
+      .select('id')
+      .eq('user_id', req.user_id)
+      .single()
+    
+    if (existing) {
+      // Update apis column
+      const { error } = await supabase
+        .from('user_preferences')
+        .update({ apis })
+        .eq('user_id', req.user_id)
+      
+      if (error) throw error
+    } else {
+      // Insert with apis
+      const { error } = await supabase
+        .from('user_preferences')
+        .insert([{ user_id: req.user_id, preferences: {}, apis }])
+      
+      if (error) throw error
+    }
+    
+    res.json({ success: true })
+  } catch (error) {
+    console.error('POST /api/preferences/apis error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
 
 app.post('/api/parse-receipt', upload.single('image'), async (req, res) => {
   try {
@@ -127,10 +853,10 @@ app.post('/api/parse-receipt', upload.single('image'), async (req, res) => {
 })
 
 
-// Helpers for Monobank processing
+// Helpers for Monobank API processing
 function roundAndRemoveNegative(value) {
   if (!value && value !== 0) return 0
-  // Monobank returns amounts in the smallest currency unit (e.g. kopiykas)
+  // Monobank API returns amounts in the smallest currency unit (e.g. kopiykas)
   // Convert to main units and return positive rounded value
   return Math.round(Math.abs(Number(value) || 0) / 100)
 }
@@ -198,17 +924,35 @@ async function postNewCheckMonoBank(amount, note, card, id, date) {
 }
 
 // POST /api/syncMonoBank
-app.post('/api/syncMonoBank', async function (req, res) {
+app.post('/api/syncMonoBank', getUserFromToken, async function (req, res) {
   if (!req.body) return res.status(400).json({ success: false, error: 'Bad request: No body provided' })
 
-  // Allow token to be passed in body/header or fall back to server env MONO_TOKEN
-  const xToken = req.body.api || req.headers['x-token'] || process.env.MONO_TOKEN || req.body['x-token']
-  if (!xToken) return res.status(400).json({ success: false, error: 'Bad request: api token required in body.api or set MONO_TOKEN in server env' })
+  // Get API keys from database instead of .env
+  const { data: prefs, error: prefsError } = await supabase
+    .from('user_preferences')
+    .select('apis')
+    .eq('user_id', req.user_id)
+    .single()
+  
+  if (prefsError && prefsError.code !== 'PGRST116') {
+    console.error('Error fetching apis:', prefsError)
+    return res.status(500).json({ 
+      success: false, 
+      error: 'Failed to fetch API keys from database' 
+    })
+  }
+  
+  const APIs = prefs?.apis || {}
+  const monobankAPIs = APIs.monobank || {}
+  
+  // Allow token to be passed in body/header or fall back to database or server env MONO_TOKEN
+  const xToken = req.body.api || req.headers['x-token'] || monobankAPIs.token || process.env.MONO_TOKEN || req.body['x-token']
+  if (!xToken) return res.status(400).json({ success: false, error: 'Bad request: api token required in body.api, database, or set MONO_TOKEN in server env' })
 
-  const id_black = process.env.MONO_CARD_ID_BLACK
-  const id_white = process.env.MONO_CARD_ID_WHITE
+  const id_black = monobankAPIs.black_card_id || process.env.MONO_CARD_ID_BLACK
+  const id_white = monobankAPIs.white_card_id || process.env.MONO_CARD_ID_WHITE
 
-  const id_cards = [id_black, id_white]
+  const id_cards = [id_black, id_white].filter(Boolean) // Filter out null/undefined
 
   try {
     // Fetch statements for both cards (last 10 days)
@@ -224,13 +968,15 @@ app.post('/api/syncMonoBank', async function (req, res) {
     const allData = results.flat()
     const sortedData = allData.sort((a, b) => a.time - b.time)
 
-    // Fetch Monobank currency rates once and cache for this request
-    let monoRates = []
+    // Fetch currency rates from exchangerate-api.com once and cache for this request
+    let exchangeRates = {}
     try {
-      const ratesResp = await axios.get('https://api.monobank.ua/bank/currency')
-      monoRates = ratesResp.data || []
+      const ratesResp = await axios.get('https://open.er-api.com/v6/latest/USD')
+      if (ratesResp.data && ratesResp.data.rates) {
+        exchangeRates = ratesResp.data.rates
+      }
     } catch (e) {
-      console.warn('Failed to fetch Monobank rates, continuing without rates', e?.message || e)
+      console.warn('Failed to fetch exchange rates, continuing without rates', e?.message || e)
     }
 
     // Process items, insert missing ones into transactions table
@@ -268,13 +1014,21 @@ app.post('/api/syncMonoBank', async function (req, res) {
         const codeMap = { 840: 'USD', 978: 'EUR', 980: 'UAH', 826: 'GBP', 643: 'RUB', 985: 'PLN' }
         const currencyIso = codeMap[currencyCode] || String(currencyCode)
 
-        // Find rate entry for currencyCode -> UAH (980)
-        const rateEntry = monoRates.find(r => Number(r.currencyCodeA) === currencyCode && Number(r.currencyCodeB) === 980)
-        const rate = rateEntry ? (rateEntry.rateSell || rateEntry.rateBuy || rateEntry.rateCross) : null
+        // Calculate rate from exchangeRates (exchangerate-api.com format)
+        let rate = null
+        if (exchangeRates && Object.keys(exchangeRates).length > 0) {
+          if (currencyIso === 'USD') {
+            // USD to UAH: directly from rates
+            rate = exchangeRates.UAH
+          } else if (exchangeRates[currencyIso] && exchangeRates.UAH) {
+            // Other currency to UAH: (USD->UAH) / (currency->USD)
+            rate = exchangeRates.UAH / exchangeRates[currencyIso]
+          }
+        }
 
         const formattedOp = `${mainOperationAmount} ${currencyIso}`
         const formattedMain = `${mainAmount} UAH`
-        const rateText = rate ? `${rate} UAH/${currencyIso}` : 'курс не знайдено'
+        const rateText = rate ? `${rate.toFixed(2)} UAH/${currencyIso}` : 'курс не знайдено'
 
         note = `${note}${note ? ' | ' : ''}Конвертовано: ${formattedOp} → ${formattedMain}; курс: ${rateText}`
       }
@@ -311,17 +1065,67 @@ function createBinanceSignature(queryString, apiSecret) {
 }
 
 // POST /api/syncBinance
-app.post('/api/syncBinance', async function (req, res) {
+app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
   try {
-    const apiKey = process.env.BINANCE_API_KEY
-    const apiSecret = process.env.BINANCE_API_SECRET
+    console.log(`[syncBinance] Starting sync for user_id: ${req.user_id}`)
+    
+    // Get API keys from database instead of .env
+    const { data: prefs, error: prefsError } = await supabase
+      .from('user_preferences')
+      .select('apis')
+      .eq('user_id', req.user_id)
+      .single()
+    
+    console.log(`[syncBinance] Database query result:`, { 
+      hasData: !!prefs, 
+      apis: prefs?.apis,
+      error: prefsError?.message,
+      errorCode: prefsError?.code 
+    })
+    
+    if (prefsError && prefsError.code !== 'PGRST116') {
+      console.error('[syncBinance] Error fetching apis:', prefsError)
+      return res.status(500).json({ 
+        success: false, 
+        synced: false, 
+        message: 'Failed to fetch API keys from database' 
+      })
+    }
+    
+    const APIs = prefs?.apis || {}
+    const binanceAPIs = APIs.binance || {}
+    const apiKey = binanceAPIs.api_key || process.env.BINANCE_API_KEY // Fallback to .env
+    const apiSecret = binanceAPIs.api_secret || process.env.BINANCE_API_SECRET // Fallback to .env
+
+    console.log(`[syncBinance] API keys:`, {
+      fromDB: {
+        hasApiKey: !!binanceAPIs.api_key,
+        hasApiSecret: !!binanceAPIs.api_secret,
+        apiKeyLength: binanceAPIs.api_key?.length || 0,
+        apiSecretLength: binanceAPIs.api_secret?.length || 0
+      },
+      fromEnv: {
+        hasApiKey: !!process.env.BINANCE_API_KEY,
+        hasApiSecret: !!process.env.BINANCE_API_SECRET
+      },
+      final: {
+        hasApiKey: !!apiKey,
+        hasApiSecret: !!apiSecret
+      }
+    })
 
     if (!apiKey || !apiSecret) {
-      console.log('Binance API keys not configured, skipping sync')
+      console.log('[syncBinance] Binance API keys not configured in database or .env, skipping sync')
+      console.log('[syncBinance] Available data:', { 
+        apis: prefs?.apis,
+        binanceAPIs,
+        envApiKey: !!process.env.BINANCE_API_KEY,
+        envApiSecret: !!process.env.BINANCE_API_SECRET
+      })
       return res.status(200).json({ 
         success: true, 
         synced: false, 
-        message: 'Binance sync skipped: API keys not configured' 
+        message: 'Binance sync skipped: API keys not configured. Please add API keys in Profile settings.' 
       })
     }
 
@@ -329,45 +1133,127 @@ app.post('/api/syncBinance', async function (req, res) {
     let binanceCard = null
     
     try {
-      // First try: exact match
-      const { data: exactMatch } = await supabase
+      // Log which key is being used
+      console.log(`Using ${isServiceRole ? 'SERVICE_ROLE_KEY (bypasses RLS)' : 'ANON_KEY (RLS enabled)'} to fetch cards`)
+      
+      // Get all cards first to see what's available
+      const { data: allCards, error: cardsError } = await supabase
         .from('cards')
-        .select('id, currency, bank, name, initial_balance')
-        .eq('bank', 'Binance')
-        .eq('name', 'Spot')
-        .limit(1)
-        .maybeSingle()
+        .select('id, currency, bank, name, initial_balance, user_id')
+      
+      if (cardsError) {
+        console.error('Error fetching cards:', cardsError)
+        console.error('Error code:', cardsError.code)
+        console.error('Error details:', cardsError.details)
+        console.error('Error hint:', cardsError.hint)
+        
+        // If it's an RLS error, provide helpful message
+        if (cardsError.code === '42501' || cardsError.message?.includes('row-level security')) {
+          return res.status(500).json({ 
+            success: false, 
+            synced: false,
+            error: 'RLS policy violation',
+            message: 'Cannot access cards due to RLS policies. Please use SUPABASE_SERVICE_ROLE_KEY in backend/.env file instead of ANON_KEY.'
+          })
+        }
+        
+        return res.status(500).json({ 
+          success: false, 
+          synced: false,
+          error: `Database error: ${cardsError.message}`,
+          message: `Database error: ${cardsError.message}`
+        })
+      }
+      
+      console.log(`Query returned ${allCards?.length || 0} cards`)
+      
+      if (!allCards || allCards.length === 0) {
+        console.log('No cards found in database')
+        if (!isServiceRole) {
+          console.log('⚠️  Using ANON_KEY: This might be due to RLS policies blocking access. Consider using SERVICE_ROLE_KEY.')
+        }
+        return res.status(200).json({ 
+          success: true, 
+          synced: false, 
+          message: 'Binance sync skipped: No cards found in database. Please create a Binance Spot card first.' 
+        })
+      }
+      
+      console.log(`Found ${allCards.length} cards in database:`, 
+        allCards.map(c => `"${c.bank || '(no bank)'} ${c.name || '(no name)'}" (user_id: ${c.user_id || 'none'})`).join(', '))
+      
+      // Log all Binance-related cards for debugging
+      const binanceCards = allCards.filter(card => 
+        String(card.bank || '').toLowerCase().includes('binance')
+      )
+      if (binanceCards.length > 0) {
+        console.log(`Found ${binanceCards.length} Binance-related card(s):`, 
+          binanceCards.map(c => `"${c.bank} ${c.name}" (id: ${c.id})`).join(', '))
+      }
+      
+      // First try: exact match
+      const exactMatch = allCards.find(card => 
+        String(card.bank || '').trim() === 'Binance' && 
+        String(card.name || '').trim() === 'Spot'
+      )
       
       if (exactMatch) {
         binanceCard = exactMatch
+        console.log(`✅ Found Binance Spot card (exact match): id=${binanceCard.id}, bank="${binanceCard.bank}", name="${binanceCard.name}"`)
       } else {
-        // Second try: case-insensitive search
-        const { data: allCards } = await supabase
-          .from('cards')
-          .select('id, currency, bank, name, initial_balance')
+        console.log('No exact match found for "Binance" + "Spot"')
         
-        if (allCards && allCards.length > 0) {
-          binanceCard = allCards.find(card => 
-            String(card.bank || '').toLowerCase().includes('binance') &&
-            String(card.name || '').toLowerCase().includes('spot')
-          )
-        }
+        // Second try: case-insensitive search for "binance" and "spot"
+        binanceCard = allCards.find(card => {
+          const bank = String(card.bank || '').toLowerCase().trim()
+          const name = String(card.name || '').toLowerCase().trim()
+          const matches = bank.includes('binance') && name.includes('spot')
+          if (matches) {
+            console.log(`Found potential match: bank="${card.bank}", name="${card.name}"`)
+          }
+          return matches
+        })
         
-        if (!binanceCard) {
-          console.log('Binance Spot card not found. Available cards:', 
-            allCards?.map(c => `${c.bank} ${c.name}`).join(', ') || 'none')
-          return res.status(200).json({ 
-            success: true, 
-            synced: false, 
-            message: 'Binance sync skipped: Binance Spot card not found in database' 
+        if (binanceCard) {
+          console.log(`✅ Found Binance Spot card (case-insensitive): "${binanceCard.bank} ${binanceCard.name}", id=${binanceCard.id}`)
+        } else {
+          console.log('No case-insensitive match found for "binance" + "spot"')
+          
+          // Third try: any Binance card (use first one found)
+          const anyBinance = allCards.find(card => {
+            const bank = String(card.bank || '').toLowerCase()
+            const matches = bank.includes('binance')
+            if (matches) {
+              console.log(`Found Binance card: "${card.bank} ${card.name}"`)
+            }
+            return matches
           })
+          
+          if (anyBinance) {
+            console.log(`⚠️  Warning: No "Binance Spot" card found, but found Binance card: "${anyBinance.bank} ${anyBinance.name}". Using it for sync.`)
+            binanceCard = anyBinance
+          } else {
+            console.log('❌ No Binance cards found at all')
+          }
         }
+      }
+      
+      if (!binanceCard) {
+        const cardsList = allCards.map(c => `"${c.bank || '(no bank)'} ${c.name || '(no name)'}"`).join(', ')
+        console.log(`Binance Spot card not found. Available cards: ${cardsList}`)
+        return res.status(200).json({ 
+          success: true, 
+          synced: false, 
+          message: `Binance sync skipped: Binance Spot card not found in database. Available cards: ${cardsList}` 
+        })
       }
     } catch (error) {
       console.error('Error finding Binance Spot card:', error)
       return res.status(500).json({ 
         success: false, 
-        error: `Database error: ${error.message}` 
+        synced: false,
+        error: `Database error: ${error.message}`,
+        message: `Database error: ${error.message}`
       })
     }
 
@@ -387,7 +1273,9 @@ app.post('/api/syncBinance', async function (req, res) {
         console.error('Error fetching transactions:', txError)
         return res.status(500).json({ 
           success: false, 
-          error: `Database error: ${txError.message}` 
+          synced: false,
+          error: `Database error: ${txError.message}`,
+          message: `Database error: ${txError.message}`
         })
       }
       
@@ -404,7 +1292,9 @@ app.post('/api/syncBinance', async function (req, res) {
       console.error('Error calculating balance:', error)
       return res.status(500).json({ 
         success: false, 
-        error: `Error calculating balance: ${error.message}` 
+        synced: false,
+        error: `Error calculating balance: ${error.message}`,
+        message: `Error calculating balance: ${error.message}`
       })
     }
 
@@ -424,7 +1314,9 @@ app.post('/api/syncBinance', async function (req, res) {
     if (!response.data || !response.data.balances) {
       return res.status(500).json({ 
         success: false, 
-        error: 'Invalid response from Binance API' 
+        synced: false,
+        error: 'Invalid response from Binance API',
+        message: 'Invalid response from Binance API'
       })
     }
 
@@ -509,14 +1401,27 @@ app.post('/api/syncBinance', async function (req, res) {
     }
 
     // Create transaction with difference
+    if (!binanceCard.user_id) {
+      console.error('Error: Binance card has no user_id')
+      return res.status(500).json({ 
+        success: false, 
+        synced: false,
+        error: 'Binance card has no user_id',
+        message: 'Binance card has no user_id. Cannot create transaction without user_id.'
+      })
+    }
+
     const txPayload = {
       amount: difference,
       category: 'Binance Sync',
       note: `Auto-sync Binance balance (all coins in USD)\n\nBalance breakdown:\n${balanceBreakdown.join('\n')}\n\nTotal Binance: $${binanceBalanceUSD.toFixed(2)}\nDB balance: $${dbBalance.toFixed(2)}\nDifference: ${difference > 0 ? '+' : ''}${difference.toFixed(2)} USD`,
       card: `${binanceCard.bank || 'Binance'} ${binanceCard.name || 'Spot'}`,
       card_id: binanceCard.id,
+      user_id: binanceCard.user_id, // Add user_id from card to pass RLS policy
       created_at: new Date().toISOString()
     }
+
+    console.log(`Creating transaction with user_id: ${binanceCard.user_id}, card_id: ${binanceCard.id}`)
 
     const { data: newTx, error: txError } = await supabase
       .from('transactions')
@@ -528,7 +1433,9 @@ app.post('/api/syncBinance', async function (req, res) {
       console.error('Error creating transaction:', txError)
       return res.status(500).json({ 
         success: false, 
-        error: 'Failed to create sync transaction' 
+        synced: false,
+        error: 'Failed to create sync transaction',
+        message: `Failed to create sync transaction: ${txError.message || 'Unknown error'}`
       })
     }
 
@@ -560,6 +1467,17 @@ app.post('/api/syncBinance', async function (req, res) {
       message: `Binance sync failed: ${error.message}` 
     })
   }
+})
+
+// Global error handler for unhandled errors
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err)
+  res.status(500).json({
+    success: false,
+    synced: false,
+    error: err.message || 'Internal server error',
+    message: err.message || 'Internal server error'
+  })
 })
 
 // Export для Vercel

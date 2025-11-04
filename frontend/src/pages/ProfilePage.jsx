@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { motion } from 'framer-motion'
-import { User, Mail, Save, Upload } from 'lucide-react'
+import { User, Mail, Save, Upload, Key, CreditCard } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { getUserAPIs, updatePreferencesSection } from '../api/preferences'
 
 export default function ProfilePage() {
   const [user, setUser] = useState(null)
@@ -11,6 +12,14 @@ export default function ProfilePage() {
   const [displayName, setDisplayName] = useState('')
   const [avatarFile, setAvatarFile] = useState(null)
   const [avatarPreview, setAvatarPreview] = useState(null)
+  
+  // API keys state
+  const [binanceApiKey, setBinanceApiKey] = useState('')
+  const [binanceApiSecret, setBinanceApiSecret] = useState('')
+  const [monobankToken, setMonobankToken] = useState('')
+  const [monobankBlackCardId, setMonobankBlackCardId] = useState('')
+  const [monobankWhiteCardId, setMonobankWhiteCardId] = useState('')
+  const [prefsLoaded, setPrefsLoaded] = useState(false)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -39,6 +48,34 @@ export default function ProfilePage() {
     })
 
     return () => subscription.unsubscribe()
+  }, [])
+
+  // Load API keys from separate APIs column
+  useEffect(() => {
+    const loadApiKeys = async () => {
+      try {
+        const APIs = await getUserAPIs()
+        if (APIs) {
+          // Binance API
+          if (APIs.binance) {
+            setBinanceApiKey(APIs.binance.api_key || '')
+            setBinanceApiSecret(APIs.binance.api_secret || '')
+          }
+          
+          // Monobank API
+          if (APIs.monobank) {
+            setMonobankToken(APIs.monobank.token || '')
+            setMonobankBlackCardId(APIs.monobank.black_card_id || '')
+            setMonobankWhiteCardId(APIs.monobank.white_card_id || '')
+          }
+        }
+        setPrefsLoaded(true)
+      } catch (e) {
+        console.error('Failed to load API keys:', e)
+        setPrefsLoaded(true)
+      }
+    }
+    loadApiKeys()
   }, [])
 
   const handleAvatarChange = (e) => {
@@ -94,6 +131,21 @@ export default function ProfilePage() {
       })
 
       if (error) throw error
+
+      // Save API keys to preferences
+      const apis = {
+        binance: {
+          api_key: binanceApiKey.trim(),
+          api_secret: binanceApiSecret.trim()
+        },
+        monobank: {
+          token: monobankToken.trim(),
+          black_card_id: monobankBlackCardId.trim(),
+          white_card_id: monobankWhiteCardId.trim()
+        }
+      }
+      
+      await updatePreferencesSection('apis', apis)
 
       toast.success('Профіль оновлено!')
     } catch (error) {
@@ -190,6 +242,92 @@ export default function ProfilePage() {
             />
           </div>
           <p className="text-xs text-gray-500 mt-1">Email не можна змінити</p>
+        </div>
+
+        {/* Binance API Section */}
+        <div className="pt-6 border-t border-gray-200">
+          <div className="flex items-center gap-2 mb-4">
+            <Key size={20} className="text-yellow-600" />
+            <h3 className="text-lg font-semibold text-gray-900">Binance API</h3>
+          </div>
+          <div className="space-y-4 bg-gray-50 rounded-lg p-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                API Key
+              </label>
+              <input
+                type="password"
+                value={binanceApiKey}
+                onChange={(e) => setBinanceApiKey(e.target.value)}
+                placeholder="Введіть Binance API Key"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 outline-none transition"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                API Secret
+              </label>
+              <input
+                type="password"
+                value={binanceApiSecret}
+                onChange={(e) => setBinanceApiSecret(e.target.value)}
+                placeholder="Введіть Binance API Secret"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 outline-none transition"
+              />
+            </div>
+            <p className="text-xs text-gray-500">
+              Ключі зберігаються безпечно в вашому обліковому записі
+            </p>
+          </div>
+        </div>
+
+        {/* Monobank API Section */}
+        <div className="pt-6 border-t border-gray-200">
+          <div className="flex items-center gap-2 mb-4">
+            <CreditCard size={20} className="text-indigo-600" />
+            <h3 className="text-lg font-semibold text-gray-900">Monobank API</h3>
+          </div>
+          <div className="space-y-4 bg-gray-50 rounded-lg p-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Monobank Token
+              </label>
+              <input
+                type="password"
+                value={monobankToken}
+                onChange={(e) => setMonobankToken(e.target.value)}
+                placeholder="Введіть Monobank Token"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                ID Чорної картки
+              </label>
+              <input
+                type="text"
+                value={monobankBlackCardId}
+                onChange={(e) => setMonobankBlackCardId(e.target.value)}
+                placeholder="Введіть ID чорної картки"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                ID Білої картки
+              </label>
+              <input
+                type="text"
+                value={monobankWhiteCardId}
+                onChange={(e) => setMonobankWhiteCardId(e.target.value)}
+                placeholder="Введіть ID білої картки"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+              />
+            </div>
+            <p className="text-xs text-gray-500">
+              Token та ID карток зберігаються безпечно в вашому обліковому записі
+            </p>
+          </div>
         </div>
 
         {/* Save Button */}

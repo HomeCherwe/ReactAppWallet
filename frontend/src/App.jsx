@@ -1,17 +1,21 @@
 import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { supabase } from './lib/supabase'
+import { supabase, cacheUser, getUserCacheStats } from './lib/supabase'
 import Sidebar from './components/Sidebar.jsx'
 import DashboardPage from './pages/DashboardPage'
 import ProfilePage from './pages/ProfilePage'
 import Auth from './components/Auth'
 import { txBus } from './utils/txBus'
-import { getApiUrl } from './utils.jsx'
+import { getApiUrl, apiFetch } from './utils.jsx'
+import { listCards } from './api/cards'
+import { sumTransactionsByCard, listTransactions } from './api/transactions'
+import { fetchTotalsByBucket } from './api/totals'
 
 export default function App(){
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
   const [syncLoading, setSyncLoading] = useState(false)
+  const [initialDataLoading, setInitialDataLoading] = useState(true)
 
   // Check authentication state and handle OAuth callback
   useEffect(() => {
@@ -32,6 +36,10 @@ export default function App(){
 
           if (session) {
             setSession(session)
+            // Кешувати user після успішної аутентифікації
+            if (session.user) {
+              cacheUser(session.user)
+            }
             // Clean up URL hash after successful auth
             window.history.replaceState(null, '', window.location.pathname)
           }
@@ -46,6 +54,10 @@ export default function App(){
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
+      // Кешувати user з session
+      if (session?.user) {
+        cacheUser(session.user)
+      }
       setLoading(false)
     })
 
@@ -54,6 +66,10 @@ export default function App(){
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
+      // Оновлювати кеш при зміні session
+      if (session?.user) {
+        cacheUser(session.user)
+      }
       setLoading(false)
       // Clean up URL hash if present
       if (session && window.location.hash.includes('access_token')) {
@@ -64,41 +80,73 @@ export default function App(){
     return () => subscription.unsubscribe()
   }, [])
 
-  // Auto-sync Binance on app load (only when authenticated)
+  // Auto-sync Binance and load all initial data on app load (only when authenticated)
   useEffect(() => {
-    if (!session) return
+    if (!session) {
+      // If no session, still allow components to load (for non-authenticated users)
+      setInitialDataLoading(false)
+      return
+    }
 
-    const syncBinance = async () => {
+    const loadAllData = async () => {
       try {
         setSyncLoading(true)
-        const response = await fetch(`${getApiUrl()}/api/syncBinance`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
+        setInitialDataLoading(true)
+
+        // Sync Binance first
+        const syncBinancePromise = apiFetch('/api/syncBinance', {
+          method: 'POST'
+        }).then(response => {
+          const data = response || {}
+          if (data.success && data.synced) {
+            console.log('Binance synced:', data.message)
+            // Small delay to ensure components are fully mounted and subscribed
+            setTimeout(() => {
+              txBus.emit({ 
+                card_id: data.card_id, 
+                delta: data.delta 
+              })
+            }, 300)
+          } else {
+            console.log('Binance sync:', data.message || 'No message')
+          }
+          return data
+        }).catch(error => {
+          console.error('Binance sync failed:', error.message)
+          return null
         })
-        const data = await response.json()
+
+        // Load all critical data in parallel
+        const dataPromises = [
+          syncBinancePromise,
+          listCards().catch(e => { console.error('listCards error:', e); return [] }),
+          sumTransactionsByCard().catch(e => { console.error('sumTransactionsByCard error:', e); return {} }),
+          fetchTotalsByBucket().catch(e => { console.error('fetchTotalsByBucket error:', e); return { cash: {}, cards: {}, savings: {} } }),
+          listTransactions({ from: 0, to: 9, search: '' }).catch(e => { console.error('listTransactions error:', e); return [] })
+        ]
+
+        // Wait for all promises to complete (including the last one)
+        await Promise.all(dataPromises)
         
-        if (data.success && data.synced) {
-          // Transaction was created, emit event to update all components
-          console.log('Binance synced:', data.message)
-          // Small delay to ensure components are fully mounted and subscribed
-          setTimeout(() => {
-            txBus.emit({ 
-              card_id: data.card_id, 
-              delta: data.delta 
-            })
-          }, 300)
-        } else {
-          console.log('Binance sync:', data.message)
-        }
+        console.log('All initial data loaded')
       } catch (error) {
-        console.error('Binance sync failed:', error.message)
+        console.error('Error loading initial data:', error)
       } finally {
         setSyncLoading(false)
+        setInitialDataLoading(false)
       }
     }
 
-    syncBinance()
+    loadAllData()
   }, [session])
+
+  // Логування статистики кешу після повного завантаження
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const stats = getUserCacheStats()
+    }, 2000)
+    return () => clearTimeout(timer)
+  }, [])
 
   // Show loader while checking auth
   if (loading) {
@@ -120,8 +168,8 @@ export default function App(){
     return <Auth />
   }
 
-  // Show sync loader while syncing Binance
-  if (syncLoading) {
+  // Show loader while syncing Binance or loading initial data
+  if (syncLoading || initialDataLoading) {
     return (
       <div className="fixed inset-0 flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50">
         <div className="text-center">
@@ -130,7 +178,9 @@ export default function App(){
             <div className="absolute inset-0 border-4 border-indigo-600 rounded-full border-t-transparent animate-spin"></div>
           </div>
           <div className="text-gray-600 font-medium">Завантаження...</div>
-          <div className="text-sm text-gray-400 mt-1">Синхронізація даних</div>
+          <div className="text-sm text-gray-400 mt-1">
+            {syncLoading ? 'Синхронізація даних' : 'Завантаження даних'}
+          </div>
         </div>
       </div>
     )

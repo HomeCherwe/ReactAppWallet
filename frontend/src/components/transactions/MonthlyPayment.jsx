@@ -10,9 +10,10 @@ import DetailsModal from './DetailsModal'
 import CreateTxModal from './CreateTxModal'
 import EditTxModal from './EditTxModal'
 import TransferModal from './TransferModal'
-import { getApiUrl } from '../../utils.jsx'
+import { apiFetch } from '../../utils.jsx'
 import { listTransactions, deleteTransaction, archiveTransaction } from '../../api/transactions'
 import { txBus } from '../../utils/txBus'
+import { listCards } from '../../api/cards'
 
 export default function MonthlyPayment() {
   // remove duplicates by `id`, preserving first occurrence order
@@ -62,12 +63,10 @@ export default function MonthlyPayment() {
     // Get current user
     const { data: { user } } = await supabase.auth.getUser()
     
-    const [txs, cardsResp] = await Promise.all([
+    const [txs, cards] = await Promise.all([
       listTransactions({ from, to, search }),
-      user ? supabase.from('cards').select('id, bank, name, currency').eq('user_id', user.id) : { data: [] }
+      user ? listCards() : []
     ])
-
-  const cards = cardsResp.data || []
   // map by card id so we can lookup currency by card_id (transactions store card_id)
   const map = {}
   cards.forEach(c => { map[c.id] = c.currency || 'EUR' })
@@ -178,27 +177,11 @@ export default function MonthlyPayment() {
                 setSyncLoading(true)
                 const toastId = toast.loading('Синхронізація виконується...')
                 try {
-                  const monoToken = import.meta.env.VITE_MONO_TOKEN || ''
-                  const resp = await fetch(`${getApiUrl()}/api/syncMonoBank`, {
+                  // apiFetch automatically adds auth token and handles JSON parsing
+                  const data = await apiFetch('/api/syncMonoBank', {
                     method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'X-Token': monoToken
-                    },
                     body: JSON.stringify({})
-                  })
-                  
-                  // Try to parse as JSON, fallback to text response for backwards compatibility
-                  let data
-                  const text = await resp.text()
-                  try {
-                    data = JSON.parse(text)
-                  } catch (parseError) {
-                    // If JSON parse fails, it's the old text API format
-                    const m = text && text.match(/(\d+)/)
-                    const count = m ? Number(m[1]) : 0
-                    data = { success: true, count, message: text, transactions: [] }
-                  }
+                  }) || {}
                   
                   toast.dismiss(toastId)
                   toast.success(data.count ? `Синхронізовано ${data.count} транзакцій` : 'Синхронізація виконана')

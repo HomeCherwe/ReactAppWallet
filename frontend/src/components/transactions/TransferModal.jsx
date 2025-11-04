@@ -4,6 +4,8 @@ import { supabase } from '../../lib/supabase'
 import { createTransfer, markExistingAsTransfer } from '../../api/transfers'
 import { txBus } from '../../utils/txBus'
 import BaseModal from '../BaseModal'
+import { listCards } from '../../api/cards'
+import { apiFetch } from '../../utils.jsx'
 
 export default function TransferModal({ open, onClose, onDone }) {
   const [cards, setCards] = useState([])
@@ -24,19 +26,14 @@ export default function TransferModal({ open, onClose, onDone }) {
   useEffect(() => {
     if (!open) return
     ;(async () => {
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      const { data } = await supabase.from('cards').select('id, bank, name, currency').eq('user_id', user.id).order('created_at', { ascending: false })
-      setCards(data || [])
+      const cards = await listCards()
+      setCards(cards || [])
+      
       // Load recent transactions for selection (last 200)
-      const { data: txs } = await supabase
-        .from('transactions')
-        .select('id, amount, card, created_at, note')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(200)
+      try {
+        const txs = await apiFetch(
+          '/api/transactions?limit=200&fields=id,amount,card,created_at,note&order_by=created_at&order_asc=false'
+        ) || []
       const opts = (txs || []).map(t => {
         const amt = Number(t.amount || 0)
         return {
@@ -46,9 +43,13 @@ export default function TransferModal({ open, onClose, onDone }) {
           label: `${new Date(t.created_at).toLocaleDateString('uk-UA')} · ${t.card || '—'} · ${amt > 0 ? '+' : ''}${amt.toFixed(2)}${t.note ? ` (${t.note})` : ''}`
         }
       })
-      setTxOptions(opts)
-      setFromOptions(opts.filter(o => o.sign < 0))
-      setToOptions(opts.filter(o => o.sign > 0))
+        setTxOptions(opts)
+        setFromOptions(opts.filter(o => o.sign < 0))
+        setToOptions(opts.filter(o => o.sign > 0))
+      } catch (e) {
+        console.error('Failed to fetch transactions:', e)
+        setTxOptions([])
+      }
     })()
   }, [open])
 
