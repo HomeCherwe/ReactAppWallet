@@ -80,14 +80,70 @@ export default function ProfilePage() {
 
   const handleAvatarChange = (e) => {
     const file = e.target.files?.[0]
-    if (file) {
-      setAvatarFile(file)
+    if (!file) return
+
+    // Check file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Розмір файлу перевищує 5MB. Будь ласка, виберіть менший файл.')
+      return
+    }
+
+    // Check file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Будь ласка, виберіть файл зображення.')
+      return
+    }
+
+    setAvatarFile(file)
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      setAvatarPreview(reader.result)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  // Helper function to compress image
+  const compressImage = (file, maxWidth = 800, maxHeight = 800, quality = 0.8) => {
+    return new Promise((resolve) => {
       const reader = new FileReader()
-      reader.onloadend = () => {
-        setAvatarPreview(reader.result)
+      reader.onload = (e) => {
+        const img = new Image()
+        img.onload = () => {
+          const canvas = document.createElement('canvas')
+          let width = img.width
+          let height = img.height
+
+          // Calculate new dimensions
+          if (width > height) {
+            if (width > maxWidth) {
+              height = (height * maxWidth) / width
+              width = maxWidth
+            }
+          } else {
+            if (height > maxHeight) {
+              width = (width * maxHeight) / height
+              height = maxHeight
+            }
+          }
+
+          canvas.width = width
+          canvas.height = height
+
+          const ctx = canvas.getContext('2d')
+          ctx.drawImage(img, 0, 0, width, height)
+
+          canvas.toBlob(
+            (blob) => {
+              resolve(blob || file)
+            },
+            file.type,
+            quality
+          )
+        }
+        img.src = e.target.result
       }
       reader.readAsDataURL(file)
-    }
+    })
   }
 
   const handleSave = async () => {
@@ -99,26 +155,79 @@ export default function ProfilePage() {
 
       // Upload avatar if changed
       if (avatarFile) {
-        const fileExt = avatarFile.name.split('.').pop()
-        const fileName = `${user.id}-${Math.random()}.${fileExt}`
-        const filePath = `avatars/${fileName}`
+        // Compress image before upload
+        const compressedFile = await compressImage(avatarFile)
+        
+        // Get file extension from original file or determine from MIME type
+        const originalExt = avatarFile.name.split('.').pop()?.toLowerCase()
+        const mimeExt = avatarFile.type.includes('png') ? 'png' : 
+                       avatarFile.type.includes('gif') ? 'gif' : 'jpg'
+        const fileExt = originalExt || mimeExt
+        const fileName = `${user.id}-${Date.now()}.${fileExt}`
 
-        // Convert to base64 or upload to Supabase Storage
-        // For now, we'll store as base64 in user_metadata
-        const reader = new FileReader()
-        reader.onloadend = async () => {
-          const base64 = reader.result
-          avatarUrl = base64
-        }
-        reader.readAsDataURL(avatarFile)
-        await new Promise(resolve => {
-          const reader = new FileReader()
-          reader.onloadend = () => {
-            avatarUrl = reader.result
-            resolve()
+        // Delete old avatar if exists (only if it's in Storage, not base64)
+        if (avatarUrl && avatarUrl.includes('/storage/v1/object/public/avatars/')) {
+          // Extract filename from URL (handles both with and without query params)
+          const urlParts = avatarUrl.split('/avatars/')
+          if (urlParts.length > 1) {
+            const oldFileName = urlParts[1].split('?')[0].split('#')[0]
+            if (oldFileName && oldFileName.startsWith(user.id)) {
+              try {
+                await supabase.storage.from('avatars').remove([oldFileName])
+              } catch (e) {
+                console.warn('Failed to delete old avatar:', e)
+                // Don't throw - continue with upload even if deletion fails
+              }
+            }
           }
-          reader.readAsDataURL(avatarFile)
-        })
+        }
+
+        // Upload to Supabase Storage
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('avatars')
+          .upload(fileName, compressedFile, {
+            cacheControl: '3600',
+            upsert: false
+          })
+
+        if (uploadError) {
+          console.error('Upload error:', uploadError)
+          console.error('Upload details:', {
+            fileName,
+            userId: user.id,
+            bucket: 'avatars',
+            errorMessage: uploadError.message,
+            errorStatus: uploadError.statusCode
+          })
+          
+          // Check if bucket doesn't exist
+          if (uploadError.message?.includes('Bucket not found') || uploadError.message?.includes('not found')) {
+            throw new Error(
+              'Bucket "avatars" не знайдено в Supabase Storage. ' +
+              'Будь ласка, створіть bucket через Supabase Dashboard: ' +
+              'Storage → Create Bucket → назва "avatars" → Public bucket = true'
+            )
+          }
+          
+          // Check if RLS policy violation
+          if (uploadError.message?.includes('row-level security') || uploadError.message?.includes('RLS')) {
+            throw new Error(
+              'Помилка політики безпеки (RLS). ' +
+              'Будь ласка, переконайтеся, що ви виконали SQL скрипт з файлу SUPABASE_STORAGE_SETUP.sql ' +
+              'в SQL Editor Supabase Dashboard для налаштування політик доступу до Storage.'
+            )
+          }
+          
+          // Other errors
+          throw new Error(`Не вдалося завантажити аватар: ${uploadError.message || 'Невідома помилка'}`)
+        }
+
+        // Get public URL
+        const { data: urlData } = supabase.storage
+          .from('avatars')
+          .getPublicUrl(fileName)
+
+        avatarUrl = urlData.publicUrl
       }
 
       // Update user metadata
@@ -148,9 +257,16 @@ export default function ProfilePage() {
       await updatePreferencesSection('apis', apis)
 
       toast.success('Профіль оновлено!')
+      
+      // Refresh user data
+      const { data: { user: updatedUser } } = await supabase.auth.getUser()
+      if (updatedUser) {
+        setUser(updatedUser)
+        setAvatarPreview(updatedUser.user_metadata?.avatar_url || null)
+      }
     } catch (error) {
       console.error('Error updating profile:', error)
-      toast.error('Не вдалося оновити профіль')
+      toast.error(error.message || 'Не вдалося оновити профіль')
     } finally {
       setSaving(false)
     }

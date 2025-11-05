@@ -67,7 +67,7 @@ async function getUserFromToken(req, res, next) {
     const authHeader = req.headers.authorization
     const token = authHeader?.replace('Bearer ', '') || req.body?.token || req.query?.token
     
-    if (!token) {
+    if (!token || token.trim() === '') {
       // Якщо токен не передано, перевіряємо чи передано user_id напряму (для спрощення)
       if (req.body?.user_id) {
         req.user_id = req.body.user_id
@@ -81,9 +81,16 @@ async function getUserFromToken(req, res, next) {
     // Валідуємо JWT токен через Supabase
     const { data: { user }, error } = await supabase.auth.getUser(token)
     
-    if (error || !user) {
-      console.error(`[getUserFromToken] Invalid token:`, error?.message || 'No user')
-      return res.status(401).json({ error: 'Invalid or expired token' })
+    if (error) {
+      const errorMsg = error.message || JSON.stringify(error) || 'Unknown error'
+      console.error(`[getUserFromToken] Invalid token for ${req.method} ${req.path}:`, errorMsg)
+      console.error(`[getUserFromToken] Token length: ${token.length}, starts with: ${token.substring(0, 20)}...`)
+      return res.status(401).json({ error: 'Invalid or expired token', details: errorMsg })
+    }
+    
+    if (!user) {
+      console.error(`[getUserFromToken] No user found for token in ${req.method} ${req.path}`)
+      return res.status(401).json({ error: 'User not found' })
     }
     
     req.user_id = user.id
@@ -91,8 +98,8 @@ async function getUserFromToken(req, res, next) {
     console.log(`[getUserFromToken] Extracted user_id: ${req.user_id} for ${req.method} ${req.path}`)
     next()
   } catch (error) {
-    console.error('Auth middleware error:', error)
-    return res.status(401).json({ error: 'Authentication failed' })
+    console.error(`[getUserFromToken] Auth middleware error for ${req.method} ${req.path}:`, error.message || error)
+    return res.status(401).json({ error: 'Authentication failed', details: error.message })
   }
 }
 
@@ -321,9 +328,22 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       fields = 'id, created_at, amount, category, note, archives, card, card_id'
     } = req.query
     
+    // Filter out 'currency' field if it doesn't exist in the table
+    // This prevents errors when frontend tries to select currency column
+    const allowedFields = [
+      'id', 'created_at', 'amount', 'category', 'note', 'archives', 
+      'card', 'card_id', 'is_transfer', 'count_as_income', 'transfer_role',
+      'transfer_id', 'user_id', 'transaction_id_card'
+    ]
+    const requestedFields = fields.split(',').map(f => f.trim())
+    const validFields = requestedFields.filter(f => allowedFields.includes(f))
+    
+    // Use valid fields, fallback to default if all were filtered out
+    const safeFields = validFields.length > 0 ? validFields.join(', ') : 'id, created_at, amount, category, note, archives, card, card_id'
+    
     let q = supabase
       .from('transactions')
-      .select(fields)
+      .select(safeFields)
       .eq('user_id', req.user_id)
     
     // Date range filter
@@ -346,14 +366,113 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
     // Archive filter
     q = q.or('archives.is.null,archives.eq.false')
     
-    // Search filter
+    // Transaction type filter (expense/income)
+    const transactionType = req.query.transaction_type
+    if (transactionType === 'expense') {
+      q = q.lt('amount', 0)
+    } else if (transactionType === 'income') {
+      q = q.gt('amount', 0)
+    }
+    
+    // Category filter
+    const category = req.query.category
+    if (category) {
+      q = q.eq('category', category)
+    }
+    
+    // Search filter - search across multiple fields with partial matching
     if (search) {
-      const isNumeric = !isNaN(parseFloat(search)) && isFinite(search)
-      if (isNumeric) {
-        q = q.or(`amount.eq.${search},category.ilike.%${search}%,card.ilike.%${search}%`)
-      } else {
-        q = q.or(`category.ilike.%${search}%,card.ilike.%${search}%`)
+      const searchTerm = search.trim()
+      const isNumeric = !isNaN(parseFloat(searchTerm)) && isFinite(searchTerm)
+      
+      // PostgREST .or() doesn't support cast operators (::text) in the syntax
+      // So we need to use a different approach - filter by text fields first, then filter results
+      // Or use a simpler approach with only supported fields
+      const conditions = []
+      
+      // Escape search term for PostgREST
+      // For values with spaces, wrap in quotes
+      const encodeValue = (val) => {
+        if (/\s/.test(val) || /[()]/.test(val)) {
+          return `"${val}"`
+        }
+        return val
       }
+      
+      const searchValue = encodeValue(searchTerm)
+      
+      // Search in text fields (category, card, note) with ILIKE for partial matching
+      // PostgREST format for .or(): field.ilike.*value* (where * is wildcard)
+      conditions.push(`category.ilike.*${searchValue}*`)
+      conditions.push(`card.ilike.*${searchValue}*`)
+      conditions.push(`note.ilike.*${searchValue}*`)
+      
+      // Search in amount - use exact match for numeric values
+      // Note: We can't use cast in .or(), so we'll filter amount separately if needed
+      if (isNumeric) {
+        const numValue = parseFloat(searchTerm)
+        // Search for both positive and negative amounts (exact match)
+        conditions.push(`amount.eq.${numValue}`)
+        conditions.push(`amount.eq.-${numValue}`)
+      }
+      
+      // Search in date (created_at) - try to match date patterns
+      // Support formats: YYYY-MM-DD, DD.MM.YYYY, DD-MM-YYYY, DD/MM/YYYY
+      // Note: We can't use cast in .or(), so we'll use a different approach for dates
+      const datePatterns = [
+        /^\d{4}-\d{2}-\d{2}$/, // YYYY-MM-DD
+        /^\d{2}\.\d{2}\.\d{4}$/, // DD.MM.YYYY
+        /^\d{2}-\d{2}-\d{4}$/, // DD-MM-YYYY
+        /^\d{2}\/\d{2}\/\d{4}$/, // DD/MM/YYYY
+      ]
+      
+      const isDateLike = datePatterns.some(pattern => pattern.test(searchTerm))
+      if (isDateLike) {
+        // Convert date format to ISO for comparison
+        let isoDate = searchTerm
+        if (searchTerm.includes('.') || searchTerm.includes('/') || (searchTerm.includes('-') && searchTerm.length === 10)) {
+          try {
+            const parts = searchTerm.split(/[.\/-]/)
+            if (parts.length === 3) {
+              if (parts[0].length === 4) {
+                isoDate = `${parts[0]}-${parts[1]}-${parts[2]}`
+              } else {
+                isoDate = `${parts[2]}-${parts[1]}-${parts[0]}`
+              }
+            }
+          } catch (e) {
+            // If parsing fails, use original search term
+          }
+        }
+        // For dates, we can use gte/lte range instead of ILIKE
+        // Or try to search in created_at using a date range
+        const dateStart = new Date(isoDate)
+        dateStart.setHours(0, 0, 0, 0)
+        const dateEnd = new Date(isoDate)
+        dateEnd.setHours(23, 59, 59, 999)
+        // Use date range for exact date match
+        q = q.gte('created_at', dateStart.toISOString())
+        q = q.lte('created_at', dateEnd.toISOString())
+      }
+      
+      // Combine text field conditions with OR (only if we have conditions)
+      if (conditions.length > 0) {
+        // If we also have date search, we need to combine with AND
+        if (isDateLike) {
+          // For date search, we already applied date filters above
+          // Now add OR conditions for text fields
+          // We need to use a different approach - fetch all and filter client-side
+          // Or use multiple queries
+          // For now, just apply text search
+          q = q.or(conditions.join(','))
+        } else {
+          q = q.or(conditions.join(','))
+        }
+      }
+      
+      // For non-numeric search terms that might match amounts or dates as text,
+      // we'll need to do client-side filtering after fetching
+      // This is a limitation of PostgREST's .or() syntax
     }
     
     // Ordering
@@ -489,6 +608,36 @@ app.patch('/api/transactions/:id/archive', getUserFromToken, async (req, res) =>
     res.json({ success: true })
   } catch (error) {
     console.error('PATCH /api/transactions/:id/archive error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Bulk delete transactions
+app.post('/api/transactions/bulk-delete', getUserFromToken, async (req, res) => {
+  try {
+    const { ids } = req.body
+    
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids array is required' })
+    }
+    
+    // Delete all transactions with matching IDs and user_id
+    const { data, error } = await supabase
+      .from('transactions')
+      .delete()
+      .in('id', ids)
+      .eq('user_id', req.user_id)
+      .select('id, amount, card_id')
+    
+    if (error) throw error
+    
+    res.json({ 
+      success: true, 
+      deleted: data?.length || 0,
+      transactions: data || []
+    })
+  } catch (error) {
+    console.error('POST /api/transactions/bulk-delete error:', error)
     res.status(500).json({ error: error.message })
   }
 })
@@ -866,9 +1015,10 @@ function convertTimestampToISO(ts) {
   return new Date(Number(ts) * 1000).toISOString()
 }
 
-async function postNewCheckMonoBank(amount, note, card, id, date) {
+async function postNewCheckMonoBank(amount, note, card, id, date, userId) {
   // Find card_id by card name in `cards` table. Try exact match first, then ilike fallback.
   let card_id = null
+  let card_user_id = null
   try {
     // Split card string by space: first token -> bank, second token -> name
     const parts = String(card || '').split(' ')
@@ -878,7 +1028,7 @@ async function postNewCheckMonoBank(amount, note, card, id, date) {
     if (bankToken && nameToken) {
       const { data: matched, error: matchErr } = await supabase
         .from('cards')
-        .select('id')
+        .select('id, user_id')
         .eq('bank', bankToken)
         .eq('name', nameToken)
         .limit(1)
@@ -886,20 +1036,45 @@ async function postNewCheckMonoBank(amount, note, card, id, date) {
       if (matchErr) {
         console.warn('cards lookup error', matchErr)
       }
-      if (matched && matched.id) card_id = matched.id
+      if (matched && matched.id) {
+        card_id = matched.id
+        card_user_id = matched.user_id
+      }
     } else if (nameToken) {
       // fallback: if only nameToken exists, try exact name match
-      const { data: byName, error: byNameErr } = await supabase.from('cards').select('id').eq('name', nameToken).limit(1).maybeSingle()
+      const { data: byName, error: byNameErr } = await supabase
+        .from('cards')
+        .select('id, user_id')
+        .eq('name', nameToken)
+        .limit(1)
+        .maybeSingle()
       if (byNameErr) console.warn('cards name lookup error', byNameErr)
-      if (byName && byName.id) card_id = byName.id
+      if (byName && byName.id) {
+        card_id = byName.id
+        card_user_id = byName.user_id
+      }
     } else if (bankToken) {
       // fallback: if only bankToken exists, try exact bank match
-      const { data: byBank, error: byBankErr } = await supabase.from('cards').select('id').eq('bank', bankToken).limit(1).maybeSingle()
+      const { data: byBank, error: byBankErr } = await supabase
+        .from('cards')
+        .select('id, user_id')
+        .eq('bank', bankToken)
+        .limit(1)
+        .maybeSingle()
       if (byBankErr) console.warn('cards bank lookup error', byBankErr)
-      if (byBank && byBank.id) card_id = byBank.id
+      if (byBank && byBank.id) {
+        card_id = byBank.id
+        card_user_id = byBank.user_id
+      }
     }
   } catch (e) {
     console.warn('Failed to lookup card_id for', card, e?.message || e)
+  }
+
+  // Використовувати user_id з картки або з параметра функції
+  const finalUserId = card_user_id || userId
+  if (!finalUserId) {
+    throw new Error('Cannot create transaction: user_id is required (from card or function parameter)')
   }
 
   // Insert into supabase transactions table. Adjust fields as your schema expects.
@@ -915,6 +1090,7 @@ async function postNewCheckMonoBank(amount, note, card, id, date) {
     transfer_id: null,
     is_transfer: false,
     transfer_role: null,
+    user_id: finalUserId, // Додати user_id для RLS policy
     created_at: date
   }
 
@@ -1034,7 +1210,7 @@ app.post('/api/syncMonoBank', getUserFromToken, async function (req, res) {
       }
 
   // insert into DB
-      const newTx = await postNewCheckMonoBank(amount, note, card, txId, date)
+      const newTx = await postNewCheckMonoBank(amount, note, card, txId, date, req.user_id)
       return newTx
     })
 
@@ -1064,12 +1240,33 @@ function createBinanceSignature(queryString, apiSecret) {
   return crypto.createHmac('sha256', apiSecret).update(queryString).digest('hex')
 }
 
+// Захист від одночасних викликів syncBinance
+const syncBinanceInProgress = new Map() // user_id -> timestamp
+
 // POST /api/syncBinance
 app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
   try {
-    console.log(`[syncBinance] Starting sync for user_id: ${req.user_id}`)
+    const userId = req.user_id
+    const now = Date.now()
     
-    // Get API keys from database instead of .env
+    // Перевірка чи вже виконується синхронізація для цього користувача
+    const lastSync = syncBinanceInProgress.get(userId)
+    if (lastSync && (now - lastSync) < 30000) { // 30 секунд мінімальний інтервал
+      console.log(`[syncBinance] Sync already in progress for user ${userId}, skipping`)
+      return res.status(200).json({
+        success: true,
+        synced: false,
+        message: 'Sync already in progress, please wait'
+      })
+    }
+    
+    // Позначити що синхронізація почалася
+    syncBinanceInProgress.set(userId, now)
+    
+    try {
+      console.log(`[syncBinance] Starting sync for user_id: ${userId}`)
+      
+      // Get API keys from database instead of .env
     const { data: prefs, error: prefsError } = await supabase
       .from('user_preferences')
       .select('apis')
@@ -1122,6 +1319,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
         envApiKey: !!process.env.BINANCE_API_KEY,
         envApiSecret: !!process.env.BINANCE_API_SECRET
       })
+      // finally блок видалить userId з Map
       return res.status(200).json({ 
         success: true, 
         synced: false, 
@@ -1393,6 +1591,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
     // Skip if difference is between -5 and +5 (to avoid syncing small fluctuations)
     if (difference > -5 && difference < 5) {
       console.log(`Difference ${difference > 0 ? '+' : ''}${difference.toFixed(2)} USD is within -5 to +5 threshold, skipping sync`)
+      // finally блок видалить userId з Map
       return res.status(200).json({ 
         success: true, 
         synced: false, 
@@ -1403,12 +1602,45 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
     // Create transaction with difference
     if (!binanceCard.user_id) {
       console.error('Error: Binance card has no user_id')
+      // finally блок видалить userId з Map
       return res.status(500).json({ 
         success: false, 
         synced: false,
         error: 'Binance card has no user_id',
         message: 'Binance card has no user_id. Cannot create transaction without user_id.'
       })
+    }
+
+    // Перевірка на дублікати: шукаємо недавні транзакції Binance Sync з такою ж сумою
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+    const { data: recentTxs, error: checkError } = await supabase
+      .from('transactions')
+      .select('id, amount, created_at')
+      .eq('card_id', binanceCard.id)
+      .eq('category', 'Binance Sync')
+      .eq('user_id', userId)
+      .gte('created_at', fiveMinutesAgo)
+      .order('created_at', { ascending: false })
+      .limit(5)
+    
+    if (checkError) {
+      console.error('[syncBinance] Error checking for duplicates:', checkError)
+    } else if (recentTxs && recentTxs.length > 0) {
+      // Перевірити чи є транзакція з такою ж сумою (з точністю до 0.01)
+      const hasDuplicate = recentTxs.some(tx => {
+        const txAmount = Number(tx.amount || 0)
+        return Math.abs(txAmount - difference) < 0.01
+      })
+      
+      if (hasDuplicate) {
+        console.log(`[syncBinance] Duplicate transaction detected (difference: ${difference.toFixed(2)}), skipping`)
+        // finally блок видалить userId з Map
+        return res.status(200).json({
+          success: true,
+          synced: false,
+          message: 'Duplicate transaction detected, sync skipped'
+        })
+      }
     }
 
     const txPayload = {
@@ -1449,9 +1681,17 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
       delta: difference,
       currency: 'USD'
     })
+    } catch (innerError) {
+      console.error('[syncBinance] Inner error:', innerError)
+      throw innerError // Перекинути помилку до зовнішнього catch
+    } finally {
+      // Завжди видаляти з Map навіть якщо сталася помилка
+      syncBinanceInProgress.delete(userId)
+    }
 
   } catch (error) {
     console.error('Binance sync error:', error)
+    // syncBinanceInProgress.delete вже викликається в finally
     if (error.response) {
       console.error('Binance API error:', error.response.data)
       // Return 200 to not break the app, just log the error

@@ -353,7 +353,15 @@ export default function EarningsChart(){
         ) || []
       } catch (e) {
         // If the DB complains about missing `currency` column, remember it and retry
-        if (hasTxCurrency && e.message?.includes('42703')) {
+        // Check for both error code (42703) and error message text
+        const isCurrencyColumnError = hasTxCurrency && (
+          e.message?.includes('42703') || 
+          e.message?.includes('currency does not exist') ||
+          e.message?.includes('column transactions.currency') ||
+          e.message?.toLowerCase().includes('column') && e.message?.toLowerCase().includes('currency') && e.message?.toLowerCase().includes('not exist')
+        )
+        
+        if (isCurrencyColumnError) {
           console.warn('transactions.currency column missing, disabling currency column for future queries')
           try { localStorage.setItem('wallet:hasTxCurrency', 'false') } catch {}
           setHasTxCurrency(false)

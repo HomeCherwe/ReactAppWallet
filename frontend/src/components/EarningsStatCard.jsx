@@ -1,36 +1,103 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { supabase } from '../lib/supabase'
 import { txBus } from '../utils/txBus'
 import useMonoRates from '../hooks/useMonoRates'
 import { listCards } from '../api/cards'
 import { apiFetch } from '../utils.jsx'
+import { getUserPreferences, updatePreferencesSection } from '../api/preferences'
 
 export default function EarningsStatCard({ title, mode, currency: initialCurrency }) {
   // mode: 'earning' or 'spending'
   const [selectedCurrency, setSelectedCurrency] = useState(initialCurrency || null)
+  const [prefsLoaded, setPrefsLoaded] = useState(false)
   const [loading, setLoading] = useState(true)
   const [total, setTotal] = useState(0)
   const [prevTotal, setPrevTotal] = useState(0)
   const currencies = ['UAH', 'EUR', 'USD', 'USDT']
   const rates = useMonoRates()
+  const saveTimeoutRef = useRef(null)
   const delta = useMemo(() => {
     if (prevTotal === 0) return 0
     return Math.round(((total - prevTotal) / Math.abs(prevTotal)) * 100)
   }, [total, prevTotal])
 
+  // Load preferences from DB on mount
+  useEffect(() => {
+    const loadPreferences = async () => {
+      try {
+        const prefs = await getUserPreferences()
+        if (prefs && prefs.earningsStat) {
+          const modePrefs = prefs.earningsStat[mode]
+          if (modePrefs && modePrefs.currency !== undefined) {
+            setSelectedCurrency(modePrefs.currency || null)
+          }
+        }
+        setPrefsLoaded(true)
+      } catch (e) {
+        console.error('Failed to load earnings stat preferences:', e)
+        setPrefsLoaded(true)
+      }
+    }
+    loadPreferences()
+  }, [mode])
+
+  // Save preferences to DB when changed (with debounce)
+  useEffect(() => {
+    if (!prefsLoaded) return
+
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+    }
+
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        const prefs = await getUserPreferences()
+        const earningsStat = prefs?.earningsStat || {}
+        earningsStat[mode] = {
+          currency: selectedCurrency || null
+        }
+        await updatePreferencesSection('earningsStat', earningsStat)
+      } catch (e) {
+        console.error('Failed to save earnings stat preferences:', e)
+      }
+    }, 500)
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
+  }, [selectedCurrency, prefsLoaded, mode])
+
   useEffect(() => {
     let mounted = true
 
-    // Helper to convert any currency to UAH using Monobank rates
-    const toUAH = (amount, currency) => {
-      if (!currency || currency === 'UAH') return amount
+    // Helper to convert any currency to target currency using Monobank rates
+    // USDT is treated as USD (code 840)
+    const convertCurrency = (amount, fromCurrency, toCurrency) => {
+      if (!fromCurrency || fromCurrency === toCurrency) return amount
+      
       const codeMap = { UAH: 980, USD: 840, EUR: 978, GBP: 826, PLN: 985, USDT: 840 }
-      const code = codeMap[currency]
-      if (!code) return amount
-      const rate = rates[`${code}->980`]
-      if (!rate) return amount
-      return amount * rate
+      const fromCode = codeMap[fromCurrency] || 980
+      const toCode = codeMap[toCurrency] || 980
+      
+      if (fromCode === toCode) return amount
+      
+      // Convert via UAH as intermediate currency
+      // First convert from source currency to UAH
+      let inUAH = amount
+      if (fromCode !== 980) {
+        const rateToUAH = rates[`${fromCode}->980`]
+        if (!rateToUAH) return amount
+        inUAH = amount * rateToUAH
+      }
+      
+      // Then convert from UAH to target currency
+      if (toCode === 980) return inUAH
+      const rateFromUAH = rates[`${toCode}->980`]
+      if (!rateFromUAH) return inUAH
+      return inUAH / rateFromUAH
     }
 
     const fetchData = async () => {
@@ -47,9 +114,11 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
 
         const cardMap = new Map()
         cards.forEach(c => {
-          const isSavings = String(c.bank || '').toLowerCase().includes('збер') || 
-                           String(c.bank || '').toLowerCase().includes('savings')
-          cardMap.set(c.id, { isSavings, currency: (c.currency || 'UAH').toUpperCase() })
+          const bank = String(c.bank || '').toLowerCase()
+          const name = String(c.name || '').toLowerCase()
+          const isSavings = bank.includes('збер') || bank.includes('savings')
+          const isBinance = bank.includes('binance') || name.includes('binance')
+          cardMap.set(c.id, { isSavings, isBinance, currency: (c.currency || 'UAH').toUpperCase() })
         })
 
         // Fetch transactions from this month
@@ -66,12 +135,18 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
           if (tx.is_transfer) continue
           
           // Check if transaction's card is savings
-          const cardInfo = cardMap.get(tx.card_id) || { isSavings: false, currency: 'UAH' }
+          const cardInfo = cardMap.get(tx.card_id) || { isSavings: false, isBinance: false, currency: 'UAH' }
           if (cardInfo.isSavings) continue
+
+          // Skip Binance transactions when calculating ALL to UAH or ALL to EUR
+          const effectiveCurrency = selectedCurrency || 'ALL_UAH'
+          if ((effectiveCurrency === 'ALL_UAH' || effectiveCurrency === 'ALL_EUR') && cardInfo.isBinance) continue
 
           // Check currency match using card currency
           const txCur = cardInfo.currency
-          if (selectedCurrency && txCur !== selectedCurrency) continue
+          
+          // If selectedCurrency is a specific currency (not ALL), filter by it
+          if (effectiveCurrency !== 'ALL_UAH' && effectiveCurrency !== 'ALL_EUR' && txCur !== effectiveCurrency) continue
 
           const amt = Number(tx.amount || 0)
           if (mode === 'spending') {
@@ -88,12 +163,18 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
         for (const tx of allTxs) {
           if (!included.has(tx.id)) continue
           const amt = Math.abs(Number(tx.amount || 0))
-          const cardInfo = cardMap.get(tx.card_id) || { isSavings: false, currency: 'UAH' }
+          const cardInfo = cardMap.get(tx.card_id) || { isSavings: false, isBinance: false, currency: 'UAH' }
           const txCur = cardInfo.currency
-          // If no currency filter, convert all to UAH for combined total
-          if (!selectedCurrency) {
-            currentTotal += toUAH(amt, txCur)
+          // Convert based on selected currency option
+          const effectiveCurrency = selectedCurrency || 'ALL_UAH'
+          if (effectiveCurrency === 'ALL_UAH') {
+            // Convert all to UAH
+            currentTotal += convertCurrency(amt, txCur, 'UAH')
+          } else if (effectiveCurrency === 'ALL_EUR') {
+            // Convert all to EUR
+            currentTotal += convertCurrency(amt, txCur, 'EUR')
           } else {
+            // Show only selected currency (no conversion needed, already filtered)
             currentTotal += amt
           }
         }
@@ -109,11 +190,17 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
             if (tx.archives) continue
             if (tx.is_transfer) continue
             
-            const cardInfo = cardMap.get(tx.card_id) || { isSavings: false, currency: 'UAH' }
+            const cardInfo = cardMap.get(tx.card_id) || { isSavings: false, isBinance: false, currency: 'UAH' }
             if (cardInfo.isSavings) continue
 
+            // Skip Binance transactions when calculating ALL to UAH or ALL to EUR
+            const effectiveCurrency = selectedCurrency || 'ALL_UAH'
+            if ((effectiveCurrency === 'ALL_UAH' || effectiveCurrency === 'ALL_EUR') && cardInfo.isBinance) continue
+
             const txCur = tx.currency ? String(tx.currency).toUpperCase() : cardInfo.currency
-            if (selectedCurrency && txCur !== selectedCurrency) continue
+            
+            // If selectedCurrency is a specific currency (not ALL), filter by it
+            if (effectiveCurrency !== 'ALL_UAH' && effectiveCurrency !== 'ALL_EUR' && txCur !== effectiveCurrency) continue
 
             const amt = Number(tx.amount || 0)
             let addAmt = 0
@@ -122,10 +209,15 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
             } else if (mode === 'earning' && amt > 0) {
               addAmt = amt
             }
-            // If no currency filter, convert all to UAH for combined total
-            if (!selectedCurrency) {
-              prevMonthTotal += toUAH(addAmt, txCur)
+            // Convert based on selected currency option
+            if (effectiveCurrency === 'ALL_UAH') {
+              // Convert all to UAH
+              prevMonthTotal += convertCurrency(addAmt, txCur, 'UAH')
+            } else if (effectiveCurrency === 'ALL_EUR') {
+              // Convert all to EUR
+              prevMonthTotal += convertCurrency(addAmt, txCur, 'EUR')
             } else {
+              // Show only selected currency (no conversion needed, already filtered)
               prevMonthTotal += addAmt
             }
           }
@@ -163,8 +255,36 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
   }, [mode, selectedCurrency, rates])
 
   const badge = delta >= 0 ? 'text-emerald-600' : 'text-rose-600'
-  const displayValue = loading ? '-' : total.toLocaleString()
-  const currencySymbol = selectedCurrency || 'ALL'
+  const displayValue = loading ? '-' : Math.round(total).toLocaleString()
+  const prevDisplayValue = loading ? '-' : Math.round(prevTotal).toLocaleString()
+  
+  // Get month names in Ukrainian
+  const getMonthName = (date) => {
+    const months = [
+      'Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень',
+      'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень'
+    ]
+    return months[date.getMonth()]
+  }
+  
+  const now = new Date()
+  const currentMonth = getMonthName(now)
+  const currentYear = now.getFullYear()
+  const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+  const prevMonth = getMonthName(prevMonthDate)
+  const prevYear = prevMonthDate.getFullYear()
+  
+  // Determine display currency symbol
+  const getCurrencySymbol = () => {
+    if (!selectedCurrency || selectedCurrency === 'ALL_UAH') return 'ALL to UAH'
+    if (selectedCurrency === 'ALL_EUR') return 'ALL to EUR'
+    return selectedCurrency
+  }
+  const currencySymbol = getCurrencySymbol()
+  
+  // Determine color and sign based on mode
+  const amountColor = mode === 'earning' ? 'text-emerald-600' : 'text-rose-600'
+  const amountSign = mode === 'earning' ? '+' : '-'
   
   return (
     <motion.div
@@ -177,21 +297,46 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
         <div className="text-sm text-gray-500">{title}</div>
         <select 
           className="text-xs border border-gray-200 rounded px-2 py-0.5 bg-white"
-          value={selectedCurrency || ''}
-          onChange={(e) => setSelectedCurrency(e.target.value || null)}
+          value={selectedCurrency || 'ALL_UAH'}
+          onChange={(e) => {
+            const val = e.target.value
+            setSelectedCurrency(val === 'ALL_UAH' ? null : (val || null))
+          }}
         >
-          <option value="">ALL</option>
+          <option value="ALL_UAH">ALL to UAH</option>
+          <option value="ALL_EUR">ALL to EUR</option>
           {currencies.map(c => (
             <option key={c} value={c}>{c}</option>
           ))}
         </select>
       </div>
-      <div className="text-[28px] sm:text-3xl font-bold">
-        {displayValue} <span className="text-lg text-gray-500">{currencySymbol}</span>
+      
+      {/* Current month label */}
+      <div className="text-xs text-gray-400 mb-1">
+        {currentMonth} {currentYear}
       </div>
+      
+      {/* Current month amount */}
+      <div className={`text-[28px] sm:text-3xl font-bold ${amountColor}`}>
+        {loading ? '-' : `${amountSign}${displayValue}`} <span className="text-lg text-gray-500">{currencySymbol}</span>
+      </div>
+      
+      {/* Delta percentage */}
       {!loading && (
         <div className={`mt-1 text-xs ${badge}`}>
           {delta > 0 ? '+' : ''}{delta}% vs last month
+        </div>
+      )}
+      
+      {/* Previous month result */}
+      {!loading && prevTotal !== 0 && (
+        <div className="mt-2 pt-2 border-t border-gray-100">
+          <div className="text-xs text-gray-400 mb-1">
+            {prevMonth} {prevYear}
+          </div>
+          <div className={`text-lg font-semibold ${amountColor}`}>
+            {amountSign}{prevDisplayValue} <span className="text-sm text-gray-500">{currencySymbol}</span>
+          </div>
         </div>
       )}
     </motion.div>

@@ -2,11 +2,13 @@ import { supabase } from '../lib/supabase'
 import { getCachedSumByCard, invalidateSumByCardCache } from '../utils/dataCache'
 import { apiFetch } from '../utils.jsx'
 
-export async function listTransactions({ from = 0, to = 9, search = '' } = {}) {
+export async function listTransactions({ from = 0, to = 9, search = '', transactionType = 'all', category = '' } = {}) {
   const params = new URLSearchParams({
     from: from.toString(),
     to: to.toString(),
-    ...(search && { search })
+    ...(search && { search }),
+    ...(transactionType && transactionType !== 'all' && { transaction_type: transactionType }),
+    ...(category && { category })
   })
 
   return await apiFetch(`/api/transactions?${params}`)
@@ -50,6 +52,22 @@ export async function archiveTransaction(id) {
   
   // Інвалідувати кеш sum by card після архівації транзакції
   invalidateSumByCardCache()
+}
+
+export async function deleteTransactions(ids) {
+  if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    throw new Error('ids array is required')
+  }
+  
+  const data = await apiFetch('/api/transactions/bulk-delete', {
+    method: 'POST',
+    body: JSON.stringify({ ids })
+  })
+  
+  // Інвалідувати кеш sum by card після видалення транзакцій
+  invalidateSumByCardCache()
+  
+  return data
 }
 
 

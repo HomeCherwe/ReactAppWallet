@@ -1,19 +1,29 @@
 import { fmtDate, fmtAmount } from '../../utils/format'
 import { Trash2, Info } from 'lucide-react'
 
-export default function Row({ tx, currency, onDetails, onAskDelete, onEdit }) {
+export default function Row({ tx, currency, onDetails, onAskDelete, onEdit, selected, onSelect }) {
   const isExp = Number(tx.amount) < 0
   const bg = isExp ? 'bg-rose-500/10' : 'bg-emerald-500/10'
   const hover = isExp ? 'hover:bg-rose-500/20' : 'hover:bg-emerald-500/20'
 
   return (
     <div 
-      className={`flex items-center justify-between p-3 rounded-xl transition ${bg} ${hover}`}
+      className={`flex items-center justify-between p-3 rounded-xl transition ${bg} ${hover} ${selected ? 'ring-2 ring-indigo-500' : ''} ${onDetails ? 'cursor-pointer' : ''}`}
       style={{
         boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06)'
       }}
+      onClick={onDetails ? () => onDetails(tx, currency) : undefined}
     >
       <div className="flex items-center gap-3">
+        {onSelect && (
+          <input
+            type="checkbox"
+            checked={selected || false}
+            onChange={(e) => onSelect(tx.id, e.target.checked)}
+            className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+            onClick={(e) => e.stopPropagation()}
+          />
+        )}
         <div>
           <div className="font-semibold text-sm">{tx.category || 'Без категорії'}</div>
           <div className="text-xs text-gray-500">
@@ -28,7 +38,10 @@ export default function Row({ tx, currency, onDetails, onAskDelete, onEdit }) {
         </div>
 
         <button
-          onClick={() => onAskDelete(tx)}
+          onClick={(e) => {
+            e.stopPropagation()
+            onAskDelete(tx)
+          }}
           className="h-9 w-9 sm:h-7 sm:w-7 rounded-full bg-rose-500/10 hover:bg-rose-500/20 grid place-items-center text-rose-600"
           title="Видалити"
         >
@@ -36,7 +49,10 @@ export default function Row({ tx, currency, onDetails, onAskDelete, onEdit }) {
         </button>
 
         <button
-          onClick={() => onDetails(tx, currency)}
+          onClick={(e) => {
+            e.stopPropagation()
+            onDetails(tx, currency)
+          }}
           className="h-9 w-9 sm:h-7 sm:w-7 rounded-full bg-gray-200/70 hover:bg-gray-300 grid place-items-center text-gray-700"
           title="Деталі"
         >
@@ -44,7 +60,10 @@ export default function Row({ tx, currency, onDetails, onAskDelete, onEdit }) {
         </button>
 
         <button
-          onClick={() => onEdit(tx)}
+          onClick={(e) => {
+            e.stopPropagation()
+            onEdit(tx)
+          }}
           className="h-9 w-9 sm:h-7 sm:w-7 rounded-full bg-amber-500/10 hover:bg-amber-500/20 grid place-items-center text-amber-600"
           title="Редагувати"
         >

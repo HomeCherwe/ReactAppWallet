@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { supabase, cacheUser, getUserCacheStats } from './lib/supabase'
 import Sidebar from './components/Sidebar.jsx'
@@ -16,6 +16,7 @@ export default function App(){
   const [loading, setLoading] = useState(true)
   const [syncLoading, setSyncLoading] = useState(false)
   const [initialDataLoading, setInitialDataLoading] = useState(true)
+  const loadedUserIdRef = useRef(null)
 
   // Check authentication state and handle OAuth callback
   useEffect(() => {
@@ -85,6 +86,15 @@ export default function App(){
     if (!session) {
       // If no session, still allow components to load (for non-authenticated users)
       setInitialDataLoading(false)
+      loadedUserIdRef.current = null
+      return
+    }
+
+    const currentUserId = session.user?.id
+    
+    // If data is already loaded for this user, do not reload
+    if (loadedUserIdRef.current === currentUserId) {
+      setInitialDataLoading(false)
       return
     }
 
@@ -129,6 +139,7 @@ export default function App(){
         await Promise.all(dataPromises)
         
         console.log('All initial data loaded')
+        loadedUserIdRef.current = currentUserId // Mark user as loaded
       } catch (error) {
         console.error('Error loading initial data:', error)
       } finally {
@@ -138,7 +149,7 @@ export default function App(){
     }
 
     loadAllData()
-  }, [session])
+  }, [session]) // Dependency on session to re-run if user changes
 
   // Логування статистики кешу після повного завантаження
   useEffect(() => {

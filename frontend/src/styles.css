@@ -49,3 +49,6 @@ body { font-family: theme('fontFamily.inter'); }
 .btn-soft {
   @apply bg-white hover:bg-gray-50 border border-gray-200;
 }
+.btn-danger {
+  @apply bg-rose-500 text-white hover:bg-rose-600 active:scale-[0.98];
+}
