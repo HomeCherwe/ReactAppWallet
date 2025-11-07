@@ -4,6 +4,7 @@ import { supabase, cacheUser, getUserCacheStats } from './lib/supabase'
 import Sidebar from './components/Sidebar.jsx'
 import DashboardPage from './pages/DashboardPage'
 import ProfilePage from './pages/ProfilePage'
+import AnalyticsPage from './pages/AnalyticsPage'
 import Auth from './components/Auth'
 import { txBus } from './utils/txBus'
 import { getApiUrl, apiFetch } from './utils.jsx'
@@ -208,6 +209,11 @@ export default function App(){
         <Routes>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/analytics" element={
+            <div className="lg:col-span-2">
+              <AnalyticsPage />
+            </div>
+          } />
           <Route path="/profile" element={
             <div className="lg:col-span-2">
               <ProfilePage />
