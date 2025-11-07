@@ -161,10 +161,23 @@ export default function CategoryPieChart() {
     }).catch(() => {})
   }, [])
 
-  // Завантажуємо дані по категоріям
+  // Захист від дублювання через AbortController
+  const abortControllerRef = useRef(null)
+
+  // Завантажуємо дані по категоріях
   useEffect(() => {
+    // Скасовуємо попередній запит, якщо він є
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    
+    // Створюємо новий AbortController
+    const abortController = new AbortController()
+    abortControllerRef.current = abortController
+
     const fetchData = async () => {
       setLoading(true)
+      
       try {
         const startDate = period.start.toISOString().split('T')[0]
         const endDate = period.end.toISOString().split('T')[0]
@@ -175,7 +188,15 @@ export default function CategoryPieChart() {
           fields: 'id,amount,category,card_id,created_at,card,is_transfer,is_savings'
         })
 
-        const transactions = await apiFetch(`/api/transactions?${params}`)
+        // Перевіряємо перед виконанням запиту
+        if (abortController.signal.aborted) return
+        
+        const transactions = await apiFetch(`/api/transactions?${params}`, {
+          signal: abortController.signal
+        })
+        
+        // Перевіряємо після отримання відповіді
+        if (abortController.signal.aborted) return
         
         // Фільтруємо трансфери, Binance та Savings транзакції
         const filteredTransactions = transactions.filter(tx => {
@@ -300,12 +321,22 @@ export default function CategoryPieChart() {
         console.error('Failed to fetch category data:', error)
         setData({ expenses: [], incomes: [] })
       } finally {
-        setLoading(false)
+        if (!abortController.signal.aborted) {
+          setLoading(false)
+        }
       }
     }
 
     fetchData()
-  }, [period, cardMap, rates, customMode, appliedCustomDates])
+    
+    // Cleanup function
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+        abortControllerRef.current = null
+      }
+    }
+  }, [period.start.toISOString(), period.end.toISOString(), Object.keys(cardMap).join(','), rates ? Object.keys(rates).join(',') : ''])
 
   const handlePeriodChange = (direction) => {
     const newDate = new Date(currentDate)

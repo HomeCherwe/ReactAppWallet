@@ -103,6 +103,68 @@ async function getUserFromToken(req, res, next) {
   }
 }
 
+// Middleware для аутентифікації через API Key
+async function getUserFromApiKey(req, res, next) {
+  try {
+    const apiKey = req.headers['x-api-key'] || req.body?.api_key || req.query?.api_key
+    
+    if (!apiKey) {
+      return res.status(401).json({ error: 'API key required. Use X-API-Key header or api_key in body/query' })
+    }
+    
+    // Шукаємо користувача за API key в user_preferences
+    // API key зберігається в apis.api_key
+    const { data: prefsList, error } = await supabase
+      .from('user_preferences')
+      .select('user_id, apis')
+    
+    if (error) {
+      console.error('[getUserFromApiKey] Database error:', error)
+      return res.status(500).json({ error: 'Database error while checking API key' })
+    }
+    
+    // Знаходимо користувача з відповідним API key
+    const userPrefs = prefsList?.find(pref => {
+      try {
+        const apis = typeof pref.apis === 'string' ? JSON.parse(pref.apis) : (pref.apis || {})
+        return apis.api_key === apiKey
+      } catch {
+        return false
+      }
+    })
+    
+    if (!userPrefs) {
+      return res.status(401).json({ error: 'Invalid API key' })
+    }
+    
+    req.user_id = userPrefs.user_id
+    req.user = { id: userPrefs.user_id }
+    console.log(`[getUserFromApiKey] Authenticated user_id: ${req.user_id}`)
+    next()
+  } catch (error) {
+    console.error('[getUserFromApiKey] Error:', error)
+    return res.status(401).json({ error: 'Authentication failed', details: error.message })
+  }
+}
+
+// Комбінована middleware - приймає або JWT або API Key
+async function getUserFromTokenOrApiKey(req, res, next) {
+  const token = req.headers.authorization?.replace('Bearer ', '') || req.body?.token || req.query?.token
+  const apiKey = req.headers['x-api-key'] || req.body?.api_key || req.query?.api_key
+  
+  if (apiKey) {
+    // Використати API Key аутентифікацію
+    return getUserFromApiKey(req, res, next)
+  } else if (token) {
+    // Використати JWT аутентифікацію
+    return getUserFromToken(req, res, next)
+  } else {
+    return res.status(401).json({ 
+      error: 'Authentication required. Provide JWT token (Authorization: Bearer <token>) or API key (X-API-Key header)' 
+    })
+  }
+}
+
 // Опціональна middleware (для endpoints що не потребують авторизації)
 async function optionalAuth(req, res, next) {
   try {
@@ -1099,8 +1161,116 @@ async function postNewCheckMonoBank(amount, note, card, id, date, userId) {
   return data
 }
 
-// POST /api/syncMonoBank
-app.post('/api/syncMonoBank', getUserFromToken, async function (req, res) {
+// POST /api/generate-api-key - Генерація API Key для користувача
+app.post('/api/generate-api-key', getUserFromToken, async function (req, res) {
+  try {
+    // Генеруємо випадковий API key (64 символи)
+    const apiKey = crypto.randomBytes(32).toString('hex')
+    
+    // Отримуємо поточні налаштування користувача
+    const { data: prefs, error: prefsError } = await supabase
+      .from('user_preferences')
+      .select('apis')
+      .eq('user_id', req.user_id)
+      .single()
+    
+    if (prefsError && prefsError.code !== 'PGRST116') {
+      console.error('[generate-api-key] Error fetching preferences:', prefsError)
+      return res.status(500).json({ 
+        success: false, 
+        error: 'Failed to fetch user preferences' 
+      })
+    }
+    
+    // Оновлюємо API key в налаштуваннях
+    // Обробляємо випадок, коли apis може бути JSON рядком
+    let APIs = {}
+    if (prefs?.apis) {
+      try {
+        APIs = typeof prefs.apis === 'string' ? JSON.parse(prefs.apis) : prefs.apis
+      } catch {
+        APIs = {}
+      }
+    }
+    APIs.api_key = apiKey
+    
+    const { error: updateError } = await supabase
+      .from('user_preferences')
+      .upsert({
+        user_id: req.user_id,
+        apis: APIs
+      }, {
+        onConflict: 'user_id'
+      })
+    
+    if (updateError) {
+      console.error('[generate-api-key] Error updating preferences:', updateError)
+      return res.status(500).json({ 
+        success: false, 
+        error: 'Failed to save API key' 
+      })
+    }
+    
+    console.log(`[generate-api-key] Generated API key for user ${req.user_id}`)
+    
+    res.status(200).json({
+      success: true,
+      api_key: apiKey,
+      message: 'API key generated successfully. Save it securely!'
+    })
+  } catch (error) {
+    console.error('[generate-api-key] Error:', error)
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Failed to generate API key' 
+    })
+  }
+})
+
+// GET /api/api-key - Отримати поточний API Key користувача
+app.get('/api/api-key', getUserFromToken, async function (req, res) {
+  try {
+    const { data: prefs, error: prefsError } = await supabase
+      .from('user_preferences')
+      .select('apis')
+      .eq('user_id', req.user_id)
+      .single()
+    
+    if (prefsError && prefsError.code !== 'PGRST116') {
+      console.error('[get-api-key] Error fetching preferences:', prefsError)
+      return res.status(500).json({ 
+        success: false, 
+        error: 'Failed to fetch user preferences' 
+      })
+    }
+    
+    // Обробляємо випадок, коли apis може бути JSON рядком
+    let APIs = {}
+    if (prefs?.apis) {
+      try {
+        APIs = typeof prefs.apis === 'string' ? JSON.parse(prefs.apis) : prefs.apis
+      } catch {
+        APIs = {}
+      }
+    }
+    const apiKey = APIs.api_key || null
+    
+    res.status(200).json({
+      success: true,
+      has_api_key: !!apiKey,
+      api_key: apiKey // Повертаємо null якщо немає ключа
+    })
+  } catch (error) {
+    console.error('[get-api-key] Error:', error)
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Failed to get API key' 
+    })
+  }
+})
+
+// POST /api/syncMonoBank - Підтримує як JWT так і API Key
+app.post('/api/syncMonoBank', getUserFromTokenOrApiKey, async function (req, res) {
   if (!req.body) return res.status(400).json({ success: false, error: 'Bad request: No body provided' })
 
   // Get API keys from database instead of .env
@@ -1245,6 +1415,21 @@ const syncBinanceInProgress = new Map() // user_id -> timestamp
 
 // POST /api/syncBinance
 app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
+  const SYNC_TIMEOUT = 30000 // 30 seconds total timeout
+  let timeoutId = null
+  let responseSent = false
+  
+  // Helper function to send response only once
+  const sendResponse = (status, data) => {
+    if (responseSent) return
+    responseSent = true
+    if (timeoutId) {
+      clearTimeout(timeoutId)
+      timeoutId = null
+    }
+    res.status(status).json(data)
+  }
+  
   try {
     const userId = req.user_id
     const now = Date.now()
@@ -1253,7 +1438,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
     const lastSync = syncBinanceInProgress.get(userId)
     if (lastSync && (now - lastSync) < 30000) { // 30 секунд мінімальний інтервал
       console.log(`[syncBinance] Sync already in progress for user ${userId}, skipping`)
-      return res.status(200).json({
+      return sendResponse(200, {
         success: true,
         synced: false,
         message: 'Sync already in progress, please wait'
@@ -1263,7 +1448,9 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
     // Позначити що синхронізація почалася
     syncBinanceInProgress.set(userId, now)
     
-    try {
+    // Створюємо Promise з timeout
+    const syncPromise = (async () => {
+      try {
       console.log(`[syncBinance] Starting sync for user_id: ${userId}`)
       
       // Get API keys from database instead of .env
@@ -1282,7 +1469,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
     
     if (prefsError && prefsError.code !== 'PGRST116') {
       console.error('[syncBinance] Error fetching apis:', prefsError)
-      return res.status(500).json({ 
+      return sendResponse(500, { 
         success: false, 
         synced: false, 
         message: 'Failed to fetch API keys from database' 
@@ -1320,7 +1507,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
         envApiSecret: !!process.env.BINANCE_API_SECRET
       })
       // finally блок видалить userId з Map
-      return res.status(200).json({ 
+      return sendResponse(200, { 
         success: true, 
         synced: false, 
         message: 'Binance sync skipped: API keys not configured. Please add API keys in Profile settings.' 
@@ -1347,7 +1534,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
         
         // If it's an RLS error, provide helpful message
         if (cardsError.code === '42501' || cardsError.message?.includes('row-level security')) {
-          return res.status(500).json({ 
+          return sendResponse(500, { 
             success: false, 
             synced: false,
             error: 'RLS policy violation',
@@ -1355,7 +1542,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
           })
         }
         
-        return res.status(500).json({ 
+        return sendResponse(500, { 
           success: false, 
           synced: false,
           error: `Database error: ${cardsError.message}`,
@@ -1370,7 +1557,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
         if (!isServiceRole) {
           console.log('⚠️  Using ANON_KEY: This might be due to RLS policies blocking access. Consider using SERVICE_ROLE_KEY.')
         }
-        return res.status(200).json({ 
+        return sendResponse(200, { 
           success: true, 
           synced: false, 
           message: 'Binance sync skipped: No cards found in database. Please create a Binance Spot card first.' 
@@ -1439,7 +1626,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
       if (!binanceCard) {
         const cardsList = allCards.map(c => `"${c.bank || '(no bank)'} ${c.name || '(no name)'}"`).join(', ')
         console.log(`Binance Spot card not found. Available cards: ${cardsList}`)
-        return res.status(200).json({ 
+        return sendResponse(200, { 
           success: true, 
           synced: false, 
           message: `Binance sync skipped: Binance Spot card not found in database. Available cards: ${cardsList}` 
@@ -1447,7 +1634,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
       }
     } catch (error) {
       console.error('Error finding Binance Spot card:', error)
-      return res.status(500).json({ 
+      return sendResponse(500, { 
         success: false, 
         synced: false,
         error: `Database error: ${error.message}`,
@@ -1469,7 +1656,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
       
       if (txError) {
         console.error('Error fetching transactions:', txError)
-        return res.status(500).json({ 
+        return sendResponse(500, { 
           success: false, 
           synced: false,
           error: `Database error: ${txError.message}`,
@@ -1488,7 +1675,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
       console.log(`Total DB balance: ${dbBalance}`)
     } catch (error) {
       console.error('Error calculating balance:', error)
-      return res.status(500).json({ 
+      return sendResponse(500, { 
         success: false, 
         synced: false,
         error: `Error calculating balance: ${error.message}`,
@@ -1503,14 +1690,38 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
 
     const url = `https://api.binance.com/api/v3/account?${queryString}&signature=${signature}`
 
-    const response = await axios.get(url, {
-      headers: {
-        'X-MBX-APIKEY': apiKey
+    let response
+    try {
+      response = await axios.get(url, {
+        headers: {
+          'X-MBX-APIKEY': apiKey
+        },
+        timeout: 15000 // 15 seconds timeout
+      })
+    } catch (axiosError) {
+      // Handle network errors (timeout, connection issues)
+      if (axiosError.code === 'ETIMEDOUT' || axiosError.code === 'ECONNABORTED') {
+        console.error('[syncBinance] Binance API request timeout')
+        return sendResponse(200, { 
+          success: false, 
+          synced: false, 
+          message: 'Binance sync failed: Request timeout. Please check your internet connection and try again later.' 
+        })
       }
-    })
+      if (axiosError.code === 'ENOTFOUND' || axiosError.code === 'ECONNREFUSED') {
+        console.error('[syncBinance] Binance API connection error:', axiosError.code)
+        return sendResponse(200, { 
+          success: false, 
+          synced: false, 
+          message: 'Binance sync failed: Cannot connect to Binance API. Please check your internet connection.' 
+        })
+      }
+      // Re-throw other errors to be handled by outer catch
+      throw axiosError
+    }
 
     if (!response.data || !response.data.balances) {
-      return res.status(500).json({ 
+      return sendResponse(500, { 
         success: false, 
         synced: false,
         error: 'Invalid response from Binance API',
@@ -1526,7 +1737,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
 
     if (allBalances.length === 0) {
       console.log('No balances found on Binance')
-      return res.status(200).json({ 
+      return sendResponse(200, { 
         success: true, 
         synced: false, 
         message: 'Binance sync skipped: No balances found on Binance' 
@@ -1536,7 +1747,33 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
     console.log(`Found ${allBalances.length} coins with balance:`, allBalances.map(b => b.asset).join(', '))
 
     // Get prices for all coins in USDT
-    const pricesResponse = await axios.get('https://api.binance.com/api/v3/ticker/price')
+    let pricesResponse
+    try {
+      pricesResponse = await axios.get('https://api.binance.com/api/v3/ticker/price', {
+        timeout: 15000 // 15 seconds timeout
+      })
+    } catch (axiosError) {
+      // Handle network errors (timeout, connection issues)
+      if (axiosError.code === 'ETIMEDOUT' || axiosError.code === 'ECONNABORTED') {
+        console.error('[syncBinance] Binance prices API request timeout')
+        return sendResponse(200, { 
+          success: false, 
+          synced: false, 
+          message: 'Binance sync failed: Request timeout while fetching prices. Please check your internet connection and try again later.' 
+        })
+      }
+      if (axiosError.code === 'ENOTFOUND' || axiosError.code === 'ECONNREFUSED') {
+        console.error('[syncBinance] Binance prices API connection error:', axiosError.code)
+        return sendResponse(200, { 
+          success: false, 
+          synced: false, 
+          message: 'Binance sync failed: Cannot connect to Binance API to fetch prices. Please check your internet connection.' 
+        })
+      }
+      // Re-throw other errors to be handled by outer catch
+      throw axiosError
+    }
+    
     const prices = {}
     pricesResponse.data.forEach(p => {
       prices[p.symbol] = Number(p.price)
@@ -1592,7 +1829,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
     if (difference > -5 && difference < 5) {
       console.log(`Difference ${difference > 0 ? '+' : ''}${difference.toFixed(2)} USD is within -5 to +5 threshold, skipping sync`)
       // finally блок видалить userId з Map
-      return res.status(200).json({ 
+      return sendResponse(200, { 
         success: true, 
         synced: false, 
         message: `Difference too small (${difference > 0 ? '+' : ''}${difference.toFixed(2)} USD), sync skipped` 
@@ -1603,7 +1840,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
     if (!binanceCard.user_id) {
       console.error('Error: Binance card has no user_id')
       // finally блок видалить userId з Map
-      return res.status(500).json({ 
+      return sendResponse(500, { 
         success: false, 
         synced: false,
         error: 'Binance card has no user_id',
@@ -1635,7 +1872,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
       if (hasDuplicate) {
         console.log(`[syncBinance] Duplicate transaction detected (difference: ${difference.toFixed(2)}), skipping`)
         // finally блок видалить userId з Map
-        return res.status(200).json({
+        return sendResponse(200, {
           success: true,
           synced: false,
           message: 'Duplicate transaction detected, sync skipped'
@@ -1663,7 +1900,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
 
     if (txError) {
       console.error('Error creating transaction:', txError)
-      return res.status(500).json({ 
+      return sendResponse(500, { 
         success: false, 
         synced: false,
         error: 'Failed to create sync transaction',
@@ -1673,7 +1910,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
 
     console.log(`Sync transaction created: ${newTx.id}, amount: ${difference}`)
 
-    return res.status(200).json({
+    return sendResponse(200, {
       success: true,
       synced: true,
       message: `Synced successfully: ${difference > 0 ? '+' : ''}${difference.toFixed(2)} USD`,
@@ -1681,30 +1918,83 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
       delta: difference,
       currency: 'USD'
     })
-    } catch (innerError) {
-      console.error('[syncBinance] Inner error:', innerError)
-      throw innerError // Перекинути помилку до зовнішнього catch
+      } catch (innerError) {
+        console.error('[syncBinance] Inner error:', innerError)
+        throw innerError // Перекинути помилку до зовнішнього catch
+      } finally {
+        // Завжди видаляти з Map навіть якщо сталася помилка
+        syncBinanceInProgress.delete(userId)
+      }
+    })()
+    
+    // Створюємо timeout Promise
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error('Sync timeout: Operation took too long'))
+      }, SYNC_TIMEOUT)
+    })
+    
+    // Виконуємо sync з timeout
+    try {
+      await Promise.race([syncPromise, timeoutPromise])
+    } catch (error) {
+      // Якщо це timeout, повертаємо відповідь
+      if (error.message === 'Sync timeout: Operation took too long') {
+        console.error('[syncBinance] Sync timeout after', SYNC_TIMEOUT, 'ms')
+        syncBinanceInProgress.delete(userId)
+        return sendResponse(200, {
+          success: false,
+          synced: false,
+          message: 'Binance sync timeout: Operation took too long. Please try again later.'
+        })
+      }
+      // Інакше перекидаємо помилку
+      throw error
     } finally {
-      // Завжди видаляти з Map навіть якщо сталася помилка
-      syncBinanceInProgress.delete(userId)
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+      }
     }
 
   } catch (error) {
     console.error('Binance sync error:', error)
     // syncBinanceInProgress.delete вже викликається в finally
+    
+    // Handle Axios errors
     if (error.response) {
       console.error('Binance API error:', error.response.data)
       // Return 200 to not break the app, just log the error
-      return res.status(200).json({ 
+      return sendResponse(200, { 
         success: false, 
         synced: false, 
         message: `Binance sync failed: ${error.response.data?.msg || error.message}` 
       })
     }
-    return res.status(200).json({ 
+    
+    // Handle network errors (timeout, connection issues)
+    if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
+      console.error('[syncBinance] Network timeout error:', error.code)
+      return sendResponse(200, { 
+        success: false, 
+        synced: false, 
+        message: 'Binance sync failed: Request timeout. Please check your internet connection and try again later.' 
+      })
+    }
+    
+    if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+      console.error('[syncBinance] Network connection error:', error.code)
+      return sendResponse(200, { 
+        success: false, 
+        synced: false, 
+        message: 'Binance sync failed: Cannot connect to Binance API. Please check your internet connection.' 
+      })
+    }
+    
+    // Generic error handler
+    return sendResponse(200, { 
       success: false, 
       synced: false, 
-      message: `Binance sync failed: ${error.message}` 
+      message: `Binance sync failed: ${error.message || 'Unknown error'}` 
     })
   }
 })

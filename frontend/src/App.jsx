@@ -18,6 +18,8 @@ export default function App(){
   const [syncLoading, setSyncLoading] = useState(false)
   const [initialDataLoading, setInitialDataLoading] = useState(true)
   const loadedUserIdRef = useRef(null)
+  const syncInProgressRef = useRef(false)
+  const abortControllerRef = useRef(null)
 
   // Check authentication state and handle OAuth callback
   useEffect(() => {
@@ -88,10 +90,20 @@ export default function App(){
       // If no session, still allow components to load (for non-authenticated users)
       setInitialDataLoading(false)
       loadedUserIdRef.current = null
+      syncInProgressRef.current = false
+      // Cancel any pending requests
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+        abortControllerRef.current = null
+      }
       return
     }
 
     const currentUserId = session.user?.id
+    
+    if (!currentUserId) {
+      return
+    }
     
     // If data is already loaded for this user, do not reload
     if (loadedUserIdRef.current === currentUserId) {
@@ -99,15 +111,43 @@ export default function App(){
       return
     }
 
+    // If sync is already in progress, skip
+    if (syncInProgressRef.current) {
+      console.log('Sync already in progress, skipping duplicate call')
+      return
+    }
+
+    // Cancel any previous pending requests
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+
+    // Create new AbortController for this request
+    const abortController = new AbortController()
+    abortControllerRef.current = abortController
+
     const loadAllData = async () => {
       try {
+        // Mark as in progress and mark user as loading BEFORE starting
+        syncInProgressRef.current = true
+        loadedUserIdRef.current = currentUserId
         setSyncLoading(true)
         setInitialDataLoading(true)
 
-        // Sync Binance first
-        const syncBinancePromise = apiFetch('/api/syncBinance', {
-          method: 'POST'
-        }).then(response => {
+        // Sync Binance with timeout to prevent hanging
+        const syncBinancePromise = Promise.race([
+          apiFetch('/api/syncBinance', {
+            method: 'POST',
+            signal: abortController.signal
+          }),
+          new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Sync timeout')), 20000) // 20 seconds timeout
+          })
+        ]).then(response => {
+          // Check if request was aborted
+          if (abortController.signal.aborted) {
+            return null
+          }
           const data = response || {}
           if (data.success && data.synced) {
             console.log('Binance synced:', data.message)
@@ -123,6 +163,14 @@ export default function App(){
           }
           return data
         }).catch(error => {
+          // Ignore abort errors and timeout
+          if (error.name === 'AbortError' || abortController.signal.aborted) {
+            return null
+          }
+          if (error.message === 'Sync timeout') {
+            console.warn('Binance sync timeout after 20s, continuing without sync')
+            return null
+          }
           console.error('Binance sync failed:', error.message)
           return null
         })
@@ -130,27 +178,65 @@ export default function App(){
         // Load all critical data in parallel
         const dataPromises = [
           syncBinancePromise,
-          listCards().catch(e => { console.error('listCards error:', e); return [] }),
-          sumTransactionsByCard().catch(e => { console.error('sumTransactionsByCard error:', e); return {} }),
-          fetchTotalsByBucket().catch(e => { console.error('fetchTotalsByBucket error:', e); return { cash: {}, cards: {}, savings: {} } }),
-          listTransactions({ from: 0, to: 9, search: '' }).catch(e => { console.error('listTransactions error:', e); return [] })
+          listCards().catch(e => { 
+            if (abortController.signal.aborted) return []
+            console.error('listCards error:', e); 
+            return [] 
+          }),
+          sumTransactionsByCard().catch(e => { 
+            if (abortController.signal.aborted) return {}
+            console.error('sumTransactionsByCard error:', e); 
+            return {} 
+          }),
+          fetchTotalsByBucket().catch(e => { 
+            if (abortController.signal.aborted) return { cash: {}, cards: {}, savings: {} }
+            console.error('fetchTotalsByBucket error:', e); 
+            return { cash: {}, cards: {}, savings: {} } 
+          }),
+          listTransactions({ from: 0, to: 9, search: '' }).catch(e => { 
+            if (abortController.signal.aborted) return []
+            console.error('listTransactions error:', e); 
+            return [] 
+          })
         ]
 
-        // Wait for all promises to complete (including the last one)
+        // Wait for all promises to complete (including syncBinance)
         await Promise.all(dataPromises)
         
+        // Check if request was aborted before completing
+        if (abortController.signal.aborted) {
+          return
+        }
+        
         console.log('All initial data loaded')
-        loadedUserIdRef.current = currentUserId // Mark user as loaded
       } catch (error) {
+        // Ignore abort errors
+        if (error.name === 'AbortError' || abortController.signal.aborted) {
+          return
+        }
         console.error('Error loading initial data:', error)
       } finally {
-        setSyncLoading(false)
-        setInitialDataLoading(false)
+        // Only reset if this is still the current request
+        if (!abortController.signal.aborted) {
+          setSyncLoading(false)
+          setInitialDataLoading(false)
+          syncInProgressRef.current = false
+          abortControllerRef.current = null
+        }
       }
     }
 
     loadAllData()
-  }, [session]) // Dependency on session to re-run if user changes
+
+    // Cleanup function to abort request if component unmounts or effect re-runs
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+        abortControllerRef.current = null
+      }
+      syncInProgressRef.current = false
+    }
+  }, [session?.user?.id]) // Dependency on user ID to re-run only if user changes
 
   // Логування статистики кешу після повного завантаження
   useEffect(() => {

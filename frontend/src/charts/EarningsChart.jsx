@@ -284,6 +284,9 @@ export default function EarningsChart(){
   const [editOpen, setEditOpen] = useState(false)
   const [editTx, setEditTx] = useState(null)
   const chartContainerRef = useRef(null)
+  
+  // Захист від дублювання через AbortController
+  const abortControllerRef = useRef(null)
 
   // Total for visible period (sum of bars)
   const periodTotal = useMemo(() => {
@@ -330,11 +333,21 @@ export default function EarningsChart(){
   useChartSync(txs, mode, appliedFrom, appliedTo, currency, animKey, setDisplayData, prevAnimKeyRef, setChartKey)
 
   const fetchData = async ({ showLoading = true } = {}) => {
-    if (showLoading) setLoading(true)
-    try {
-      const fromTs = new Date(from).toISOString()
-      const toTs = new Date(new Date(to).getTime() + 24*60*60*1000 - 1).toISOString()
+    // Скасовуємо попередній запит, якщо він є
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    
+    // Створюємо новий AbortController
+    const abortController = new AbortController()
+    abortControllerRef.current = abortController
 
+    if (showLoading) setLoading(true)
+    
+    const fromTs = new Date(from).toISOString()
+    const toTs = new Date(new Date(to).getTime() + 24*60*60*1000 - 1).toISOString()
+    
+    try {
       // Try selecting currency directly from transactions. Some DB schemas may not have
       // `transactions.currency` yet; if the RPC returns a 42703 (column not found),
       // fall back to fetching transactions without the column and then fetch card
@@ -346,11 +359,18 @@ export default function EarningsChart(){
         ? 'id,amount,created_at,category,note,is_transfer,count_as_income,transfer_role,card_id,currency,card,archives'
         : 'id,amount,created_at,category,note,is_transfer,count_as_income,transfer_role,card_id,card,archives'
 
+      // Перевіряємо перед виконанням запиту
+      if (abortController.signal.aborted) return
+
       let data
       try {
         data = await apiFetch(
-          `/api/transactions?start_date=${fromTs}&end_date=${toTs}&fields=${fields}&order_by=created_at&order_asc=true`
+          `/api/transactions?start_date=${fromTs}&end_date=${toTs}&fields=${fields}&order_by=created_at&order_asc=true`,
+          { signal: abortController.signal }
         ) || []
+        
+        // Перевіряємо після отримання відповіді
+        if (abortController.signal.aborted) return
       } catch (e) {
         // If the DB complains about missing `currency` column, remember it and retry
         // Check for both error code (42703) and error message text
@@ -366,21 +386,35 @@ export default function EarningsChart(){
           try { localStorage.setItem('wallet:hasTxCurrency', 'false') } catch {}
           setHasTxCurrency(false)
 
+          // Перевіряємо перед повторним запитом
+          if (abortController.signal.aborted) return
+
           // Retry without currency column
           const retryFields = 'id,amount,created_at,category,note,is_transfer,count_as_income,transfer_role,card_id,card,archives'
           data = await apiFetch(
-            `/api/transactions?start_date=${fromTs}&end_date=${toTs}&fields=${retryFields}&order_by=created_at&order_asc=true`
+            `/api/transactions?start_date=${fromTs}&end_date=${toTs}&fields=${retryFields}&order_by=created_at&order_asc=true`,
+            { signal: abortController.signal }
           ) || []
+          
+          // Перевіряємо після повторного запиту
+          if (abortController.signal.aborted) return
         } else {
           throw e
         }
       }
+
+      // Перевіряємо перед виконанням запиту карток
+      if (abortController.signal.aborted) return
 
       // fetch cards to get currency and detect savings accounts per card (using cached API)
       const cardIds = Array.from(new Set((data || []).map(t => t.card_id).filter(Boolean)))
       let cardsMap = new Map()
       if (cardIds.length) {
         const allCards = await listCards() // Get all cards from cache
+        
+        // Перевіряємо після отримання карток
+        if (abortController.signal.aborted) return
+        
         const cards = allCards.filter(c => cardIds.includes(c.id)) // Filter to needed IDs
         for (const c of cards || []) {
           const bank = (c?.bank || '') + ' ' + (c?.name || '')
@@ -388,6 +422,9 @@ export default function EarningsChart(){
           cardsMap.set(c.id, { currency: (c.currency || 'UAH').toUpperCase(), isSavings })
         }
       }
+
+      // Перевіряємо перед оновленням стану
+      if (abortController.signal.aborted) return
 
       // attach derived currency and is_savings to each tx record
       const enriched = (data || []).map(t => ({
@@ -397,14 +434,22 @@ export default function EarningsChart(){
       }))
       setTxs(enriched)
     } catch (e) {
+      // Ігноруємо помилки скасування
+      if (e.name === 'AbortError' || abortController.signal.aborted) return
       console.error('fetch chart txs failed', e)
-      setTxs([])
+      if (!abortController.signal.aborted) {
+        setTxs([])
+      }
     } finally {
-      if (showLoading) setLoading(false)
+      if (!abortController.signal.aborted) {
+        if (showLoading) setLoading(false)
+      }
     }
   }
 
-  useEffect(() => { fetchData() }, [])
+  useEffect(() => { 
+    fetchData({ showLoading: true }) 
+  }, [])
 
   // Зберегти налаштування в БД при зміні (з debounce)
   useEffect(() => {
@@ -446,7 +491,14 @@ export default function EarningsChart(){
       if (timeout.id) clearTimeout(timeout.id)
       timeout.id = setTimeout(() => { fetchData({ showLoading: false }) }, 150)
     })
-    return () => { if (typeof unsub === 'function') unsub(); if (timeout.id) clearTimeout(timeout.id) }
+    return () => { 
+      if (typeof unsub === 'function') unsub()
+      if (timeout.id) clearTimeout(timeout.id)
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+        abortControllerRef.current = null
+      }
+    }
   }, [])
 
   // Period changes are applied only when user clicks Apply. Presets update the
@@ -505,7 +557,8 @@ export default function EarningsChart(){
               setCurrency(v)
               // Збереження в БД відбувається через useEffect
               setAnimKey(k => k + 1)
-              fetchData({ showLoading: false })
+              // Не викликаємо fetchData тут, оскільки це змінить відображені дані
+              // Дані оновлюються через useChartSync
             }}>
               <option>UAH</option>
               <option>EUR</option>

@@ -124,3 +124,34 @@ export async function getPreferencesSection(key, defaultValue = {}) {
     return defaultValue
   }
 }
+
+/**
+ * Отримати поточний API Key користувача
+ * @returns {Promise<{success: boolean, has_api_key: boolean, api_key: string|null}>}
+ */
+export async function getApiKey() {
+  try {
+    const response = await apiFetch('/api/api-key')
+    return response || { success: false, has_api_key: false, api_key: null }
+  } catch (e) {
+    console.error('getApiKey failed:', e)
+    return { success: false, has_api_key: false, api_key: null }
+  }
+}
+
+/**
+ * Згенерувати новий API Key
+ * @returns {Promise<{success: boolean, api_key: string|null, message: string}>}
+ */
+export async function generateApiKey() {
+  try {
+    const response = await apiFetch('/api/generate-api-key', {
+      method: 'POST',
+      body: JSON.stringify({})
+    })
+    return response || { success: false, api_key: null, message: 'Failed to generate API key' }
+  } catch (e) {
+    console.error('generateApiKey failed:', e)
+    return { success: false, api_key: null, message: e.message || 'Failed to generate API key' }
+  }
+}

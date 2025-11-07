@@ -70,7 +70,19 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
     }
   }, [selectedCurrency, prefsLoaded, mode])
 
+  // Захист від дублювання через AbortController
+  const abortControllerRef = useRef(null)
+
   useEffect(() => {
+    // Скасовуємо попередній запит, якщо він є
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    
+    // Створюємо новий AbortController
+    const abortController = new AbortController()
+    abortControllerRef.current = abortController
+
     let mounted = true
 
     // Helper to convert any currency to target currency using Monobank rates
@@ -88,20 +100,26 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
       // First convert from source currency to UAH
       let inUAH = amount
       if (fromCode !== 980) {
-        const rateToUAH = rates[`${fromCode}->980`]
+        const rateToUAH = rates?.[`${fromCode}->980`]
         if (!rateToUAH) return amount
         inUAH = amount * rateToUAH
       }
       
       // Then convert from UAH to target currency
       if (toCode === 980) return inUAH
-      const rateFromUAH = rates[`${toCode}->980`]
+      const rateFromUAH = rates?.[`${toCode}->980`]
       if (!rateFromUAH) return inUAH
       return inUAH / rateFromUAH
     }
 
     const fetchData = async () => {
+      // Перевіряємо, чи запит не було скасовано
+      if (abortController.signal.aborted) {
+        return
+      }
+      
       setLoading(true)
+      
       try {
         // Calculate first day of current month and first day of previous month
         const now = new Date()
@@ -109,8 +127,14 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
         const firstDayPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
         const firstDayNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1)
 
+        // Перевіряємо перед виконанням запиту
+        if (abortController.signal.aborted) return
+
         // Fetch card info first to determine savings accounts and currencies (using cached API)
         const cards = await listCards()
+
+        // Перевіряємо після отримання карток
+        if (abortController.signal.aborted || !mounted) return
 
         const cardMap = new Map()
         cards.forEach(c => {
@@ -121,11 +145,18 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
           cardMap.set(c.id, { isSavings, isBinance, currency: (c.currency || 'UAH').toUpperCase() })
         })
 
+        // Перевіряємо перед виконанням запиту транзакцій
+        if (abortController.signal.aborted || !mounted) return
+
         // Fetch transactions from this month
         const fields = 'id,amount,created_at,is_transfer,transfer_role,transfer_id,archives,card,card_id'
         const allTxs = await apiFetch(
-          `/api/transactions?start_date=${firstDayThisMonth.toISOString()}&end_date=${firstDayNextMonth.toISOString()}&fields=${fields}&order_by=created_at&order_asc=true`
+          `/api/transactions?start_date=${firstDayThisMonth.toISOString()}&end_date=${firstDayNextMonth.toISOString()}&fields=${fields}&order_by=created_at&order_asc=true`,
+          { signal: abortController.signal }
         ) || []
+        
+        // Перевіряємо після отримання транзакцій
+        if (abortController.signal.aborted || !mounted) return
 
         // Apply filters: no archived, no transfers, no savings
         const included = new Set()
@@ -179,13 +210,20 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
           }
         }
 
+        // Перевіряємо перед виконанням запиту попереднього місяця
+        if (abortController.signal.aborted || !mounted) return
+
         // Calculate previous month total
         const prevMonthFields = 'id,amount,created_at,is_transfer,archives,card_id'
         let prevMonthTotal = 0
         try {
           const prevTxs = await apiFetch(
-            `/api/transactions?start_date=${firstDayPrevMonth.toISOString()}&end_date=${firstDayThisMonth.toISOString()}&fields=${prevMonthFields}&order_by=created_at&order_asc=true`
+            `/api/transactions?start_date=${firstDayPrevMonth.toISOString()}&end_date=${firstDayThisMonth.toISOString()}&fields=${prevMonthFields}&order_by=created_at&order_asc=true`,
+            { signal: abortController.signal }
           ) || []
+          
+          // Перевіряємо після отримання транзакцій попереднього місяця
+          if (abortController.signal.aborted || !mounted) return
           for (const tx of prevTxs) {
             if (tx.archives) continue
             if (tx.is_transfer) continue
@@ -225,16 +263,20 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
           console.error('Failed to fetch previous month transactions:', e)
         }
 
-        if (!mounted) return
+        if (!mounted || abortController.signal.aborted) return
         setPrevTotal(prevMonthTotal)
         setTotal(currentTotal)
       } catch (e) {
+        // Ігноруємо помилки скасування
+        if (e.name === 'AbortError' || abortController.signal.aborted) return
         console.error('fetch earnings stat failed', e)
-        if (!mounted) return
+        if (!mounted || abortController.signal.aborted) return
         setTotal(0)
         setPrevTotal(0)
       } finally {
-        if (mounted) setLoading(false)
+        if (!abortController.signal.aborted && mounted) {
+          setLoading(false)
+        }
       }
     }
 
@@ -250,9 +292,13 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
 
     return () => {
       mounted = false
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+        abortControllerRef.current = null
+      }
       if (typeof unsub === 'function') unsub()
     }
-  }, [mode, selectedCurrency, rates])
+  }, [mode, selectedCurrency, rates ? Object.keys(rates).join(',') : ''])
 
   const badge = delta >= 0 ? 'text-emerald-600' : 'text-rose-600'
   const displayValue = loading ? '-' : Math.round(total).toLocaleString()
@@ -317,8 +363,11 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
       </div>
       
       {/* Current month amount */}
-      <div className={`text-[28px] sm:text-3xl font-bold ${amountColor}`}>
-        {loading ? '-' : `${amountSign}${displayValue}`} <span className="text-lg text-gray-500">{currencySymbol}</span>
+      <div>
+        <div className={`text-[28px] sm:text-3xl font-bold ${amountColor}`}>
+          {loading ? '-' : `${amountSign}${displayValue}`}
+        </div>
+        <div className="text-lg text-gray-500">{currencySymbol}</div>
       </div>
       
       {/* Delta percentage */}
@@ -334,8 +383,11 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
           <div className="text-xs text-gray-400 mb-1">
             {prevMonth} {prevYear}
           </div>
-          <div className={`text-lg font-semibold ${amountColor}`}>
-            {amountSign}{prevDisplayValue} <span className="text-sm text-gray-500">{currencySymbol}</span>
+          <div>
+            <div className={`text-lg font-semibold ${amountColor}`}>
+              {amountSign}{prevDisplayValue}
+            </div>
+            <div className="text-lg text-gray-500">{currencySymbol}</div>
           </div>
         </div>
       )}

@@ -177,26 +177,41 @@ export async function apiFetch(endpoint, options = {}) {
     }
   }
   
-  const response = await fetch(url, {
-    ...options,
-    headers,
-  })
-  
-  if (!response.ok) {
-    let errorMessage = `HTTP ${response.status}: ${response.statusText}`
-    try {
-      const errorData = await response.json()
-      errorMessage = errorData.error || errorData.message || errorMessage
-    } catch {
-      // If response is not JSON, use status text
-    }
-    throw new Error(errorMessage)
-  }
-  
-  // Try to parse JSON, if fails return empty object
   try {
-    return await response.json()
-  } catch {
-    return {}
+    const response = await fetch(url, {
+      ...options,
+      headers,
+      signal: options.signal, // Support AbortController
+    })
+    
+    // Check if request was aborted before processing response
+    if (options.signal?.aborted) {
+      throw new DOMException('The operation was aborted.', 'AbortError')
+    }
+    
+    if (!response.ok) {
+      let errorMessage = `HTTP ${response.status}: ${response.statusText}`
+      try {
+        const errorData = await response.json()
+        errorMessage = errorData.error || errorData.message || errorMessage
+      } catch {
+        // If response is not JSON, use status text
+      }
+      throw new Error(errorMessage)
+    }
+    
+    // Try to parse JSON, if fails return empty object
+    try {
+      return await response.json()
+    } catch {
+      return {}
+    }
+  } catch (error) {
+    // Re-throw AbortError so it can be handled by caller
+    if (error.name === 'AbortError' || options.signal?.aborted) {
+      throw error
+    }
+    // Re-throw other errors
+    throw error
   }
 }

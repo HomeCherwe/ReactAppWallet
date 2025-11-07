@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { motion } from 'framer-motion'
-import { User, Mail, Save, Upload, Key, CreditCard } from 'lucide-react'
+import { User, Mail, Save, Upload, Key, CreditCard, Copy, Eye, EyeOff, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { getUserAPIs, updatePreferencesSection } from '../api/preferences'
+import { getUserAPIs, updatePreferencesSection, getApiKey, generateApiKey } from '../api/preferences'
+import { getApiUrl } from '../utils.jsx'
 
 export default function ProfilePage() {
   const [user, setUser] = useState(null)
@@ -20,6 +21,12 @@ export default function ProfilePage() {
   const [monobankBlackCardId, setMonobankBlackCardId] = useState('')
   const [monobankWhiteCardId, setMonobankWhiteCardId] = useState('')
   const [prefsLoaded, setPrefsLoaded] = useState(false)
+  
+  // API Key state
+  const [apiKey, setApiKey] = useState(null)
+  const [apiKeyVisible, setApiKeyVisible] = useState(false)
+  const [apiKeyLoading, setApiKeyLoading] = useState(false)
+  const [apiKeyGenerating, setApiKeyGenerating] = useState(false)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -76,7 +83,61 @@ export default function ProfilePage() {
       }
     }
     loadApiKeys()
+    loadApiKey()
   }, [])
+
+  // Load API Key
+  const loadApiKey = async () => {
+    setApiKeyLoading(true)
+    try {
+      const result = await getApiKey()
+      if (result.success && result.has_api_key) {
+        setApiKey(result.api_key)
+      } else {
+        setApiKey(null)
+      }
+    } catch (e) {
+      console.error('Failed to load API key:', e)
+      setApiKey(null)
+    } finally {
+      setApiKeyLoading(false)
+    }
+  }
+
+  // Generate new API Key
+  const handleGenerateApiKey = async () => {
+    if (!confirm('Створити новий API ключ? Старий ключ буде замінений і перестане працювати.')) {
+      return
+    }
+    
+    setApiKeyGenerating(true)
+    try {
+      const result = await generateApiKey()
+      if (result.success && result.api_key) {
+        setApiKey(result.api_key)
+        toast.success('API ключ успішно згенеровано! Збережіть його в безпечному місці.')
+      } else {
+        toast.error(result.message || 'Не вдалося згенерувати API ключ')
+      }
+    } catch (e) {
+      console.error('Failed to generate API key:', e)
+      toast.error('Не вдалося згенерувати API ключ')
+    } finally {
+      setApiKeyGenerating(false)
+    }
+  }
+
+  // Copy API Key to clipboard
+  const handleCopyApiKey = async () => {
+    if (!apiKey) return
+    try {
+      await navigator.clipboard.writeText(apiKey)
+      toast.success('API ключ скопійовано в буфер обміну!')
+    } catch (e) {
+      console.error('Failed to copy API key:', e)
+      toast.error('Не вдалося скопіювати API ключ')
+    }
+  }
 
   const handleAvatarChange = (e) => {
     const file = e.target.files?.[0]
@@ -443,6 +504,118 @@ export default function ProfilePage() {
             <p className="text-xs text-gray-500">
               Token та ID карток зберігаються безпечно в вашому обліковому записі
             </p>
+          </div>
+        </div>
+
+        {/* API Key Section для автоматизації */}
+        <div className="pt-6 border-t border-gray-200">
+          <div className="flex items-center gap-2 mb-4">
+            <Key size={20} className="text-green-600" />
+            <h3 className="text-lg font-semibold text-gray-900">API Key для автоматизації</h3>
+          </div>
+          <div className="space-y-4 bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 border border-green-200">
+            <p className="text-sm text-gray-700 mb-4">
+              API Key дозволяє автоматично синхронізувати транзакції з Monobank через iPhone Shortcuts або інші автоматизації. 
+              Ключ не має терміну дії, на відміну від JWT токену.
+            </p>
+            
+            {/* API URL для зручності */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                API URL (для використання в автоматизаціях)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={getApiUrl()}
+                  readOnly
+                  className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg bg-white font-mono text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(getApiUrl())
+                      toast.success('API URL скопійовано!')
+                    } catch (e) {
+                      toast.error('Не вдалося скопіювати URL')
+                    }
+                  }}
+                  className="p-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  title="Скопіювати URL"
+                >
+                  <Copy size={18} className="text-gray-600" />
+                </button>
+              </div>
+              <p className="text-xs text-gray-600 mt-1">
+                Використай цей URL разом з API Key для налаштування автоматизації
+              </p>
+            </div>
+            
+            {apiKeyLoading ? (
+              <div className="flex items-center justify-center py-4">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600"></div>
+              </div>
+            ) : apiKey ? (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Ваш API Key
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type={apiKeyVisible ? 'text' : 'password'}
+                      value={apiKey}
+                      readOnly
+                      className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg bg-white font-mono text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setApiKeyVisible(!apiKeyVisible)}
+                      className="p-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                      title={apiKeyVisible ? 'Приховати' : 'Показати'}
+                    >
+                      {apiKeyVisible ? <EyeOff size={18} className="text-gray-600" /> : <Eye size={18} className="text-gray-600" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCopyApiKey}
+                      className="p-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                      title="Скопіювати"
+                    >
+                      <Copy size={18} className="text-gray-600" />
+                    </button>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleGenerateApiKey}
+                  disabled={apiKeyGenerating}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw size={16} className={apiKeyGenerating ? 'animate-spin' : ''} />
+                  {apiKeyGenerating ? 'Генерація...' : 'Створити новий ключ'}
+                </button>
+                <p className="text-xs text-gray-600">
+                  ⚠️ При створенні нового ключа старий перестане працювати
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-gray-600">
+                  У вас поки немає API ключа. Створіть його для використання в автоматизаціях.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleGenerateApiKey}
+                  disabled={apiKeyGenerating}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Key size={16} />
+                  {apiKeyGenerating ? 'Генерація...' : 'Створити API Key'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
