@@ -1,14 +1,16 @@
 import { motion } from 'framer-motion'
-import { Wallet, CreditCard, PiggyBank } from 'lucide-react'
+import { Wallet, CreditCard, PiggyBank, Globe } from 'lucide-react'
 import { fmtAmount } from '../../utils/format'
 
 export default function BalanceCard({ currency, amount, isVisible, sectionType }) {
   const icon = sectionType==='cash' ? <Wallet size={12} className="text-green-600"/> :
                sectionType==='cards'? <CreditCard size={12} className="text-blue-600"/> :
-               <PiggyBank size={12} className="text-purple-600"/>
+               sectionType==='savings' ? <PiggyBank size={12} className="text-purple-600"/> :
+               <Globe size={12} className="text-indigo-600"/>
   const grad = sectionType==='cash' ? 'from-green-500 to-emerald-600' :
                sectionType==='cards'? 'from-blue-500 to-indigo-600' :
-               'from-purple-500 to-pink-600'
+               sectionType==='savings' ? 'from-purple-500 to-pink-600' :
+               'from-indigo-500 to-purple-600'
 
   return (
     <motion.div

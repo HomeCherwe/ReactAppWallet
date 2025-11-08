@@ -52,3 +52,12 @@ body { font-family: theme('fontFamily.inter'); }
 .btn-danger {
   @apply bg-rose-500 text-white hover:bg-rose-600 active:scale-[0.98];
 }
+
+/* Hide scrollbar but keep functionality */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari and Opera */
+}

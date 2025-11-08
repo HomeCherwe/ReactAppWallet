@@ -1,21 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Eye, EyeOff, Wallet, CreditCard, PiggyBank } from 'lucide-react'
+import { Eye, EyeOff, Wallet, CreditCard, PiggyBank, Globe } from 'lucide-react'
 import { fetchTotalsByBucket } from '../../api/totals'
 import { txBus } from '../../utils/txBus'
 import BalanceCard from './BalanceCard'
 import TotalsGrid from './TotalsGrid'
 import { getUserPreferences, updatePreferencesSection } from '../../api/preferences'
+import useMonoRates from '../../hooks/useMonoRates'
 
 const ORDER = ['UAH','EUR','USD','PLN','GBP','CHF','CZK','HUF']
 
 export default function TotalsCard({ title = 'Total balance' }) {
   const [loading, setLoading] = useState(true)
-  const [idx, setIdx] = useState(0)
+  const [idx, setIdx] = useState(0) // За замовчуванням All (індекс 0)
   const [isVisible, setIsVisible] = useState(true)
   const [data, setData] = useState({ cash:{}, cards:{}, savings:{} })
   const rootRef = useRef(null)
+  const tabsRef = useRef(null)
+  const tabButtonsRef = useRef([])
   const [prefsLoaded, setPrefsLoaded] = useState(false)
+  const rates = useMonoRates()
   
   // Touch swipe state
   const touchStartX = useRef(0)
@@ -26,18 +30,50 @@ export default function TotalsCard({ title = 'Total balance' }) {
     const loadSection = async () => {
       try {
         const prefs = await getUserPreferences()
+        let loadedIdx = 0 // За замовчуванням All (індекс 0)
+        
         if (prefs && prefs.totals) {
           if (typeof prefs.totals.section === 'number') {
-            setIdx(Math.max(0, Math.min(2, prefs.totals.section)))
+            const savedIdx = prefs.totals.section
+            // Перевіряємо, чи це вже новий формат (всі індекси 0-3 валідні)
+            // Якщо індекс валідний (0-3), використовуємо його без міграції
+            if (savedIdx >= 0 && savedIdx <= 3) {
+              loadedIdx = savedIdx
+            }
           }
           if (typeof prefs.totals.isVisible === 'boolean') {
             setIsVisible(prefs.totals.isVisible)
           }
         }
+        
+        // Встановлюємо завантажений індекс
+        setIdx(loadedIdx)
         setPrefsLoaded(true)
+        
+        // Завжди зберігаємо поточний індекс після завантаження
+        // Це гарантує, що idx = 0 збережеться, навіть якщо preferences не існувало
+        setTimeout(() => {
+          updatePreferencesSection('totals', {
+            section: loadedIdx,
+            isVisible
+          }).catch(e => {
+            console.error('Failed to save totals preferences after load:', e)
+          })
+        }, 700) // Затримка більша за debounce (500ms), щоб уникнути конфліктів
       } catch (e) {
         console.error('Failed to load totals preferences:', e)
+        // При помилці встановлюємо за замовчуванням All (0)
+        setIdx(0)
         setPrefsLoaded(true)
+        // Спробуємо зберегти за замовчуванням
+        setTimeout(() => {
+          updatePreferencesSection('totals', {
+            section: 0,
+            isVisible
+          }).catch(err => {
+            console.error('Failed to save default totals preferences:', err)
+          })
+        }, 700)
       }
     }
     loadSection()
@@ -47,10 +83,14 @@ export default function TotalsCard({ title = 'Total balance' }) {
   useEffect(() => {
     if (!prefsLoaded) return
     
+    // Зберігаємо тільки після того, як preferences завантажені
+    // Це запобігає перезапису preferences при ініціалізації
     const timeoutId = setTimeout(() => {
       updatePreferencesSection('totals', {
         section: idx,
         isVisible
+      }).catch(e => {
+        console.error('Failed to save totals preferences:', e)
       })
     }, 500) // Debounce 500ms
     
@@ -61,12 +101,12 @@ export default function TotalsCard({ title = 'Total balance' }) {
   useEffect(() => {
     const el = rootRef.current
     if (!el) return
-    const onWheel = (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      const dir = e.deltaY > 0 ? 1 : -1
-      setIdx((i)=>Math.max(0, Math.min(2, i+dir)))
-    }
+      const onWheel = (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        const dir = e.deltaY > 0 ? 1 : -1
+        setIdx((i)=>Math.max(0, Math.min(3, i+dir)))
+      }
     el.addEventListener('wheel', onWheel, { passive:false, capture:true })
     return () => el.removeEventListener('wheel', onWheel, { passive:false, capture:true })
   }, [])
@@ -87,7 +127,7 @@ export default function TotalsCard({ title = 'Total balance' }) {
     if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
       if (deltaX > 0) {
         // Swipe left - next section
-        setIdx((i) => Math.min(2, i + 1))
+        setIdx((i) => Math.min(3, i + 1))
       } else {
         // Swipe right - previous section
         setIdx((i) => Math.max(0, i - 1))
@@ -130,13 +170,143 @@ export default function TotalsCard({ title = 'Total balance' }) {
     return () => { mounted = false; if (typeof unsub === 'function') unsub() }
   }, [])
 
+  // Функція конвертації валют через UAH
+  const convertCurrency = useMemo(() => {
+    return (amount, fromCurrency, toCurrency) => {
+      if (!fromCurrency || fromCurrency === toCurrency) return amount
+      
+      const codeMap = { UAH: 980, USD: 840, EUR: 978, GBP: 826, PLN: 985, CHF: 756, CZK: 203, HUF: 348, USDT: 840 }
+      const fromCode = codeMap[fromCurrency] || 980
+      const toCode = codeMap[toCurrency] || 980
+      
+      if (fromCode === toCode) return amount
+      
+      // Конвертуємо через UAH як проміжну валюту
+      let inUAH = amount
+      if (fromCode !== 980) {
+        const rateToUAH = rates?.[`${fromCode}->980`]
+        if (!rateToUAH) return amount // Якщо курс не знайдено, повертаємо оригінальну суму
+        inUAH = amount * rateToUAH
+      }
+      
+      // Потім конвертуємо з UAH в цільову валюту
+      if (toCode === 980) return inUAH
+      const rateFromUAH = rates?.[`${toCode}->980`]
+      if (!rateFromUAH) return inUAH // Якщо курс не знайдено, повертаємо суму в UAH
+      return inUAH / rateFromUAH
+    }
+  }, [rates])
+
+  // Обчислюємо загальний баланс (All) в EUR, UAH, USD
+  const allTotals = useMemo(() => {
+    // Об'єднуємо всі баланси, спочатку сумуємо по валютах
+    const allBalances = {}
+    
+    // Сумуємо баланси по валютах з усіх секцій
+    Object.values([data.cash, data.cards, data.savings]).forEach(section => {
+      Object.entries(section || {}).forEach(([currency, amount]) => {
+        if (amount && Math.abs(amount) > 0.01) {
+          // USDT рахуємо як USD
+          const normalizedCurrency = currency === 'USDT' ? 'USD' : currency
+          
+          if (!allBalances[normalizedCurrency]) {
+            allBalances[normalizedCurrency] = 0
+          }
+          allBalances[normalizedCurrency] += amount
+        }
+      })
+    })
+    
+    // Конвертуємо все в UAH і сумуємо
+    let totalInUAH = 0
+    
+    Object.entries(allBalances).forEach(([currency, amount]) => {
+      const inUAH = convertCurrency(amount, currency, 'UAH')
+      totalInUAH += inUAH
+    })
+    
+    // Якщо загальна сума нульова, повертаємо порожній об'єкт
+    if (Math.abs(totalInUAH) < 0.01) {
+      return {}
+    }
+    
+    // Конвертуємо загальну суму в UAH в EUR та USD
+    const result = {
+      UAH: totalInUAH,
+      EUR: convertCurrency(totalInUAH, 'UAH', 'EUR'),
+      USD: convertCurrency(totalInUAH, 'UAH', 'USD')
+    }
+    
+    // Фільтруємо тільки ненульові значення
+    const filtered = {}
+    Object.entries(result).forEach(([currency, amount]) => {
+      if (Math.abs(amount) > 0.01) { // Враховуємо помилки округлення
+        filtered[currency] = amount
+      }
+    })
+    
+    return filtered
+  }, [data, convertCurrency])
+
   const sections = useMemo(() => ([
+    { key:'all',     title:'All',      icon:<Globe size={14} className="text-indigo-600"/>, totals:allTotals },
     { key:'cash',    title:'Cash',     icon:<Wallet size={14} className="text-green-600"/>,  totals:data.cash },
     { key:'cards',   title:'Cards',      icon:<CreditCard size={14} className="text-blue-600"/>, totals:data.cards },
     { key:'savings', title:'Savings',  icon:<PiggyBank size={14} className="text-purple-600"/>, totals:data.savings },
-  ]), [data])
+  ]), [data, allTotals])
 
   const current = sections[idx]
+
+  // Автоматичний скрол вкладок до вибраної
+  useEffect(() => {
+    // Невелика затримка, щоб DOM встиг оновитися
+    const timeoutId = setTimeout(() => {
+      if (tabButtonsRef.current[idx] && tabsRef.current) {
+        const button = tabButtonsRef.current[idx]
+        const container = tabsRef.current
+        
+        // Використовуємо getBoundingClientRect для точного визначення позицій
+        const buttonRect = button.getBoundingClientRect()
+        const containerRect = container.getBoundingClientRect()
+        
+        // Визначаємо позицію кнопки відносно контейнера
+        const buttonLeftRelative = buttonRect.left - containerRect.left
+        const buttonRightRelative = buttonRect.right - containerRect.left
+        const containerWidth = containerRect.width
+        
+        // Перевіряємо, чи кнопка видима
+        const isVisible = buttonLeftRelative >= 0 && buttonRightRelative <= containerWidth
+        
+        if (!isVisible) {
+          // Обчислюємо необхідний скрол
+          const currentScroll = container.scrollLeft
+          
+          // Якщо кнопка ліворуч від видимої області
+          if (buttonLeftRelative < 0) {
+            // Скролимо так, щоб кнопка була видима зліва
+            const newScroll = currentScroll + buttonLeftRelative - 8
+            container.scrollTo({
+              left: Math.max(0, newScroll),
+              behavior: 'smooth'
+            })
+          } 
+          // Якщо кнопка праворуч від видимої області
+          else if (buttonRightRelative > containerWidth) {
+            // Скролимо так, щоб кнопка була видима справа
+            const scrollDelta = buttonRightRelative - containerWidth + 8
+            const newScroll = currentScroll + scrollDelta
+            const maxScroll = container.scrollWidth - containerWidth
+            container.scrollTo({
+              left: Math.min(maxScroll, newScroll),
+              behavior: 'smooth'
+            })
+          }
+        }
+      }
+    }, 100) // Затримка для оновлення DOM після зміни індексу
+    
+    return () => clearTimeout(timeoutId)
+  }, [idx])
 
   return (
     <motion.div
@@ -164,17 +334,21 @@ export default function TotalsCard({ title = 'Total balance' }) {
       </div>
 
       <div className="p-2 border-b border-gray-100">
-        <div className="flex gap-0.5">
+        <div 
+          ref={tabsRef}
+          className="flex gap-0.5 overflow-x-auto scrollbar-hide"
+        >
           {sections.map((s, i) => (
             <button
               key={s.key}
+              ref={(el) => { tabButtonsRef.current[i] = el }}
               onClick={() => setIdx(i)}
-              className={`flex items-center gap-1 px-1.5 py-1 rounded-md transition-all text-xs flex-1 justify-center ${
-                i===idx ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'
+              className={`flex items-center gap-1 px-1.5 py-1 rounded-md transition-all text-xs flex-shrink-0 justify-center whitespace-nowrap ${
+                i===idx ? 'bg-indigo-100 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
               {s.icon}
-              <span className="truncate">{s.title}</span>
+              <span>{s.title}</span>
             </button>
           ))}
         </div>

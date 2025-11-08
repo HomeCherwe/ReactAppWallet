@@ -54,7 +54,13 @@ const CustomTooltip = ({ active, payload, type }) => {
 
 export default function CategoryPieChart() {
   const [periodType, setPeriodType] = useState('month') // 'week', 'month', 'year', 'custom'
-  const [currentDate, setCurrentDate] = useState(new Date())
+  // Ініціалізуємо currentDate на 1 число поточного місяця
+  const [currentDate, setCurrentDate] = useState(() => {
+    const d = new Date()
+    d.setDate(1)
+    d.setHours(0, 0, 0, 0)
+    return d
+  })
   const [customMode, setCustomMode] = useState(false) // Режим вибору вручну
   const [customFromDate, setCustomFromDate] = useState(() => {
     const d = new Date()
@@ -95,8 +101,10 @@ export default function CategoryPieChart() {
       return { start, end }
     }
 
-    const now = new Date(currentDate)
+    // Створюємо нові об'єкти дат, щоб уникнути мутації
+    const now = new Date(currentDate.getTime())
     const today = new Date()
+    today.setHours(0, 0, 0, 0)
     let start, end
 
     if (periodType === 'week') {
@@ -109,21 +117,29 @@ export default function CategoryPieChart() {
       end.setDate(start.getDate() + 6)
       end.setHours(23, 59, 59, 999)
       // Якщо це поточний тиждень, обмежуємо до сьогодні
-      if (end > today) {
-        end = new Date(today)
-        end.setHours(23, 59, 59, 999)
+      const todayEnd = new Date(today)
+      todayEnd.setHours(23, 59, 59, 999)
+      if (end > todayEnd) {
+        end = todayEnd
       }
     } else if (periodType === 'month') {
-      // Місяць: з 1 числа по сьогодні (якщо поточний місяць) або до кінця місяця
-      start = new Date(now.getFullYear(), now.getMonth(), 1)
+      // Місяць: завжди з 1 числа по сьогодні (якщо поточний місяць) або до кінця місяця
+      // Гарантуємо, що починаємо з 1 числа, незалежно від того, яка дата в currentDate
+      const month = now.getMonth()
+      const year = now.getFullYear()
+      start = new Date(year, month, 1)
       start.setHours(0, 0, 0, 0)
+      
+      const todayMonth = today.getMonth()
+      const todayYear = today.getFullYear()
+      
       // Якщо це поточний місяць, обмежуємо до сьогодні
-      if (now.getMonth() === today.getMonth() && now.getFullYear() === today.getFullYear()) {
+      if (month === todayMonth && year === todayYear) {
         end = new Date(today)
         end.setHours(23, 59, 59, 999)
       } else {
         // Інакше до кінця місяця
-        end = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+        end = new Date(year, month + 1, 0)
         end.setHours(23, 59, 59, 999)
       }
     } else if (periodType === 'year') {
@@ -179,8 +195,26 @@ export default function CategoryPieChart() {
       setLoading(true)
       
       try {
-        const startDate = period.start.toISOString().split('T')[0]
-        const endDate = period.end.toISOString().split('T')[0]
+        // Форматуємо дати з урахуванням часу для включення всього дня
+        const formatDate = (date, isEndDate = false) => {
+          if (isEndDate) {
+            // Для end_date встановлюємо час на кінець дня (23:59:59.999) у локальному часовому поясі
+            // Потім конвертуємо в ISO формат для передачі на backend
+            const endDate = new Date(date)
+            endDate.setHours(23, 59, 59, 999)
+            // Використовуємо toISOString() для конвертації в UTC
+            // Це гарантує, що весь день включено, навіть якщо локальний час конвертується в UTC
+            return endDate.toISOString()
+          }
+          
+          // Для start_date встановлюємо час на початок дня (00:00:00) у локальному часовому поясі
+          const startDate = new Date(date)
+          startDate.setHours(0, 0, 0, 0)
+          return startDate.toISOString()
+        }
+        
+        const startDate = formatDate(period.start, false)
+        const endDate = formatDate(period.end, true)
         
         const params = new URLSearchParams({
           start_date: startDate,
@@ -189,14 +223,62 @@ export default function CategoryPieChart() {
         })
 
         // Перевіряємо перед виконанням запиту
-        if (abortController.signal.aborted) return
+        if (abortController.signal.aborted) {
+          setLoading(false)
+          return
+        }
         
-        const transactions = await apiFetch(`/api/transactions?${params}`, {
-          signal: abortController.signal
-        })
+        // Отримуємо транзакції з карток (card_id не null)
+        let cardTransactions = []
+        try {
+          cardTransactions = await apiFetch(`/api/transactions?${params}`, {
+            signal: abortController.signal
+          }) || []
+        } catch (error) {
+          // Якщо запит був скасований, просто виходимо
+          if (error.name === 'AbortError' || abortController.signal.aborted) {
+            setLoading(false)
+            return
+          }
+          throw error
+        }
         
         // Перевіряємо після отримання відповіді
-        if (abortController.signal.aborted) return
+        if (abortController.signal.aborted) {
+          setLoading(false)
+          return
+        }
+        
+        // Отримуємо готівкові транзакції (card_id = null)
+        const cashParams = new URLSearchParams({
+          start_date: startDate,
+          end_date: endDate,
+          card_id: 'null',
+          fields: 'id,amount,category,card_id,created_at,card,is_transfer,is_savings'
+        })
+        
+        let cashTransactions = []
+        try {
+          cashTransactions = await apiFetch(`/api/transactions?${cashParams}`, {
+            signal: abortController.signal
+          }) || []
+        } catch (error) {
+          // Якщо запит був скасований, просто виходимо
+          if (error.name === 'AbortError' || abortController.signal.aborted) {
+            setLoading(false)
+            return
+          }
+          throw error
+        }
+        
+        // Перевіряємо після отримання відповіді
+        if (abortController.signal.aborted) {
+          setLoading(false)
+          return
+        }
+        
+        // Об'єднуємо транзакції з карток та готівкові
+        const transactions = [...cardTransactions, ...cashTransactions]
         
         // Фільтруємо трансфери, Binance та Savings транзакції
         const filteredTransactions = transactions.filter(tx => {
@@ -255,7 +337,8 @@ export default function CategoryPieChart() {
         filteredTransactions.forEach(tx => {
           const category = tx.category || 'Без категорії'
           const amount = Number(tx.amount || 0)
-          const txCurrency = cardMap[tx.card_id]?.currency || 'UAH'
+          // Для готівкових транзакцій (card_id = null) валюта завжди UAH
+          const txCurrency = tx.card_id ? (cardMap[tx.card_id]?.currency || 'UAH') : 'UAH'
           const absAmount = Math.abs(amount)
           
           // Конвертуємо в UAH та EUR
@@ -317,13 +400,17 @@ export default function CategoryPieChart() {
         setTotalExpense({ uah: totalExpenseUAH, eur: totalExpenseEUR })
 
         setData({ expenses, incomes })
+        setLoading(false)
       } catch (error) {
+        // Не логуємо помилку, якщо запит був скасований (це нормальна поведінка)
+        if (error.name === 'AbortError' || abortController.signal.aborted) {
+          setLoading(false)
+          return
+        }
+        // Логуємо тільки реальні помилки
         console.error('Failed to fetch category data:', error)
         setData({ expenses: [], incomes: [] })
-      } finally {
-        if (!abortController.signal.aborted) {
-          setLoading(false)
-        }
+        setLoading(false)
       }
     }
 
@@ -343,9 +430,16 @@ export default function CategoryPieChart() {
     if (periodType === 'week') {
       newDate.setDate(newDate.getDate() + (direction === 'next' ? 7 : -7))
     } else if (periodType === 'month') {
+      // Змінюємо місяць, а потім встановлюємо на 1 число
       newDate.setMonth(newDate.getMonth() + (direction === 'next' ? 1 : -1))
+      newDate.setDate(1)
+      newDate.setHours(0, 0, 0, 0)
     } else if (periodType === 'year') {
+      // Змінюємо рік, а потім встановлюємо на 1 січня
       newDate.setFullYear(newDate.getFullYear() + (direction === 'next' ? 1 : -1))
+      newDate.setMonth(0)
+      newDate.setDate(1)
+      newDate.setHours(0, 0, 0, 0)
     }
     setCurrentDate(newDate)
   }
@@ -487,13 +581,19 @@ export default function CategoryPieChart() {
   const handleDateSelect = (value) => {
     if (periodType === 'month') {
       const { year, monthIndex } = value
-      setCurrentDate(new Date(year, monthIndex, 1))
+      const newDate = new Date(year, monthIndex, 1)
+      newDate.setHours(0, 0, 0, 0)
+      setCurrentDate(newDate)
       setShowDatePicker(false)
     } else if (periodType === 'year') {
-      setCurrentDate(new Date(value, 0, 1))
+      const newDate = new Date(value, 0, 1)
+      newDate.setHours(0, 0, 0, 0)
+      setCurrentDate(newDate)
       setShowDatePicker(false)
     } else if (periodType === 'week') {
-      setCurrentDate(value.start)
+      const newDate = new Date(value.start)
+      newDate.setHours(0, 0, 0, 0)
+      setCurrentDate(newDate)
       setShowDatePicker(false)
     }
   }
