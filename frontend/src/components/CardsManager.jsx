@@ -7,7 +7,8 @@ import { CreditCard, Plus, X, Pencil, Trash2, Filter, Copy } from 'lucide-react'
 import { txBus } from '../utils/txBus'
 import toast from 'react-hot-toast'
 import BaseModal from './BaseModal'
-import { getUserPreferences, updatePreferencesSection } from '../api/preferences'
+import { updatePreferencesSection } from '../api/preferences'
+import { usePreferences } from '../context/PreferencesContext'
 
 const GRADS = [
   'from-indigo-500 via-fuchsia-500 to-amber-400',
@@ -229,6 +230,7 @@ function CardModal({ open, initial, onClose, onSubmit }) {
 }
 
 export default function CardsManager() {
+  const { preferences, loading: prefsLoading } = usePreferences()
   const [cards, setCards] = useState([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
@@ -238,23 +240,18 @@ export default function CardsManager() {
   const [selectedBanks, setSelectedBanks] = useState([])
   const [prefsLoaded, setPrefsLoaded] = useState(false)
 
-  // load persisted filter from DB
+  // load persisted filter from PreferencesContext
   useEffect(() => {
-    const loadFilter = async () => {
-      try {
-        const prefs = await getUserPreferences()
-        if (prefs && prefs.cards && prefs.cards.selectedBanks) {
-          const banks = prefs.cards.selectedBanks
-          if (Array.isArray(banks)) setSelectedBanks(banks)
-        }
-        setPrefsLoaded(true)
-      } catch (e) {
-        console.error('Failed to load cards preferences:', e)
-        setPrefsLoaded(true)
-      }
+    if (prefsLoading) return
+    try {
+      const banks = preferences?.cards?.selectedBanks
+      if (Array.isArray(banks)) setSelectedBanks(banks)
+    } catch (e) {
+      console.error('Failed to load cards preferences:', e)
+    } finally {
+      setPrefsLoaded(true)
     }
-    loadFilter()
-  }, [])
+  }, [prefsLoading, preferences])
 
   // persist filter changes to DB (з debounce)
   useEffect(() => {

@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
-import { supabase } from '../lib/supabase'
+import { supabase, invalidateUserCache } from '../lib/supabase'
 import { motion } from 'framer-motion'
-import { User, Mail, Save, Upload, Key, CreditCard, Copy, Eye, EyeOff, RefreshCw } from 'lucide-react'
+import { User, Mail, Save, Upload, Key, CreditCard, Copy, Eye, EyeOff, RefreshCw, BarChart3, LogOut } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { getUserAPIs, updatePreferencesSection, getApiKey, generateApiKey } from '../api/preferences'
+import { getUserAPIs, updatePreferencesSection, getApiKey, generateApiKey, getPreferencesSection } from '../api/preferences'
 import { getApiUrl } from '../utils.jsx'
+import { usePreferences } from '../context/PreferencesContext'
+import ConfirmModal from '../components/ConfirmModal'
 
 export default function ProfilePage() {
   const [user, setUser] = useState(null)
@@ -27,6 +29,13 @@ export default function ProfilePage() {
   const [apiKeyVisible, setApiKeyVisible] = useState(false)
   const [apiKeyLoading, setApiKeyLoading] = useState(false)
   const [apiKeyGenerating, setApiKeyGenerating] = useState(false)
+  
+  // Dashboard settings
+  const { preferences, loading: prefsLoading } = usePreferences()
+  const [showUsdtInChart, setShowUsdtInChart] = useState(true)
+  
+  // Logout modal
+  const [showLogoutModal, setShowLogoutModal] = useState(false)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -85,6 +94,15 @@ export default function ProfilePage() {
     loadApiKeys()
     loadApiKey()
   }, [])
+  
+  // Load dashboard settings
+  useEffect(() => {
+    if (prefsLoading) return
+    const dashboard = preferences?.dashboard || {}
+    if (typeof dashboard.showUsdtInChart === 'boolean') {
+      setShowUsdtInChart(dashboard.showUsdtInChart)
+    }
+  }, [prefsLoading, preferences])
 
   // Load API Key
   const loadApiKey = async () => {
@@ -333,6 +351,12 @@ export default function ProfilePage() {
     }
   }
 
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+    invalidateUserCache() // Очистити кеш користувача
+    setShowLogoutModal(false)
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -507,6 +531,53 @@ export default function ProfilePage() {
           </div>
         </div>
 
+        {/* Dashboard Settings Section */}
+        <div className="pt-6 border-t border-gray-200">
+          <div className="flex items-center gap-2 mb-4">
+            <BarChart3 size={20} className="text-blue-600" />
+            <h3 className="text-lg font-semibold text-gray-900">Налаштування дашборду</h3>
+          </div>
+          <div className="space-y-4 bg-gray-50 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Показувати USDT в графіку (режим ALL)
+                </label>
+                <p className="text-xs text-gray-500">
+                  Коли вибрано "ALL" в графіку витрат і доходів, показувати USDT разом з іншими валютами
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer ml-4">
+                <input
+                  type="checkbox"
+                  checked={showUsdtInChart}
+                  onChange={async (e) => {
+                    const newValue = e.target.checked
+                    setShowUsdtInChart(newValue)
+                    try {
+                      // Отримуємо поточні налаштування dashboard
+                      const currentDashboard = preferences?.dashboard || {}
+                      // Оновлюємо тільки showUsdtInChart, зберігаючи інші налаштування
+                      await updatePreferencesSection('dashboard', {
+                        ...currentDashboard,
+                        showUsdtInChart: newValue
+                      })
+                      toast.success('Налаштування збережено')
+                    } catch (error) {
+                      console.error('Failed to save dashboard settings:', error)
+                      toast.error('Не вдалося зберегти налаштування')
+                      // Відкатуємо зміну при помилці
+                      setShowUsdtInChart(!newValue)
+                    }
+                  }}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+          </div>
+        </div>
+
         {/* API Key Section для автоматизації */}
         <div className="pt-6 border-t border-gray-200">
           <div className="flex items-center gap-2 mb-4">
@@ -632,7 +703,31 @@ export default function ProfilePage() {
             {saving ? 'Збереження...' : 'Зберегти зміни'}
           </motion.button>
         </div>
+
+        {/* Logout Button */}
+        <div className="flex justify-end pt-4 border-t border-gray-200">
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => setShowLogoutModal(true)}
+            className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 text-white font-medium rounded-lg transition-all shadow-sm hover:shadow-md"
+          >
+            <LogOut size={18} />
+            Вийти з акаунту
+          </motion.button>
+        </div>
       </div>
+
+      <ConfirmModal
+        open={showLogoutModal}
+        onConfirm={handleSignOut}
+        onCancel={() => setShowLogoutModal(false)}
+        title="Вихід з акаунту"
+        message="Ви справді хочете вийти з акаунту?"
+        confirmLabel="Вийти"
+        cancelLabel="Скасувати"
+        danger={true}
+      />
     </motion.div>
   )
 }

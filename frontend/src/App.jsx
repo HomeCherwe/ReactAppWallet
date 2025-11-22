@@ -5,12 +5,15 @@ import Sidebar from './components/Sidebar.jsx'
 import DashboardPage from './pages/DashboardPage'
 import ProfilePage from './pages/ProfilePage'
 import AnalyticsPage from './pages/AnalyticsPage'
+import SubscriptionsPage from './pages/SubscriptionsPage'
+import CardsPage from './pages/CardsPage'
 import Auth from './components/Auth'
 import { txBus } from './utils/txBus'
 import { getApiUrl, apiFetch } from './utils.jsx'
 import { listCards } from './api/cards'
 import { sumTransactionsByCard, listTransactions } from './api/transactions'
 import { fetchTotalsByBucket } from './api/totals'
+import { useRealtimeTransactions } from './hooks/useRealtimeTransactions'
 
 export default function App(){
   const [session, setSession] = useState(null)
@@ -20,6 +23,9 @@ export default function App(){
   const loadedUserIdRef = useRef(null)
   const syncInProgressRef = useRef(false)
   const abortControllerRef = useRef(null)
+  
+  // Підписка на Realtime зміни транзакцій (тільки для авторизованих користувачів)
+  useRealtimeTransactions()
 
   // Check authentication state and handle OAuth callback
   useEffect(() => {
@@ -175,9 +181,30 @@ export default function App(){
           return null
         })
 
+        // Process subscriptions (check and execute due subscriptions)
+        const processSubscriptionsPromise = apiFetch('/api/subscriptions/process', {
+          method: 'POST',
+          signal: abortController.signal
+        }).then(response => {
+          if (abortController.signal.aborted) return null
+          if (response?.processed > 0) {
+            console.log(`Processed ${response.processed} subscription(s)`)
+            // Emit txBus event to refresh components
+            setTimeout(() => {
+              txBus.emit({ type: 'SUBSCRIPTIONS_PROCESSED', count: response.processed })
+            }, 300)
+          }
+          return response
+        }).catch(error => {
+          if (error.name === 'AbortError' || abortController.signal.aborted) return null
+          console.error('Process subscriptions error:', error)
+          return null
+        })
+
         // Load all critical data in parallel
         const dataPromises = [
           syncBinancePromise,
+          processSubscriptionsPromise,
           listCards().catch(e => { 
             if (abortController.signal.aborted) return []
             console.error('listCards error:', e); 
@@ -246,6 +273,32 @@ export default function App(){
     return () => clearTimeout(timer)
   }, [])
 
+  // Періодична перевірка підписок (кожні 5 хвилин)
+  useEffect(() => {
+    if (!session?.user) return
+
+    const checkSubscriptions = async () => {
+      try {
+        const response = await apiFetch('/api/subscriptions/process', {
+          method: 'POST'
+        })
+        if (response?.processed > 0) {
+          console.log(`[Auto] Processed ${response.processed} subscription(s)`)
+          // Emit txBus event to refresh components
+          txBus.emit({ type: 'SUBSCRIPTIONS_PROCESSED', count: response.processed })
+        }
+      } catch (error) {
+        console.error('[Auto] Failed to process subscriptions:', error)
+      }
+    }
+
+    // Перевіряємо одразу при завантаженні (вже робиться в loadAllData, але для надійності)
+    // І потім кожні 5 хвилин
+    const interval = setInterval(checkSubscriptions, 5 * 60 * 1000) // 5 хвилин
+
+    return () => clearInterval(interval)
+  }, [session?.user?.id])
+
   // Show loader while checking auth
   if (loading) {
     return (
@@ -285,7 +338,7 @@ export default function App(){
   }
 
   return (
-    <div className="app-container min-h-dvh sm:pt-6 pb-20 sm:pb-2">
+    <div className="app-container min-h-dvh sm:pt-6 pb-20 sm:pb-2 pt-4 sm:pt-6">
       {/* Mobile sidebar - fixed at bottom */}
       <Sidebar className="sm:hidden" />
       
@@ -303,6 +356,16 @@ export default function App(){
           <Route path="/profile" element={
             <div className="lg:col-span-2">
               <ProfilePage />
+            </div>
+          } />
+          <Route path="/subscriptions" element={
+            <div className="lg:col-span-2">
+              <SubscriptionsPage />
+            </div>
+          } />
+          <Route path="/cards" element={
+            <div className="lg:col-span-2 sm:hidden">
+              <CardsPage />
             </div>
           } />
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -2,6 +2,9 @@ import { supabase } from '../lib/supabase'
 import { getCachedSumByCard, invalidateSumByCardCache } from '../utils/dataCache'
 import { apiFetch } from '../utils.jsx'
 
+// Forward declaration для invalidateCategoriesCache
+let invalidateCategoriesCacheFn = null
+
 export async function listTransactions({ from = 0, to = 9, search = '', transactionType = 'all', category = '' } = {}) {
   const params = new URLSearchParams({
     from: from.toString(),
@@ -20,8 +23,11 @@ export async function createTransaction(payload) {
     body: JSON.stringify(payload)
   })
   
-  // Інвалідувати кеш sum by card після створення транзакції
+  // Інвалідувати кеші після створення транзакції
   invalidateSumByCardCache()
+  if (invalidateCategoriesCacheFn) {
+    invalidateCategoriesCacheFn()
+  }
   
   return data
 }
@@ -93,11 +99,54 @@ export async function getTransaction(id) {
   return await apiFetch(`/api/transactions/${id}`)
 }
 
+// Кеш для категорій
+let categoriesCache = null
+let categoriesCacheTimestamp = 0
+let categoriesCachePromise = null
+const CATEGORIES_CACHE_TTL = 60000 // 60 секунд
+
+/**
+ * Отримати категорії транзакцій з кешу або зробити новий запит
+ * @returns {Promise<Array>}
+ */
 export async function getTransactionCategories() {
-  try {
-    return await apiFetch('/api/transactions/categories')
-  } catch (error) {
-    console.error('Failed to fetch categories:', error.message)
-    return []
+  const now = Date.now()
+  
+  // Якщо кеш актуальний, повертаємо його
+  if (categoriesCache && (now - categoriesCacheTimestamp) < CATEGORIES_CACHE_TTL) {
+    return categoriesCache
   }
+  
+  // Якщо вже є запит в процесі, чекаємо на нього
+  if (categoriesCachePromise) {
+    return categoriesCachePromise
+  }
+  
+  // Робимо новий запит
+  categoriesCachePromise = (async () => {
+    try {
+      const categories = await apiFetch('/api/transactions/categories') || []
+      categoriesCache = categories
+      categoriesCacheTimestamp = now
+      categoriesCachePromise = null
+      return categories
+    } catch (error) {
+      console.error('Failed to fetch categories:', error.message)
+      categoriesCachePromise = null
+      return []
+    }
+  })()
+  
+  return categoriesCachePromise
 }
+
+/**
+ * Інвалідувати кеш категорій (викликати після створення/оновлення транзакції з новою категорією)
+ */
+export function invalidateCategoriesCache() {
+  categoriesCache = null
+  categoriesCacheTimestamp = 0
+}
+
+// Зберігаємо посилання для використання в createTransaction
+invalidateCategoriesCacheFn = invalidateCategoriesCache

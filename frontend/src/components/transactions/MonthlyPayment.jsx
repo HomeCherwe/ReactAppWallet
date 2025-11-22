@@ -14,9 +14,11 @@ import { apiFetch } from '../../utils.jsx'
 import { listTransactions, deleteTransaction, archiveTransaction, deleteTransactions, getTransactionCategories } from '../../api/transactions'
 import { txBus } from '../../utils/txBus'
 import { listCards } from '../../api/cards'
-import { getUserPreferences, updatePreferencesSection } from '../../api/preferences'
+import { updatePreferencesSection } from '../../api/preferences'
+import { usePreferences } from '../../context/PreferencesContext'
 
 export default function MonthlyPayment() {
+  const { preferences, loading: prefsLoading } = usePreferences()
   // remove duplicates by `id`, preserving first occurrence order
   function dedupeById(arr) {
     const seen = new Set()
@@ -95,36 +97,42 @@ export default function MonthlyPayment() {
     if (append) setLoadingMore(false); else setLoading(false)
   }
 
-  // Load categories and filters from DB on mount
+  // Load categories once on mount (не залежить від preferences)
   useEffect(() => {
-    const loadData = async () => {
+    const loadCategories = async () => {
       try {
-        // Load categories
         const cats = await getTransactionCategories()
         setCategories(cats || [])
-        
-        // Load filters from DB
-        const prefs = await getUserPreferences()
-        if (prefs && prefs.transactionsFilters) {
-          const filters = prefs.transactionsFilters
-          if (filters.pageSize) {
-            setPageSize(filters.pageSize)
-          }
-          if (filters.transactionType) {
-            setTransactionType(filters.transactionType)
-          }
-          if (filters.category !== undefined) {
-            setSelectedCategory(filters.category || '')
-          }
-        }
-        setFiltersLoaded(true)
       } catch (e) {
-        console.error('Failed to load categories or filters:', e)
-        setFiltersLoaded(true)
+        console.error('Failed to load categories:', e)
       }
     }
-    loadData()
-  }, [])
+    loadCategories()
+  }, []) // Завантажуємо тільки один раз при монтуванні
+
+  // Load filters from context preferences (окремо від категорій)
+  useEffect(() => {
+    if (prefsLoading || !preferences) return
+    
+    try {
+      if (preferences.transactionsFilters) {
+        const filters = preferences.transactionsFilters
+        if (filters.pageSize) {
+          setPageSize(filters.pageSize)
+        }
+        if (filters.transactionType) {
+          setTransactionType(filters.transactionType)
+        }
+        if (filters.category !== undefined) {
+          setSelectedCategory(filters.category || '')
+        }
+      }
+      setFiltersLoaded(true)
+    } catch (e) {
+      console.error('Failed to load filters:', e)
+      setFiltersLoaded(true)
+    }
+  }, [prefsLoading, preferences]) // Тільки для фільтрів, не для категорій
 
   useEffect(() => {
     // Wait for filters to be loaded from DB before fetching
@@ -135,9 +143,12 @@ export default function MonthlyPayment() {
 
   // Subscribe to txBus events to refresh list when transactions are created/updated
   useEffect(() => {
-    const unsubscribe = txBus.subscribe(() => {
+    const unsubscribe = txBus.subscribe((event) => {
       // Refresh transaction list when any transaction event occurs
-      fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })
+      // Якщо це нова транзакція (INSERT), оновлюємо список
+      if (event?.type === 'INSERT' || event?.type === 'UPDATE' || event?.type === 'DELETE' || !event?.type) {
+        fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })
+      }
     })
     return unsubscribe
   }, [searchQuery, transactionType, selectedCategory])

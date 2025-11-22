@@ -3,6 +3,8 @@ import multer from 'multer'
 import fetch from 'node-fetch'
 import dotenv from 'dotenv'
 import axios from 'axios'
+import http from 'http'
+import https from 'https'
 import cors from 'cors'
 import crypto from 'crypto'
 import { createClient } from '@supabase/supabase-js'
@@ -61,6 +63,22 @@ if (!isServiceRole) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
+// Global HTTP client with keep-alive for external APIs (Binance, etc.)
+const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 50 })
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 50 })
+const httpClient = axios.create({
+  httpAgent,
+  httpsAgent,
+  timeout: 15000
+})
+
+// In-memory cache for Binance prices
+const binancePricesCache = {
+  data: null,
+  ts: 0,
+  ttlMs: 5 * 60 * 1000 // 5 minutes
+}
+
 // Middleware для отримання user_id з JWT токену
 async function getUserFromToken(req, res, next) {
   try {
@@ -112,26 +130,18 @@ async function getUserFromApiKey(req, res, next) {
       return res.status(401).json({ error: 'API key required. Use X-API-Key header or api_key in body/query' })
     }
     
-    // Шукаємо користувача за API key в user_preferences
+    // Шукаємо користувача за API key в user_preferences без full-sкану
     // API key зберігається в apis.api_key
-    const { data: prefsList, error } = await supabase
+    const { data: userPrefs, error } = await supabase
       .from('user_preferences')
-      .select('user_id, apis')
+      .select('user_id')
+      .contains('apis', { api_key: apiKey })
+      .single()
     
     if (error) {
       console.error('[getUserFromApiKey] Database error:', error)
       return res.status(500).json({ error: 'Database error while checking API key' })
     }
-    
-    // Знаходимо користувача з відповідним API key
-    const userPrefs = prefsList?.find(pref => {
-      try {
-        const apis = typeof pref.apis === 'string' ? JSON.parse(pref.apis) : (pref.apis || {})
-        return apis.api_key === apiKey
-      } catch {
-        return false
-      }
-    })
     
     if (!userPrefs) {
       return res.status(401).json({ error: 'Invalid API key' })
@@ -976,6 +986,373 @@ app.post('/api/preferences/apis', getUserFromToken, async (req, res) => {
   }
 })
 
+// ============================================
+// Subscriptions API
+// ============================================
+
+// Get all subscriptions for current user
+app.get('/api/subscriptions', getUserFromToken, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', req.user_id)
+      .order('created_at', { ascending: false })
+    
+    if (error) throw error
+    res.json(data || [])
+  } catch (error) {
+    console.error('GET /api/subscriptions error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Create new subscription
+app.post('/api/subscriptions', getUserFromToken, async (req, res) => {
+  try {
+    const { name, amount, card_id, frequency, day_of_week, day_of_month, is_expense, category, note } = req.body
+    
+    if (!name || !amount || !frequency) {
+      return res.status(400).json({ error: 'Missing required fields: name, amount, frequency' })
+    }
+    
+    // Calculate next_execution_at
+    const nextExecution = calculateNextExecution(frequency, day_of_week, day_of_month, null)
+    
+    const insertData = {
+      user_id: req.user_id,
+      name,
+      amount: Math.abs(Number(amount)),
+      card_id: card_id || null,
+      frequency,
+      day_of_week: frequency === 'weekly' ? day_of_week : null,
+      day_of_month: frequency === 'monthly' ? day_of_month : null,
+      is_expense: is_expense !== false,
+      next_execution_at: nextExecution
+    }
+    
+    // Add category and note if they exist (columns might not exist in DB yet)
+    if (category !== undefined) insertData.category = category || null
+    if (note !== undefined) insertData.note = note || null
+    
+    const { data, error } = await supabase
+      .from('subscriptions')
+      .insert([insertData])
+      .select()
+      .single()
+    
+    if (error) {
+      // If error is about missing columns, try inserting without them
+      if (error.code === 'PGRST204' && (error.message.includes('category') || error.message.includes('note'))) {
+        console.warn('Category/note columns not found, inserting without them. Please run SQL migration.')
+        const { category: _, note: __, ...insertDataWithoutNewFields } = insertData
+        const { data: retryData, error: retryError } = await supabase
+          .from('subscriptions')
+          .insert([insertDataWithoutNewFields])
+          .select()
+          .single()
+        
+        if (retryError) throw retryError
+        return res.json(retryData)
+      }
+      throw error
+    }
+    
+    res.json(data)
+  } catch (error) {
+    console.error('POST /api/subscriptions error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Update subscription
+app.put('/api/subscriptions/:id', getUserFromToken, async (req, res) => {
+  try {
+    const { id } = req.params
+    const updates = req.body
+    
+    // Verify ownership
+    const { data: existing } = await supabase
+      .from('subscriptions')
+      .select('id, frequency, day_of_week, day_of_month')
+      .eq('id', id)
+      .eq('user_id', req.user_id)
+      .single()
+    
+    if (!existing) {
+      return res.status(404).json({ error: 'Subscription not found' })
+    }
+    
+    // If frequency or day changed, recalculate next_execution_at
+    if (updates.frequency || updates.day_of_week || updates.day_of_month) {
+      const frequency = updates.frequency || existing.frequency
+      const day_of_week = updates.day_of_week !== undefined ? updates.day_of_week : existing.day_of_week
+      const day_of_month = updates.day_of_month !== undefined ? updates.day_of_month : existing.day_of_month
+      
+      // Get last_executed_at if exists
+      const { data: subData } = await supabase
+        .from('subscriptions')
+        .select('last_executed_at')
+        .eq('id', id)
+        .single()
+      
+      updates.next_execution_at = calculateNextExecution(
+        frequency,
+        day_of_week,
+        day_of_month,
+        subData?.last_executed_at || null
+      )
+    }
+    
+    // Ensure amount is positive
+    if (updates.amount !== undefined) {
+      updates.amount = Math.abs(Number(updates.amount))
+    }
+    
+    // Filter out fields that might not exist in the database yet
+    // If category/note/participants columns don't exist, they will be ignored
+    const safeUpdates = { ...updates }
+    
+    // Ensure participants is an array if provided
+    if (safeUpdates.participants !== undefined) {
+      if (!Array.isArray(safeUpdates.participants)) {
+        safeUpdates.participants = []
+      }
+    }
+    
+    // Ensure total_participants is a positive integer
+    if (safeUpdates.total_participants !== undefined) {
+      safeUpdates.total_participants = Math.max(1, parseInt(safeUpdates.total_participants) || 1)
+    }
+    
+    // Try to update, but handle case where columns might not exist
+    const { data, error } = await supabase
+      .from('subscriptions')
+      .update(safeUpdates)
+      .eq('id', id)
+      .eq('user_id', req.user_id)
+      .select()
+      .single()
+    
+    if (error) {
+      // If error is about missing columns, try updating without them
+      if (error.code === 'PGRST204' && (
+        error.message.includes('category') || 
+        error.message.includes('note') || 
+        error.message.includes('participants') ||
+        error.message.includes('total_participants')
+      )) {
+        console.warn('Some columns not found, updating without them. Please run SQL migration.')
+        const { category, note, participants, total_participants, ...updatesWithoutNewFields } = safeUpdates
+        const { data: retryData, error: retryError } = await supabase
+          .from('subscriptions')
+          .update(updatesWithoutNewFields)
+          .eq('id', id)
+          .eq('user_id', req.user_id)
+          .select()
+          .single()
+        
+        if (retryError) throw retryError
+        return res.json(retryData)
+      }
+      throw error
+    }
+    
+    res.json(data)
+  } catch (error) {
+    console.error('PUT /api/subscriptions/:id error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Delete subscription
+app.delete('/api/subscriptions/:id', getUserFromToken, async (req, res) => {
+  try {
+    const { id } = req.params
+    
+    const { error } = await supabase
+      .from('subscriptions')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', req.user_id)
+    
+    if (error) throw error
+    res.json({ success: true })
+  } catch (error) {
+    console.error('DELETE /api/subscriptions/:id error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Helper function to calculate next execution date
+function calculateNextExecution(frequency, day_of_week, day_of_month, last_executed_at) {
+  const now = new Date()
+  let nextDate = new Date()
+  
+  if (frequency === 'weekly') {
+    // Find next occurrence of day_of_week
+    if (last_executed_at) {
+      nextDate = new Date(last_executed_at)
+      nextDate.setDate(nextDate.getDate() + 7) // Add 1 week
+    } else {
+      nextDate = new Date(now)
+    }
+    
+    // Adjust to the correct day of week
+    // day_of_week: 1=Monday, 7=Sunday
+    // JavaScript getDay(): 0=Sunday, 1=Monday, ..., 6=Saturday
+    const targetDay = day_of_week === 7 ? 0 : day_of_week
+    const currentDay = nextDate.getDay()
+    let daysToAdd = targetDay - currentDay
+    
+    if (daysToAdd <= 0) {
+      daysToAdd += 7
+    }
+    
+    nextDate.setDate(nextDate.getDate() + daysToAdd)
+    
+    // Set time to start of day
+    nextDate.setHours(0, 0, 0, 0)
+    
+  } else if (frequency === 'monthly') {
+    // Find next occurrence of day_of_month
+    if (last_executed_at) {
+      nextDate = new Date(last_executed_at)
+      nextDate.setMonth(nextDate.getMonth() + 1) // Add 1 month
+    } else {
+      nextDate = new Date(now.getFullYear(), now.getMonth(), day_of_month)
+      // If date is in the past, move to next month
+      if (nextDate < now) {
+        nextDate.setMonth(nextDate.getMonth() + 1)
+      }
+    }
+    
+    // Handle day_of_month > days in month
+    const daysInMonth = new Date(nextDate.getFullYear(), nextDate.getMonth() + 1, 0).getDate()
+    if (day_of_month > daysInMonth) {
+      nextDate.setDate(daysInMonth)
+    } else {
+      nextDate.setDate(day_of_month)
+    }
+    
+    // Set time to start of day
+    nextDate.setHours(0, 0, 0, 0)
+  }
+  
+  return nextDate.toISOString()
+}
+
+// Process subscriptions - check and execute due subscriptions
+app.post('/api/subscriptions/process', getUserFromToken, async (req, res) => {
+  try {
+    const now = new Date()
+    const nowISO = now.toISOString()
+    
+    // Find all active subscriptions that are due
+    const { data: dueSubscriptions, error: fetchError } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', req.user_id)
+      .eq('is_active', true)
+      .lte('next_execution_at', nowISO)
+    
+    if (fetchError) throw fetchError
+    
+    if (!dueSubscriptions || dueSubscriptions.length === 0) {
+      return res.json({ processed: 0, message: 'No subscriptions due' })
+    }
+    
+    let processed = 0
+    const errors = []
+    
+    for (const sub of dueSubscriptions) {
+      try {
+        // Get card currency if card_id exists
+        let transactionCurrency = 'UAH' // default
+        if (sub.card_id) {
+          const { data: cardData } = await supabase
+            .from('cards')
+            .select('currency')
+            .eq('id', sub.card_id)
+            .single()
+          if (cardData?.currency) {
+            transactionCurrency = cardData.currency
+          }
+        }
+        
+        // Create transaction
+        const amount = sub.is_expense ? -Math.abs(sub.amount) : Math.abs(sub.amount)
+        
+        // Формуємо опис транзакції
+        let transactionNote = ''
+        if (sub.note && sub.note.trim()) {
+          // Якщо є користувацький опис, додаємо його
+          transactionNote = `${sub.note} | `
+        }
+        // Завжди додаємо назву підписки та інформацію про автоматичне створення
+        transactionNote += `${sub.name} (автоматично створено через підписки)`
+        
+        // Використовуємо category з підписки, або 'Підписки' за замовчуванням
+        const transactionCategory = sub.category || 'Підписки'
+        
+        const { data: transaction, error: txError } = await supabase
+          .from('transactions')
+          .insert([{
+            user_id: req.user_id,
+            amount,
+            currency: transactionCurrency,
+            card_id: sub.card_id,
+            category: transactionCategory,
+            note: transactionNote,
+            created_at: sub.next_execution_at // Use scheduled date
+          }])
+          .select()
+          .single()
+        
+        if (txError) {
+          errors.push({ subscription: sub.id, error: txError.message })
+          continue
+        }
+        
+        // Calculate next execution
+        const nextExecution = calculateNextExecution(
+          sub.frequency,
+          sub.day_of_week,
+          sub.day_of_month,
+          sub.next_execution_at
+        )
+        
+        // Update subscription
+        const { error: updateError } = await supabase
+          .from('subscriptions')
+          .update({
+            last_executed_at: sub.next_execution_at,
+            next_execution_at: nextExecution
+          })
+          .eq('id', sub.id)
+        
+        if (updateError) {
+          errors.push({ subscription: sub.id, error: updateError.message })
+          continue
+        }
+        
+        processed++
+      } catch (err) {
+        errors.push({ subscription: sub.id, error: err.message })
+      }
+    }
+    
+    res.json({
+      processed,
+      total: dueSubscriptions.length,
+      errors: errors.length > 0 ? errors : undefined
+    })
+  } catch (error) {
+    console.error('POST /api/subscriptions/process error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 app.post('/api/parse-receipt', upload.single('image'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'image required' })
@@ -1514,126 +1891,44 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
       })
     }
 
-    // Find Binance Spot card - try multiple approaches
+    // Find Binance Spot card efficiently for this user
     let binanceCard = null
-    
     try {
-      // Log which key is being used
-      console.log(`Using ${isServiceRole ? 'SERVICE_ROLE_KEY (bypasses RLS)' : 'ANON_KEY (RLS enabled)'} to fetch cards`)
-      
-      // Get all cards first to see what's available
-      const { data: allCards, error: cardsError } = await supabase
+      const { data: exactCard, error: exactErr } = await supabase
         .from('cards')
         .select('id, currency, bank, name, initial_balance, user_id')
-      
-      if (cardsError) {
-        console.error('Error fetching cards:', cardsError)
-        console.error('Error code:', cardsError.code)
-        console.error('Error details:', cardsError.details)
-        console.error('Error hint:', cardsError.hint)
-        
-        // If it's an RLS error, provide helpful message
-        if (cardsError.code === '42501' || cardsError.message?.includes('row-level security')) {
-          return sendResponse(500, { 
-            success: false, 
-            synced: false,
-            error: 'RLS policy violation',
-            message: 'Cannot access cards due to RLS policies. Please use SUPABASE_SERVICE_ROLE_KEY in backend/.env file instead of ANON_KEY.'
-          })
-        }
-        
-        return sendResponse(500, { 
-          success: false, 
-          synced: false,
-          error: `Database error: ${cardsError.message}`,
-          message: `Database error: ${cardsError.message}`
-        })
-      }
-      
-      console.log(`Query returned ${allCards?.length || 0} cards`)
-      
-      if (!allCards || allCards.length === 0) {
-        console.log('No cards found in database')
-        if (!isServiceRole) {
-          console.log('⚠️  Using ANON_KEY: This might be due to RLS policies blocking access. Consider using SERVICE_ROLE_KEY.')
-        }
-        return sendResponse(200, { 
-          success: true, 
-          synced: false, 
-          message: 'Binance sync skipped: No cards found in database. Please create a Binance Spot card first.' 
-        })
-      }
-      
-      console.log(`Found ${allCards.length} cards in database:`, 
-        allCards.map(c => `"${c.bank || '(no bank)'} ${c.name || '(no name)'}" (user_id: ${c.user_id || 'none'})`).join(', '))
-      
-      // Log all Binance-related cards for debugging
-      const binanceCards = allCards.filter(card => 
-        String(card.bank || '').toLowerCase().includes('binance')
-      )
-      if (binanceCards.length > 0) {
-        console.log(`Found ${binanceCards.length} Binance-related card(s):`, 
-          binanceCards.map(c => `"${c.bank} ${c.name}" (id: ${c.id})`).join(', '))
-      }
-      
-      // First try: exact match
-      const exactMatch = allCards.find(card => 
-        String(card.bank || '').trim() === 'Binance' && 
-        String(card.name || '').trim() === 'Spot'
-      )
-      
-      if (exactMatch) {
-        binanceCard = exactMatch
-        console.log(`✅ Found Binance Spot card (exact match): id=${binanceCard.id}, bank="${binanceCard.bank}", name="${binanceCard.name}"`)
+        .eq('user_id', userId)
+        .eq('bank', 'Binance')
+        .eq('name', 'Spot')
+        .single()
+      if (!exactErr && exactCard) {
+        binanceCard = exactCard
+        console.log(`✅ Found Binance Spot card (exact): id=${binanceCard.id}`)
       } else {
-        console.log('No exact match found for "Binance" + "Spot"')
-        
-        // Second try: case-insensitive search for "binance" and "spot"
-        binanceCard = allCards.find(card => {
-          const bank = String(card.bank || '').toLowerCase().trim()
-          const name = String(card.name || '').toLowerCase().trim()
-          const matches = bank.includes('binance') && name.includes('spot')
-          if (matches) {
-            console.log(`Found potential match: bank="${card.bank}", name="${card.name}"`)
-          }
-          return matches
-        })
-        
-        if (binanceCard) {
-          console.log(`✅ Found Binance Spot card (case-insensitive): "${binanceCard.bank} ${binanceCard.name}", id=${binanceCard.id}`)
-        } else {
-          console.log('No case-insensitive match found for "binance" + "spot"')
-          
-          // Third try: any Binance card (use first one found)
-          const anyBinance = allCards.find(card => {
-            const bank = String(card.bank || '').toLowerCase()
-            const matches = bank.includes('binance')
-            if (matches) {
-              console.log(`Found Binance card: "${card.bank} ${card.name}"`)
-            }
-            return matches
-          })
-          
-          if (anyBinance) {
-            console.log(`⚠️  Warning: No "Binance Spot" card found, but found Binance card: "${anyBinance.bank} ${anyBinance.name}". Using it for sync.`)
-            binanceCard = anyBinance
-          } else {
-            console.log('❌ No Binance cards found at all')
-          }
+        const { data: anyCard, error: anyErr } = await supabase
+          .from('cards')
+          .select('id, currency, bank, name, initial_balance, user_id')
+          .eq('user_id', userId)
+          .ilike('bank', '%binance%')
+          .limit(1)
+          .maybeSingle()
+        if (anyErr) {
+          console.error('Error fetching Binance card:', anyErr)
+        }
+        if (anyCard) {
+          binanceCard = anyCard
+          console.log(`⚠️ Using Binance card fallback: "${binanceCard.bank} ${binanceCard.name}" (id=${binanceCard.id})`)
         }
       }
-      
       if (!binanceCard) {
-        const cardsList = allCards.map(c => `"${c.bank || '(no bank)'} ${c.name || '(no name)'}"`).join(', ')
-        console.log(`Binance Spot card not found. Available cards: ${cardsList}`)
         return sendResponse(200, { 
           success: true, 
           synced: false, 
-          message: `Binance sync skipped: Binance Spot card not found in database. Available cards: ${cardsList}` 
+          message: 'Binance sync skipped: No Binance card found for current user. Please create "Binance Spot" card.' 
         })
       }
     } catch (error) {
-      console.error('Error finding Binance Spot card:', error)
+      console.error('Error finding Binance card:', error)
       return sendResponse(500, { 
         success: false, 
         synced: false,
@@ -1692,11 +1987,10 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
 
     let response
     try {
-      response = await axios.get(url, {
+      response = await httpClient.get(url, {
         headers: {
           'X-MBX-APIKEY': apiKey
         },
-        timeout: 15000 // 15 seconds timeout
       })
     } catch (axiosError) {
       // Handle network errors (timeout, connection issues)
@@ -1746,12 +2040,17 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
 
     console.log(`Found ${allBalances.length} coins with balance:`, allBalances.map(b => b.asset).join(', '))
 
-    // Get prices for all coins in USDT
+    // Get prices for all coins in USDT with cache
     let pricesResponse
     try {
-      pricesResponse = await axios.get('https://api.binance.com/api/v3/ticker/price', {
-        timeout: 15000 // 15 seconds timeout
-      })
+      const now = Date.now()
+      if (!binancePricesCache.data || (now - binancePricesCache.ts) > binancePricesCache.ttlMs) {
+        pricesResponse = await httpClient.get('https://api.binance.com/api/v3/ticker/price')
+        binancePricesCache.data = pricesResponse.data
+        binancePricesCache.ts = now
+      } else {
+        pricesResponse = { data: binancePricesCache.data }
+      }
     } catch (axiosError) {
       // Handle network errors (timeout, connection issues)
       if (axiosError.code === 'ETIMEDOUT' || axiosError.code === 'ECONNABORTED') {

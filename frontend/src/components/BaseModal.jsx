@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { X } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useScrollLock } from '../hooks/useScrollLock'
 
 /**
@@ -23,6 +23,10 @@ export default function BaseModal({
   maxWidth = 'md',
   children
 }) {
+  // Track mousedown position to detect if user dragged
+  // Must be called before any conditional returns
+  const mouseDownRef = useRef({ x: 0, y: 0 })
+  
   useScrollLock(open)
 
   // Handle Escape key to close modal
@@ -69,7 +73,22 @@ export default function BaseModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          onClick={onClose}
+          onMouseDown={(e) => {
+            // Only close if clicking on backdrop (not on modal content)
+            if (e.target === e.currentTarget) {
+              mouseDownRef.current = { x: e.clientX, y: e.clientY }
+            }
+          }}
+          onMouseUp={(e) => {
+            // Only close if mouse didn't move (no drag) and clicked on backdrop
+            if (e.target === e.currentTarget) {
+              const moved = Math.abs(e.clientX - mouseDownRef.current.x) > 5 || 
+                           Math.abs(e.clientY - mouseDownRef.current.y) > 5
+              if (!moved) {
+                onClose()
+              }
+            }
+          }}
         >
           <motion.div
             className="rounded-2xl bg-white p-5"
@@ -85,7 +104,7 @@ export default function BaseModal({
             animate={{ y: 0, opacity: 1, scale: 1 }}
             exit={{ y: 12, opacity: 0, scale: 0.98 }}
             transition={{ duration: 0.15 }}
-            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
           >
             {(title || showCloseButton) && (
               <div className="flex items-center justify-between mb-3">

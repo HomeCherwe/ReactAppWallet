@@ -5,9 +5,11 @@ import { txBus } from '../utils/txBus'
 import useMonoRates from '../hooks/useMonoRates'
 import { listCards } from '../api/cards'
 import { apiFetch } from '../utils.jsx'
-import { getUserPreferences, updatePreferencesSection } from '../api/preferences'
+import { updatePreferencesSection } from '../api/preferences'
+import { usePreferences } from '../context/PreferencesContext'
 
 export default function EarningsStatCard({ title, mode, currency: initialCurrency }) {
+  const { preferences, loading: prefsLoading } = usePreferences()
   // mode: 'earning' or 'spending'
   const [selectedCurrency, setSelectedCurrency] = useState(initialCurrency || null)
   const [prefsLoaded, setPrefsLoaded] = useState(false)
@@ -22,25 +24,15 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
     return Math.round(((total - prevTotal) / Math.abs(prevTotal)) * 100)
   }, [total, prevTotal])
 
-  // Load preferences from DB on mount
+  // Init preferences from context (single fetch per session)
   useEffect(() => {
-    const loadPreferences = async () => {
-      try {
-        const prefs = await getUserPreferences()
-        if (prefs && prefs.earningsStat) {
-          const modePrefs = prefs.earningsStat[mode]
-          if (modePrefs && modePrefs.currency !== undefined) {
-            setSelectedCurrency(modePrefs.currency || null)
-          }
-        }
-        setPrefsLoaded(true)
-      } catch (e) {
-        console.error('Failed to load earnings stat preferences:', e)
-        setPrefsLoaded(true)
-      }
+    if (prefsLoading) return
+    const modePrefs = preferences?.earningsStat?.[mode]
+    if (modePrefs && modePrefs.currency !== undefined) {
+      setSelectedCurrency(modePrefs.currency || null)
     }
-    loadPreferences()
-  }, [mode])
+    setPrefsLoaded(true)
+  }, [prefsLoading, preferences, mode])
 
   // Save preferences to DB when changed (with debounce)
   useEffect(() => {
@@ -52,11 +44,8 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
 
     saveTimeoutRef.current = setTimeout(async () => {
       try {
-        const prefs = await getUserPreferences()
-        const earningsStat = prefs?.earningsStat || {}
-        earningsStat[mode] = {
-          currency: selectedCurrency || null
-        }
+        const earningsStat = { ...(preferences?.earningsStat || {}) }
+        earningsStat[mode] = { currency: selectedCurrency || null }
         await updatePreferencesSection('earningsStat', earningsStat)
       } catch (e) {
         console.error('Failed to save earnings stat preferences:', e)

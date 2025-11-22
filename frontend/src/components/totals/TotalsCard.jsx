@@ -5,12 +5,14 @@ import { fetchTotalsByBucket } from '../../api/totals'
 import { txBus } from '../../utils/txBus'
 import BalanceCard from './BalanceCard'
 import TotalsGrid from './TotalsGrid'
-import { getUserPreferences, updatePreferencesSection } from '../../api/preferences'
+import { updatePreferencesSection } from '../../api/preferences'
+import { usePreferences } from '../../context/PreferencesContext'
 import useMonoRates from '../../hooks/useMonoRates'
 
 const ORDER = ['UAH','EUR','USD','PLN','GBP','CHF','CZK','HUF']
 
 export default function TotalsCard({ title = 'Total balance' }) {
+  const { preferences, loading: prefsLoading } = usePreferences()
   const [loading, setLoading] = useState(true)
   const [idx, setIdx] = useState(0) // За замовчуванням All (індекс 0)
   const [isVisible, setIsVisible] = useState(true)
@@ -25,59 +27,25 @@ export default function TotalsCard({ title = 'Total balance' }) {
   const touchStartX = useRef(0)
   const touchStartY = useRef(0)
 
-  // load saved section from DB
+  // init from PreferencesContext (один запит на проєкт)
   useEffect(() => {
-    const loadSection = async () => {
-      try {
-        const prefs = await getUserPreferences()
-        let loadedIdx = 0 // За замовчуванням All (індекс 0)
-        
-        if (prefs && prefs.totals) {
-          if (typeof prefs.totals.section === 'number') {
-            const savedIdx = prefs.totals.section
-            // Перевіряємо, чи це вже новий формат (всі індекси 0-3 валідні)
-            // Якщо індекс валідний (0-3), використовуємо його без міграції
-            if (savedIdx >= 0 && savedIdx <= 3) {
-              loadedIdx = savedIdx
-            }
-          }
-          if (typeof prefs.totals.isVisible === 'boolean') {
-            setIsVisible(prefs.totals.isVisible)
-          }
-        }
-        
-        // Встановлюємо завантажений індекс
-        setIdx(loadedIdx)
-        setPrefsLoaded(true)
-        
-        // Завжди зберігаємо поточний індекс після завантаження
-        // Це гарантує, що idx = 0 збережеться, навіть якщо preferences не існувало
-        setTimeout(() => {
-          updatePreferencesSection('totals', {
-            section: loadedIdx,
-            isVisible
-          }).catch(e => {
-            console.error('Failed to save totals preferences after load:', e)
-          })
-        }, 700) // Затримка більша за debounce (500ms), щоб уникнути конфліктів
-      } catch (e) {
-        console.error('Failed to load totals preferences:', e)
-        // При помилці встановлюємо за замовчуванням All (0)
-        setIdx(0)
-        setPrefsLoaded(true)
-        // Спробуємо зберегти за замовчуванням
-        setTimeout(() => {
-          updatePreferencesSection('totals', {
-            section: 0,
-            isVisible
-          }).catch(err => {
-            console.error('Failed to save default totals preferences:', err)
-          })
-        }, 700)
-      }
+    if (prefsLoading) return
+    let loadedIdx = 0
+    const totals = preferences?.totals || {}
+    if (typeof totals.section === 'number' && totals.section >= 0 && totals.section <= 3) {
+      loadedIdx = totals.section
     }
-    loadSection()
-  }, [])
+    if (typeof totals.isVisible === 'boolean') {
+      setIsVisible(totals.isVisible)
+    }
+    setIdx(loadedIdx)
+    setPrefsLoaded(true)
+    // Записати дефолт у БД один раз після ініціалізації (щоб зафіксувати стан)
+    setTimeout(() => {
+      updatePreferencesSection('totals', { section: loadedIdx, isVisible })
+        .catch(e => console.error('Failed to save totals preferences after load:', e))
+    }, 700)
+  }, [prefsLoading, preferences])
 
   // persist section changes to DB (з debounce)
   useEffect(() => {
