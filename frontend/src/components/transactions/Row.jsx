@@ -1,5 +1,5 @@
 import { fmtDate, fmtAmount } from '../../utils/format'
-import { Trash2, Info } from 'lucide-react'
+import { Trash2, Info, MapPin } from 'lucide-react'
 
 export default function Row({ tx, currency, onDetails, onAskDelete, onEdit, selected, onSelect }) {
   const isExp = Number(tx.amount) < 0
@@ -25,9 +25,31 @@ export default function Row({ tx, currency, onDetails, onAskDelete, onEdit, sele
           />
         )}
         <div>
-          <div className="font-semibold text-sm">{tx.category || 'Без категорії'}</div>
+          <div className="font-semibold text-sm flex items-center gap-2">
+            {tx.category || 'Без категорії'}
+            {tx?.merchant_lat && tx?.merchant_lng && (
+              <MapPin size={12} className="text-indigo-600" title="Є локація на карті" />
+            )}
+          </div>
           <div className="text-xs text-gray-500">
             {[tx.card].filter(Boolean).join(' · ') || '—'} · {fmtDate(tx.created_at)}
+            {tx?.merchant_name && (
+              <span className="ml-2 text-indigo-600">
+                · {tx.merchant_name}
+                {tx?.merchant_lat && tx?.merchant_lng && (
+                  <a
+                    href={`https://www.google.com/maps?q=${tx.merchant_lat},${tx.merchant_lng}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="ml-1 inline-flex items-center text-indigo-600 hover:text-indigo-700 hover:underline"
+                    title="Відкрити на карті"
+                  >
+                    <MapPin size={10} />
+                  </a>
+                )}
+              </span>
+            )}
           </div>
         </div>
       </div>
