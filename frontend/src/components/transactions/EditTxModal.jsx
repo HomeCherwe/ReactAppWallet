@@ -261,15 +261,70 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
 
   const startCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      // Перевірка підтримки getUserMedia
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        toast.error('Ваш браузер не підтримує камеру')
+        return
+      }
+
+      // Перевірка протоколу (на мобільних потрібен HTTPS або localhost)
+      const isSecure = window.location.protocol === 'https:' || 
+                       window.location.hostname === 'localhost' || 
+                       window.location.hostname === '127.0.0.1'
+      
+      if (!isSecure && /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+        toast.error('Для доступу до камери потрібен HTTPS. Використайте https:// або localhost', { duration: 5000 })
+        return
+      }
+
+      // Спробувати відкрити камеру
+      const constraints = {
+        video: {
+          facingMode: 'environment', // Задня камера
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        },
+        audio: false
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints)
       setStream(stream)
       setCameraOpen(true)
       if (videoRef.current) {
         videoRef.current.srcObject = stream
+        videoRef.current.play().catch(err => {
+          console.error('Video play error:', err)
+          toast.error('Не вдалося запустити відео')
+        })
       }
     } catch (e) {
       console.error('Camera error:', e)
-      toast.error('Не вдалося відкрити камеру')
+      let errorMessage = 'Не вдалося відкрити камеру'
+      
+      if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+        errorMessage = 'Дозвіл на камеру відхилено. Перевірте налаштування браузера'
+      } else if (e.name === 'NotFoundError' || e.name === 'DevicesNotFoundError') {
+        errorMessage = 'Камера не знайдена'
+      } else if (e.name === 'NotReadableError' || e.name === 'TrackStartError') {
+        errorMessage = 'Камера зайнята іншим додатком'
+      } else if (e.name === 'OverconstrainedError' || e.name === 'ConstraintNotSatisfiedError') {
+        // Спробувати з простішими налаштуваннями
+        try {
+          const simpleConstraints = { video: { facingMode: 'environment' }, audio: false }
+          const stream = await navigator.mediaDevices.getUserMedia(simpleConstraints)
+          setStream(stream)
+          setCameraOpen(true)
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream
+            videoRef.current.play().catch(() => {})
+          }
+          return
+        } catch (retryError) {
+          errorMessage = 'Не вдалося відкрити камеру. Перевірте дозволи'
+        }
+      }
+      
+      toast.error(errorMessage, { duration: 4000 })
     }
   }
 
@@ -577,17 +632,22 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
       <AnimatePresence>
         {cameraOpen && (
           <motion.div
-            className="fixed inset-0 z-[120] bg-black/70 grid place-items-center p-4"
+            className="fixed inset-0 z-[120] bg-black sm:bg-black/70 grid place-items-center sm:p-4 p-0"
             style={{ zIndex: 120 }}
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             onMouseDown={stopCamera}
           >
-            <div className="w-full max-w-lg bg-white rounded-2xl overflow-hidden" onMouseDown={e=>e.stopPropagation()}>
-              <div className="relative bg-black">
-                <video ref={videoRef} autoPlay playsInline className="w-full max-h-[70vh] object-contain" />
+            <div className="w-full h-full sm:w-full sm:max-w-lg sm:h-auto sm:bg-white sm:rounded-2xl overflow-hidden flex flex-col" onMouseDown={e=>e.stopPropagation()}>
+              <div className="relative bg-black flex-1 flex items-center justify-center">
+                <video 
+                  ref={videoRef} 
+                  autoPlay 
+                  playsInline 
+                  className="w-full h-full sm:max-h-[70vh] object-cover sm:object-contain" 
+                />
                 <canvas ref={canvasRef} className="hidden" />
               </div>
-              <div className="p-3 flex gap-2 justify-end">
+              <div className="p-3 sm:p-3 flex gap-2 justify-end bg-black/80 sm:bg-white">
                 <button className="btn btn-soft" onClick={stopCamera}>Скасувати</button>
                 <button className="btn btn-primary" onClick={capturePhoto}>Зробити фото</button>
               </div>

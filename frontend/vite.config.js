@@ -12,6 +12,7 @@ export default defineConfig({
   base,
   plugins: [react()],
   server: {
+    host: '0.0.0.0', // Allow access from network
     proxy: {
       '/api/parse-receipt': {
         target: process.env.VITE_API_URL || 'http://localhost:8787',

@@ -598,9 +598,19 @@ export default function ProfilePage() {
               <div className="flex items-center gap-2">
                 <input
                   type="text"
-                  value={getApiUrl()}
-                  readOnly
+                  defaultValue={getApiUrl()}
+                  onChange={(e) => {
+                    const newUrl = e.target.value.trim()
+                    if (newUrl) {
+                      localStorage.setItem('api_url_override', newUrl)
+                      toast.success('API URL збережено! Перезавантажте сторінку.')
+                    } else {
+                      localStorage.removeItem('api_url_override')
+                      toast.success('API URL скинуто до значення за замовчуванням')
+                    }
+                  }}
                   className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg bg-white font-mono text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                  placeholder="http://192.168.1.100:8787"
                 />
                 <button
                   type="button"
@@ -617,9 +627,23 @@ export default function ProfilePage() {
                 >
                   <Copy size={18} className="text-gray-600" />
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    localStorage.removeItem('api_url_override')
+                    toast.success('API URL скинуто! Перезавантажте сторінку.')
+                    setTimeout(() => window.location.reload(), 1000)
+                  }}
+                  className="p-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm"
+                  title="Скинути до значення за замовчуванням"
+                >
+                  ↻
+                </button>
               </div>
               <p className="text-xs text-gray-600 mt-1">
-                Використай цей URL разом з API Key для налаштування автоматизації
+                Використай цей URL разом з API Key для налаштування автоматизації.
+                <br />
+                <span className="text-amber-600 font-medium">На мобільних:</span> введіть IP-адресу вашого комп'ютера (наприклад: http://192.168.1.100:8787)
               </p>
             </div>
             

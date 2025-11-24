@@ -24,6 +24,12 @@ const corsOptions = {
       return callback(null, true)
     }
     
+    // Allow local network IP addresses (for mobile testing)
+    // Pattern: http://192.168.x.x:port or http://10.x.x.x:port or http://172.16-31.x.x:port
+    if (/^http:\/\/(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)\d+\.\d+:\d+$/.test(origin)) {
+      return callback(null, true)
+    }
+    
     // Allow production domain
     if (origin === 'https://homecherwe.github.io') {
       return callback(null, true)
@@ -2829,5 +2835,10 @@ export default app
 // Але для локальної розробки потрібен
 if (process.env.NODE_ENV !== 'production' || process.env.VERCEL !== '1') {
   const port = process.env.PORT || 8787
-  app.listen(port, () => console.log(`API on http://localhost:${port}`))
+  // Listen on 0.0.0.0 to allow access from other devices on the network
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`API on http://localhost:${port}`)
+    console.log(`API доступний з мережі на порту ${port}`)
+    console.log(`Для доступу з телефону використовуйте IP-адресу вашого комп'ютера`)
+  })
 }

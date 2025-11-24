@@ -6,6 +6,23 @@ export function cn(...inputs){ return twMerge(clsx(inputs)) }
 
 // Helper to normalize API URL (remove trailing slash)
 export function getApiUrl() {
+  // Перевірка, чи є збережений API URL в localStorage (для мобільних пристроїв)
+  const savedApiUrl = localStorage.getItem('api_url_override')
+  if (savedApiUrl) {
+    return savedApiUrl.endsWith('/') ? savedApiUrl.slice(0, -1) : savedApiUrl
+  }
+  
+  // Якщо працюємо на мобільному пристрої або не на localhost
+  const hostname = window.location.hostname
+  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1'
+  
+  // Якщо не localhost (наприклад, IP-адреса), використовуємо її для API
+  if (!isLocalhost && hostname !== '') {
+    const port = import.meta.env.VITE_API_PORT || '8787'
+    return `http://${hostname}:${port}`
+  }
+  
+  // За замовчуванням або з env
   const url = import.meta.env.VITE_API_URL || 'http://localhost:8787'
   return url.endsWith('/') ? url.slice(0, -1) : url
 }
