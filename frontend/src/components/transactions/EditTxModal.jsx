@@ -632,13 +632,13 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
       <AnimatePresence>
         {cameraOpen && (
           <motion.div
-            className="fixed inset-0 z-[120] bg-black sm:bg-black/70 grid place-items-center sm:p-4 p-0"
+            className="fixed inset-0 z-[120] bg-black sm:bg-black/70 flex flex-col sm:grid sm:place-items-center sm:p-4 p-0"
             style={{ zIndex: 120 }}
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             onMouseDown={stopCamera}
           >
             <div className="w-full h-full sm:w-full sm:max-w-lg sm:h-auto sm:bg-white sm:rounded-2xl overflow-hidden flex flex-col" onMouseDown={e=>e.stopPropagation()}>
-              <div className="relative bg-black flex-1 flex items-center justify-center">
+              <div className="relative bg-black flex-1 flex items-center justify-center min-h-0">
                 <video 
                   ref={videoRef} 
                   autoPlay 
@@ -647,9 +647,28 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
                 />
                 <canvas ref={canvasRef} className="hidden" />
               </div>
-              <div className="p-3 sm:p-3 flex gap-2 justify-end bg-black/80 sm:bg-white">
-                <button className="btn btn-soft" onClick={stopCamera}>Скасувати</button>
-                <button className="btn btn-primary" onClick={capturePhoto}>Зробити фото</button>
+              {/* Кнопки для мобільних - завжди видимі внизу */}
+              <div className="pb-4 sm:pb-0 p-4 sm:p-3 bg-black/90 sm:bg-white flex items-center justify-between gap-3 sm:justify-end flex-shrink-0" style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
+                {/* Кнопка скасувати зліва */}
+                <button 
+                  className="px-4 py-2 text-white bg-transparent hover:bg-white/10 rounded-lg font-medium transition-colors sm:text-gray-700 sm:bg-gray-100 sm:hover:bg-gray-200" 
+                  onClick={stopCamera}
+                >
+                  СКАСУВАТИ
+                </button>
+                {/* Кругла кнопка для фотографування (як на iPhone) - по центру */}
+                <button 
+                  className="w-16 h-16 sm:w-14 sm:h-14 rounded-full bg-white border-4 border-white shadow-lg flex items-center justify-center hover:scale-105 active:scale-95 transition-transform flex-shrink-0"
+                  onClick={capturePhoto}
+                  title="Зробити фото"
+                  style={{
+                    boxShadow: '0 0 0 2px rgba(255, 255, 255, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3)'
+                  }}
+                >
+                  <div className="w-12 h-12 sm:w-10 sm:h-10 rounded-full bg-white"></div>
+                </button>
+                {/* Заглушка для вирівнювання */}
+                <div className="w-16 sm:w-0"></div>
               </div>
             </div>
           </motion.div>
