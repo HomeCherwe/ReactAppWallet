@@ -9,21 +9,37 @@ export function getApiUrl() {
   // Перевірка, чи є збережений API URL в localStorage (для мобільних пристроїв)
   const savedApiUrl = localStorage.getItem('api_url_override')
   if (savedApiUrl) {
-    return savedApiUrl.endsWith('/') ? savedApiUrl.slice(0, -1) : savedApiUrl
+    const normalized = savedApiUrl.endsWith('/') ? savedApiUrl.slice(0, -1) : savedApiUrl
+    // Якщо збережений URL використовує HTTP, але сайт завантажений через HTTPS, замінити на HTTPS
+    if (normalized.startsWith('http://') && window.location.protocol === 'https:') {
+      return normalized.replace('http://', 'https://')
+    }
+    return normalized
   }
+  
+  // Визначаємо протокол на основі поточного протоколу сторінки
+  const currentProtocol = window.location.protocol // 'http:' або 'https:'
+  const isHttps = currentProtocol === 'https:'
   
   // Якщо працюємо на мобільному пристрої або не на localhost
   const hostname = window.location.hostname
   const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1'
   
-  // Якщо не localhost (наприклад, IP-адреса), використовуємо її для API
+  // Якщо не localhost (наприклад, IP-адреса або домен), використовуємо той самий протокол
   if (!isLocalhost && hostname !== '') {
     const port = import.meta.env.VITE_API_PORT || '8787'
-    return `http://${hostname}:${port}`
+    const protocol = isHttps ? 'https' : 'http'
+    return `${protocol}://${hostname}:${port}`
   }
   
   // За замовчуванням або з env
-  const url = import.meta.env.VITE_API_URL || 'http://localhost:8787'
+  let url = import.meta.env.VITE_API_URL || 'http://localhost:8787'
+  
+  // Якщо сайт завантажений через HTTPS, але URL використовує HTTP, замінити на HTTPS
+  if (isHttps && url.startsWith('http://') && !url.includes('localhost') && !url.includes('127.0.0.1')) {
+    url = url.replace('http://', 'https://')
+  }
+  
   return url.endsWith('/') ? url.slice(0, -1) : url
 }
 

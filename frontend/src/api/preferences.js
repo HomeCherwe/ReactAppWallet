@@ -103,74 +103,95 @@ export async function saveUserPreferences(preferences, skipCacheUpdate = false) 
   }
 }
 
+// Promise для відстеження поточного процесу збереження
+let currentFlushPromise = null
+
 /**
  * Внутрішня функція для фактичного збереження preferences
+ * @returns {Promise<void>}
  */
 async function flushPendingUpdates() {
-  if (pendingUpdates.size === 0) return
+  if (pendingUpdates.size === 0) {
+    return
+  }
+  
+  // Якщо вже йде процес збереження, повертаємо той самий Promise
+  if (currentFlushPromise) {
+    return currentFlushPromise
+  }
   
   console.log('[flushPendingUpdates] Початок збереження, pending updates:', Array.from(pendingUpdates.entries()))
   
-  try {
-    // Special handling for apis - save to separate column
-    const apisUpdate = pendingUpdates.get('apis') || pendingUpdates.get('APIs')
-    if (apisUpdate !== undefined) {
-      console.log('[flushPendingUpdates] Зберігаю APIs...')
-      await apiFetch('/api/preferences/apis', {
-        method: 'POST',
-        body: JSON.stringify({ apis: apisUpdate })
-      })
-      pendingUpdates.delete('apis')
-      pendingUpdates.delete('APIs')
-      invalidatePreferencesCache()
-      console.log('[flushPendingUpdates] APIs збережено')
-    }
-    
-    // Якщо є інші оновлення (не apis), зберігаємо їх разом
-    if (pendingUpdates.size > 0) {
-      const current = getCachedPreferences() || {}
-      const updated = { ...current }
-      
-      // Застосовуємо всі pending оновлення з merge для кожної секції
-      for (const [key, value] of pendingUpdates.entries()) {
-        // Якщо значення - об'єкт, merge-имо з існуючими налаштуваннями секції
-        if (value && typeof value === 'object' && !Array.isArray(value)) {
-          updated[key] = {
-            ...(updated[key] || {}),
-            ...value
-          }
-        } else {
-          // Якщо не об'єкт (наприклад, null або примітив), просто замінюємо
-          updated[key] = value
-        }
+  // Створюємо новий Promise для поточного процесу збереження
+  currentFlushPromise = (async () => {
+    try {
+      // Special handling for apis - save to separate column
+      const apisUpdate = pendingUpdates.get('apis') || pendingUpdates.get('APIs')
+      if (apisUpdate !== undefined) {
+        console.log('[flushPendingUpdates] Зберігаю APIs...')
+        await apiFetch('/api/preferences/apis', {
+          method: 'POST',
+          body: JSON.stringify({ apis: apisUpdate })
+        })
+        pendingUpdates.delete('apis')
+        pendingUpdates.delete('APIs')
+        invalidatePreferencesCache()
+        console.log('[flushPendingUpdates] APIs збережено')
       }
       
-      console.log('[flushPendingUpdates] Зберігаю preferences:', updated)
-      
-      // Зберігаємо в БД
-      await saveUserPreferences(updated, true) // skipCacheUpdate = true, щоб не викликати callback
-      console.log('[flushPendingUpdates] Preferences збережено успішно')
-      
-      // Оновлюємо кеш після успішного збереження (без callback, щоб не перезаписати локальний стан компонентів)
-      globalPreferencesCache = updated
-      
+      // Якщо є інші оновлення (не apis), зберігаємо їх разом
+      if (pendingUpdates.size > 0) {
+        const current = getCachedPreferences() || {}
+        const updated = { ...current }
+        
+        // Застосовуємо всі pending оновлення з merge для кожної секції
+        for (const [key, value] of pendingUpdates.entries()) {
+          // Якщо значення - об'єкт, merge-имо з існуючими налаштуваннями секції
+          if (value && typeof value === 'object' && !Array.isArray(value)) {
+            updated[key] = {
+              ...(updated[key] || {}),
+              ...value
+            }
+          } else {
+            // Якщо не об'єкт (наприклад, null або примітив), просто замінюємо
+            updated[key] = value
+          }
+        }
+        
+        console.log('[flushPendingUpdates] Зберігаю preferences:', updated)
+        
+        // Зберігаємо в БД
+        await saveUserPreferences(updated, true) // skipCacheUpdate = true, щоб не викликати callback
+        console.log('[flushPendingUpdates] Preferences збережено успішно')
+        
+        // Оновлюємо кеш після успішного збереження (без callback, щоб не перезаписати локальний стан компонентів)
+        globalPreferencesCache = updated
+        
+        pendingUpdates.clear()
+      }
+    } catch (e) {
+      console.error('[flushPendingUpdates] Помилка збереження:', e)
       pendingUpdates.clear()
+      throw e // Прокидаємо помилку далі
+    } finally {
+      // Очищаємо Promise після завершення
+      currentFlushPromise = null
     }
-  } catch (e) {
-    console.error('[flushPendingUpdates] Помилка збереження:', e)
-    pendingUpdates.clear()
-  }
+  })()
+  
+  return currentFlushPromise
 }
 
 /**
  * Оновити частину налаштувань (merge) з debounce
  * @param {string} key - Ключ секції (напр. 'chart', 'cards')
  * @param {Object} value - Нове значення для секції
- * @returns {Promise<void>}
+ * @param {boolean} immediate - Якщо true, зберегти одразу без debounce
+ * @returns {Promise<void>} Promise який резолвиться після збереження
  */
-export async function updatePreferencesSection(key, value) {
+export async function updatePreferencesSection(key, value, immediate = false) {
   try {
-    console.log('[updatePreferencesSection] Оновлення:', key, value)
+    console.log('[updatePreferencesSection] Оновлення:', key, value, 'immediate:', immediate)
     
     // Якщо значення - об'єкт, merge-имо з існуючими pending оновленнями для цієї секції
     if (value && typeof value === 'object' && !Array.isArray(value)) {
@@ -197,16 +218,32 @@ export async function updatePreferencesSection(key, value) {
     // Очищаємо попередній timeout
     if (saveTimeout) {
       clearTimeout(saveTimeout)
+      saveTimeout = null
+    }
+    
+    // Якщо immediate, зберігаємо одразу
+    if (immediate) {
+      console.log('[updatePreferencesSection] Immediate save requested')
+      return await flushPendingUpdates()
     }
     
     // Встановлюємо новий timeout для збереження
-    saveTimeout = setTimeout(() => {
-      console.log('[updatePreferencesSection] Timeout вийшов, викликаю flushPendingUpdates')
-      flushPendingUpdates()
-      saveTimeout = null
-    }, SAVE_DEBOUNCE_MS)
+    return new Promise((resolve, reject) => {
+      saveTimeout = setTimeout(async () => {
+        console.log('[updatePreferencesSection] Timeout вийшов, викликаю flushPendingUpdates')
+        try {
+          await flushPendingUpdates()
+          saveTimeout = null
+          resolve()
+        } catch (error) {
+          saveTimeout = null
+          reject(error)
+        }
+      }, SAVE_DEBOUNCE_MS)
+    })
   } catch (e) {
     console.error('[updatePreferencesSection] Помилка:', e)
+    throw e
   }
 }
 

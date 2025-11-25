@@ -337,21 +337,21 @@ export default function SubscriptionsPage() {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white rounded-2xl shadow-soft border border-gray-200 p-6"
+      className="bg-white rounded-2xl shadow-soft border border-gray-200 p-4 sm:p-6"
     >
       {/* Загальна витрата на місяць */}
       {subscriptions.length > 0 && (
-        <div className="mb-6 p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl border border-indigo-200">
+        <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl border border-indigo-200">
           <div>
-            <h3 className="text-sm font-medium text-gray-600 mb-2">Загальна витрата на місяць (всі активні підписки)</h3>
-            <div className="flex items-center gap-4 flex-wrap">
+            <h3 className="text-xs sm:text-sm font-medium text-gray-600 mb-2">Загальна витрата на місяць (всі активні підписки)</h3>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
               <div className="flex items-center gap-2">
-                <span className="text-2xl font-bold text-indigo-700">
+                <span className="text-lg sm:text-2xl font-bold text-indigo-700">
                   {totalMonthlyExpense.UAH.toFixed(2)} UAH
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-2xl font-bold text-purple-700">
+                <span className="text-lg sm:text-2xl font-bold text-purple-700">
                   {totalMonthlyExpense.EUR.toFixed(2)} EUR
                 </span>
               </div>
@@ -360,9 +360,9 @@ export default function SubscriptionsPage() {
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-          <Repeat size={24} />
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
+        <h2 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
+          <Repeat size={20} className="sm:w-6 sm:h-6" />
           Підписки
         </h2>
         <button
@@ -381,10 +381,11 @@ export default function SubscriptionsPage() {
             })
             setModalOpen(true)
           }}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors"
+          className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors text-sm sm:text-base"
         >
-          <Plus size={18} />
-          Додати підписку
+          <Plus size={16} className="sm:w-[18px] sm:h-[18px]" />
+          <span className="hidden sm:inline">Додати підписку</span>
+          <span className="sm:hidden">Додати</span>
         </button>
       </div>
 
@@ -399,21 +400,21 @@ export default function SubscriptionsPage() {
           {subscriptions.map((sub) => (
             <div
               key={sub.id}
-              className={`p-4 rounded-lg border-2 transition-all ${
+              className={`p-3 sm:p-4 rounded-lg border-2 transition-all ${
                 sub.is_active
                   ? 'border-gray-200 bg-white hover:border-indigo-300'
                   : 'border-gray-100 bg-gray-50 opacity-60'
               }`}
             >
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-2">
-                    <h3 className="font-semibold text-gray-900">{sub.name}</h3>
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-2 flex-wrap">
+                    <h3 className="font-semibold text-gray-900 text-sm sm:text-base">{sub.name}</h3>
                     {!sub.is_active && (
                       <span className="text-xs px-2 py-0.5 bg-gray-200 text-gray-600 rounded">Неактивна</span>
                     )}
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm mb-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 text-xs sm:text-sm mb-2">
                     <div className="flex items-center gap-1.5 text-gray-600">
                       <DollarSign size={16} />
                       <span className={sub.is_expense ? 'text-red-600' : 'text-green-600'}>
@@ -437,8 +438,8 @@ export default function SubscriptionsPage() {
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5 text-gray-600">
-                      <Calendar size={16} />
-                      <span>Наступна: {getNextExecutionDate(sub)}</span>
+                      <Calendar size={14} className="sm:w-4 sm:h-4 flex-shrink-0" />
+                      <span className="break-words">Наступна: {getNextExecutionDate(sub)}</span>
                     </div>
                   </div>
                   <div className="text-xs text-gray-500 space-y-1 mt-2">
@@ -486,35 +487,36 @@ export default function SubscriptionsPage() {
                     })()}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 ml-4">
+                <div className="flex items-center gap-1.5 sm:gap-2 sm:ml-4 flex-shrink-0">
                   <button
                     onClick={() => handleToggleActive(sub)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    className={`px-2 sm:px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
                       sub.is_active
                         ? 'bg-gray-100 hover:bg-gray-200 text-gray-700'
                         : 'bg-green-100 hover:bg-green-200 text-green-700'
                     }`}
                   >
-                    {sub.is_active ? 'Деактивувати' : 'Активувати'}
+                    <span className="hidden sm:inline">{sub.is_active ? 'Деактивувати' : 'Активувати'}</span>
+                    <span className="sm:hidden">{sub.is_active ? 'Вимк' : 'Увімк'}</span>
                   </button>
                   <button
                     onClick={() => handleOpenParticipants(sub)}
-                    className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                    className="p-1.5 sm:p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                     title="Учасники"
                   >
-                    <Users size={18} />
+                    <Users size={16} className="sm:w-[18px] sm:h-[18px]" />
                   </button>
                   <button
                     onClick={() => handleEdit(sub)}
-                    className="p-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                    className="p-1.5 sm:p-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
                   >
-                    <Edit2 size={18} />
+                    <Edit2 size={16} className="sm:w-[18px] sm:h-[18px]" />
                   </button>
                   <button
                     onClick={() => handleDeleteClick(sub)}
-                    className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    className="p-1.5 sm:p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                   >
-                    <Trash2 size={18} />
+                    <Trash2 size={16} className="sm:w-[18px] sm:h-[18px]" />
                   </button>
                 </div>
               </div>

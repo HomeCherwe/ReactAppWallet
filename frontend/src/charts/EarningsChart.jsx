@@ -15,6 +15,7 @@ import { txBus } from '../utils/txBus'
 import { updatePreferencesSection } from '../api/preferences'
 import { usePreferences } from '../context/PreferencesContext'
 import { listCards } from '../api/cards'
+import useMonoRates from '../hooks/useMonoRates'
 
 // Кольори для різних валют
 const CURRENCY_COLORS = {
@@ -29,7 +30,33 @@ const getCurrencyColor = (currency) => {
   return CURRENCY_COLORS[currency] || CURRENCY_COLORS.DEFAULT
 }
 
-const CustomTooltip = ({ active, payload, label, onPointClick, isMobile, currency, mode }) => {
+// Функція для конвертації валюти
+const convertCurrency = (amount, fromCurrency, toCurrency, rates) => {
+  if (!fromCurrency || fromCurrency === toCurrency) return amount
+  if (!rates || Object.keys(rates).length === 0) return null
+  
+  const codeMap = { UAH: 980, USD: 840, EUR: 978, GBP: 826, PLN: 985, USDT: 840 }
+  const fromCode = codeMap[fromCurrency] || 980
+  const toCode = codeMap[toCurrency] || 980
+  
+  if (fromCode === toCode) return amount
+  
+  // Конвертуємо через UAH як проміжну валюту
+  let inUAH = amount
+  if (fromCode !== 980) {
+    const rateToUAH = rates[`${fromCode}->980`]
+    if (!rateToUAH) return null
+    inUAH = amount * rateToUAH
+  }
+  
+  // Конвертуємо з UAH в цільову валюту
+  if (toCode === 980) return inUAH
+  const rateFromUAH = rates[`${toCode}->980`]
+  if (!rateFromUAH) return null
+  return inUAH / rateFromUAH
+}
+
+const CustomTooltip = ({ active, payload, label, onPointClick, isMobile, currency, mode, rates }) => {
   if (active && payload && payload.length) {
     const isSpending = mode === 'spending'
     const sign = isSpending ? '-' : '+'
@@ -41,6 +68,21 @@ const CustomTooltip = ({ active, payload, label, onPointClick, isMobile, currenc
       if (nonZeroPayloads.length === 0) {
         return <div style={{ opacity: 0, pointerEvents: 'none' }} />
       }
+      
+      // Рахуємо конвертовані суми в EUR і UAH
+      let totalEURConverted = 0
+      let totalUAHConverted = 0
+      
+      nonZeroPayloads.forEach(p => {
+        const cur = p.dataKey || 'UAH'
+        const amount = p.value || 0
+        
+        // Конвертовані суми
+        const inEUR = convertCurrency(amount, cur, 'EUR', rates)
+        const inUAH = convertCurrency(amount, cur, 'UAH', rates)
+        if (inEUR !== null) totalEURConverted += inEUR
+        if (inUAH !== null) totalUAHConverted += inUAH
+      })
       
       const iso = payload[0]?.payload?._iso
       const handleActivate = (e) => {
@@ -62,6 +104,8 @@ const CustomTooltip = ({ active, payload, label, onPointClick, isMobile, currenc
           title={isMobile ? "Натисніть, щоб побачити транзакції цього дня" : undefined}
         >
           <div className="text-xs text-gray-500 mb-1">{label}</div>
+          
+          {/* Окремі валюти */}
           {nonZeroPayloads.map((p, idx) => {
             const cur = p.dataKey || 'UAH'
             const amountColor = isSpending ? 'text-red-600' : 'text-green-600'
@@ -72,11 +116,29 @@ const CustomTooltip = ({ active, payload, label, onPointClick, isMobile, currenc
                   style={{ backgroundColor: getCurrencyColor(cur) }}
                 />
                 <div className={`font-semibold ${amountColor}`}>
-                  {sign}{p.value.toLocaleString()} {cur}
+                  {sign}{p.value.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {cur}
                 </div>
               </div>
             )
           })}
+          
+          {/* Конвертовані суми */}
+          {(totalEURConverted > 0 || totalUAHConverted > 0) && (
+            <div className="border-t border-gray-200 mt-2 pt-2">
+              <div className="text-xs text-gray-400 mb-0.5">Конвертовано:</div>
+              {totalEURConverted > 0 && (
+                <div className={`text-xs font-semibold ${isSpending ? 'text-red-600' : 'text-green-600'}`}>
+                  {sign}{totalEURConverted.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR
+                </div>
+              )}
+              {totalUAHConverted > 0 && (
+                <div className={`text-xs font-semibold ${isSpending ? 'text-red-600' : 'text-green-600'}`}>
+                  {sign}{totalUAHConverted.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} UAH
+                </div>
+              )}
+            </div>
+          )}
+          
           {isMobile ? (
             <div className="text-xs text-gray-400 mt-1">👆 Детальніше</div>
           ) : (
@@ -91,6 +153,12 @@ const CustomTooltip = ({ active, payload, label, onPointClick, isMobile, currenc
     if (!value || value === 0) {
       return <div style={{ opacity: 0, pointerEvents: 'none' }} />
     }
+    
+    const currentCurrency = currency || 'UAH'
+    
+    // Конвертуємо в EUR і UAH
+    const inEUR = convertCurrency(value, currentCurrency, 'EUR', rates)
+    const inUAH = convertCurrency(value, currentCurrency, 'UAH', rates)
     
     const iso = payload[0]?.payload?._iso
     const handleActivate = (e) => {
@@ -113,8 +181,28 @@ const CustomTooltip = ({ active, payload, label, onPointClick, isMobile, currenc
         onTouchEnd={isMobile ? handleActivate : undefined}
         title={isMobile ? "Натисніть, щоб побачити транзакції цього дня" : undefined}
       >
-        <div className={`font-semibold ${amountColor}`}>{sign}{value.toLocaleString()} {currency || 'UAH'}</div>
-        <div className="text-xs text-gray-500">{label}</div>
+        <div className={`font-semibold ${amountColor}`}>
+          {sign}{value.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {currentCurrency}
+        </div>
+        <div className="text-xs text-gray-500 mb-1">{label}</div>
+        
+        {/* Конвертовані суми */}
+        {(inEUR !== null || inUAH !== null) && (
+          <div className="border-t border-gray-200 pt-1 mt-1">
+            <div className="text-xs text-gray-400 mb-0.5">Конвертовано:</div>
+            {inEUR !== null && currentCurrency !== 'EUR' && (
+              <div className={`text-xs font-semibold ${amountColor}`}>
+                {sign}{inEUR.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR
+              </div>
+            )}
+            {inUAH !== null && currentCurrency !== 'UAH' && (
+              <div className={`text-xs font-semibold ${amountColor}`}>
+                {sign}{inUAH.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} UAH
+              </div>
+            )}
+          </div>
+        )}
+        
         {isMobile ? (
           <div className="text-xs text-gray-400 mt-1">👆 Детальніше</div>
         ) : (
@@ -320,6 +408,7 @@ function computeChartData(txsArg, modeArg, fromArg, toArg, currencyArg) {
 
 export default function EarningsChart(){
   const { preferences, loading: prefsLoading } = usePreferences()
+  const rates = useMonoRates()
   const [mode, setMode] = useState('earning') // 'earning' | 'spending'
   
   // Dashboard settings
@@ -628,7 +717,16 @@ export default function EarningsChart(){
       if (!iso) return
       const included = getIncludedTxIds(txs || [], mode, currency === 'ALL' ? null : currency)
       const txsForDay = (txs || []).filter(t => {
-        try { return new Date(t.created_at).toISOString().slice(0,10) === iso && included.has(t.id) } catch { return false }
+        try { 
+          if (new Date(t.created_at).toISOString().slice(0,10) !== iso) return false
+          if (!included.has(t.id)) return false
+          // Фільтруємо USDT якщо налаштування вимкнено
+          if (currency === 'ALL' && !showUsdtInChart) {
+            const txCur = (t.currency || 'UAH').toUpperCase()
+            if (txCur === 'USDT') return false
+          }
+          return true
+        } catch { return false }
       })
       setDayTxs(txsForDay)
       setDayModalOpen(true)
@@ -788,7 +886,16 @@ export default function EarningsChart(){
             if (clickedDay?._iso) {
               const included = getIncludedTxIds(txs || [], mode, currency === 'ALL' ? null : currency)
               const txsForDay = (txs || []).filter(t => {
-                try { return new Date(t.created_at).toISOString().slice(0,10) === clickedDay._iso && included.has(t.id) } catch { return false }
+                try { 
+                  if (new Date(t.created_at).toISOString().slice(0,10) !== clickedDay._iso) return false
+                  if (!included.has(t.id)) return false
+                  // Фільтруємо USDT якщо налаштування вимкнено
+                  if (currency === 'ALL' && !showUsdtInChart) {
+                    const txCur = (t.currency || 'UAH').toUpperCase()
+                    if (txCur === 'USDT') return false
+                  }
+                  return true
+                } catch { return false }
               })
               setDayTxs(txsForDay)
               setDayModalOpen(true)
@@ -827,10 +934,19 @@ export default function EarningsChart(){
               <Tooltip 
                 trigger="hover"
                 animationDuration={200}
-                content={<CustomTooltip isMobile={isMobileViewport} currency={currency} mode={mode} onPointClick={(iso) => {
+                content={<CustomTooltip isMobile={isMobileViewport} currency={currency} mode={mode} rates={rates} onPointClick={(iso) => {
                   const included = getIncludedTxIds(txs || [], mode, currency === 'ALL' ? null : currency)
                   const txsForDay = (txs || []).filter(t => {
-                    try { return new Date(t.created_at).toISOString().slice(0,10) === iso && included.has(t.id) } catch { return false }
+                    try { 
+                      if (new Date(t.created_at).toISOString().slice(0,10) !== iso) return false
+                      if (!included.has(t.id)) return false
+                      // Фільтруємо USDT якщо налаштування вимкнено
+                      if (currency === 'ALL' && !showUsdtInChart) {
+                        const txCur = (t.currency || 'UAH').toUpperCase()
+                        if (txCur === 'USDT') return false
+                      }
+                      return true
+                    } catch { return false }
                   })
                   setDayTxs(txsForDay)
                   setDayModalOpen(true)

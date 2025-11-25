@@ -558,10 +558,11 @@ export default function ProfilePage() {
                       // Отримуємо поточні налаштування dashboard
                       const currentDashboard = preferences?.dashboard || {}
                       // Оновлюємо тільки showUsdtInChart, зберігаючи інші налаштування
+                      // Використовуємо immediate=true для негайного збереження без debounce
                       await updatePreferencesSection('dashboard', {
                         ...currentDashboard,
                         showUsdtInChart: newValue
-                      })
+                      }, true)
                       toast.success('Налаштування збережено')
                     } catch (error) {
                       console.error('Failed to save dashboard settings:', error)

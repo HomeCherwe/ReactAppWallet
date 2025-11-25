@@ -63,6 +63,7 @@ export default function MonthlyPayment() {
   const [selectedCategory, setSelectedCategory] = useState('')
   const [categories, setCategories] = useState([])
   const [filtersLoaded, setFiltersLoaded] = useState(false) // Track if filters are loaded from DB
+  const [showUsdt, setShowUsdt] = useState(true) // Show USDT transactions by default
 
   const listRef = useRef(null)
   const saveFiltersTimeoutRef = useRef(null)
@@ -77,7 +78,7 @@ export default function MonthlyPayment() {
     const { data: { user } } = await supabase.auth.getUser()
     
     const [txs, cards] = await Promise.all([
-      listTransactions({ from, to, search, transactionType: txType, category }),
+      listTransactions({ from, to, search, transactionType: txType, category, excludeUsdt: !showUsdt }),
       user ? listCards() : []
     ])
   // map by card id so we can lookup currency by card_id (transactions store card_id)
@@ -126,6 +127,9 @@ export default function MonthlyPayment() {
         if (filters.category !== undefined) {
           setSelectedCategory(filters.category || '')
         }
+        if (typeof filters.showUsdt === 'boolean') {
+          setShowUsdt(filters.showUsdt)
+        }
       }
       setFiltersLoaded(true)
     } catch (e) {
@@ -139,7 +143,7 @@ export default function MonthlyPayment() {
     if (!filtersLoaded) return
     
     fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })
-  }, [transactionType, selectedCategory, pageSize, filtersLoaded]) // Re-fetch when filters or page size change
+  }, [transactionType, selectedCategory, pageSize, showUsdt, filtersLoaded]) // Re-fetch when filters, page size, or USDT toggle change
 
   // Subscribe to txBus events to refresh list when transactions are created/updated
   useEffect(() => {
@@ -151,7 +155,7 @@ export default function MonthlyPayment() {
       }
     })
     return unsubscribe
-  }, [searchQuery, transactionType, selectedCategory])
+  }, [searchQuery, transactionType, selectedCategory, showUsdt])
 
   const handleSearch = (query) => {
     setSearchQuery(query)
@@ -174,7 +178,8 @@ export default function MonthlyPayment() {
         await updatePreferencesSection('transactionsFilters', {
           pageSize,
           transactionType,
-          category: selectedCategory || ''
+          category: selectedCategory || '',
+          showUsdt
         })
       } catch (e) {
         console.error('Failed to save transaction filters:', e)
@@ -186,7 +191,7 @@ export default function MonthlyPayment() {
         clearTimeout(saveFiltersTimeoutRef.current)
       }
     }
-  }, [pageSize, transactionType, selectedCategory, filtersLoaded])
+  }, [pageSize, transactionType, selectedCategory, showUsdt, filtersLoaded])
 
   const handleFilterChange = (newType, newCategory) => {
     setTransactionType(newType)
@@ -268,7 +273,7 @@ export default function MonthlyPayment() {
   }
 
   const handleSelectAll = (checked) => {
-    // Since filters are now applied on backend, we can use rows directly
+    // Since USDT filtering is now done on backend, we can use rows directly
     if (checked) {
       setSelectedIds(new Set(rows.map(tx => tx.id)))
     } else {
@@ -426,20 +431,39 @@ export default function MonthlyPayment() {
           {rows.length > 0 && (
             <div className="mb-2 pb-2 border-b border-gray-200">
               <div className="flex items-center justify-between gap-4 flex-wrap">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.size > 0 && selectedIds.size === rows.length && rows.length > 0}
-                    onChange={(e) => handleSelectAll(e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span className="text-sm text-gray-600">
-                    Вибрати всі ({selectedIds.size}/{rows.length})
-                  </span>
-                </label>
+                <div className="flex items-center gap-4 flex-wrap">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.size > 0 && selectedIds.size === rows.length && rows.length > 0}
+                      onChange={(e) => handleSelectAll(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-sm text-gray-600">
+                      Вибрати всі ({selectedIds.size}/{rows.length})
+                    </span>
+                  </label>
+                  
+                  {/* USDT Toggle */}
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showUsdt}
+                      onChange={(e) => {
+                        setShowUsdt(e.target.checked)
+                        setSelectedIds(new Set()) // Clear selection when filter changes
+                        setOffset(0) // Reset offset when filter changes
+                      }}
+                      className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-sm text-gray-600">
+                      Показувати USDT
+                    </span>
+                  </label>
+                </div>
 
-                {/* Filters and Page Size */}
-                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Filters and Page Size */}
+                  <div className="flex items-center gap-2 flex-wrap">
                   {/* Page size selector */}
                   <select
                     value={pageSize}

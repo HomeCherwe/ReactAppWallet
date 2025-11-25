@@ -363,11 +363,11 @@ export default function App(){
               <SubscriptionsPage />
             </div>
           } />
-          <Route path="/cards" element={
-            <div className="lg:col-span-2 sm:hidden">
-              <CardsPage />
-            </div>
-          } />
+            <Route path="/cards" element={
+              <div className="lg:col-span-2">
+                <CardsPage />
+              </div>
+            } />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>

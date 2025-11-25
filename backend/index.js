@@ -206,17 +206,123 @@ async function optionalAuth(req, res, next) {
 // API ENDPOINTS FOR DATABASE OPERATIONS
 // ========================================
 
+// Banks API
+app.get('/api/banks', getUserFromToken, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('banks')
+      .select('id, name, iban, bic, beneficiary, created_at, updated_at')
+      .eq('user_id', req.user_id)
+      .order('name', { ascending: true })
+    
+    if (error) throw error
+    res.json(data || [])
+  } catch (error) {
+    console.error('GET /api/banks error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.post('/api/banks', getUserFromToken, async (req, res) => {
+  try {
+    const { name, iban, bic, beneficiary } = req.body
+    const payload = { 
+      name, 
+      iban: iban || null, 
+      bic: bic || null, 
+      beneficiary: beneficiary || null,
+      user_id: req.user_id 
+    }
+    
+    const { data, error } = await supabase
+      .from('banks')
+      .insert([payload])
+      .select()
+      .single()
+    
+    if (error) throw error
+    res.json(data)
+  } catch (error) {
+    console.error('POST /api/banks error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.put('/api/banks/:id', getUserFromToken, async (req, res) => {
+  try {
+    const { id } = req.params
+    const patch = { ...req.body }
+    delete patch.id
+    delete patch.user_id
+    
+    const { data, error } = await supabase
+      .from('banks')
+      .update(patch)
+      .eq('id', id)
+      .eq('user_id', req.user_id)
+      .select()
+      .single()
+    
+    if (error) throw error
+    if (!data) return res.status(404).json({ error: 'Bank not found' })
+    res.json(data)
+  } catch (error) {
+    console.error('PUT /api/banks/:id error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.delete('/api/banks/:id', getUserFromToken, async (req, res) => {
+  try {
+    const { id } = req.params
+    
+    // Перевіряємо, чи є карти, прив'язані до цього банку
+    const { data: cards } = await supabase
+      .from('cards')
+      .select('id')
+      .eq('bank_id', id)
+      .eq('user_id', req.user_id)
+      .limit(1)
+    
+    if (cards && cards.length > 0) {
+      return res.status(400).json({ error: 'Не можна видалити банк, до якого прив\'язані карти' })
+    }
+    
+    const { error } = await supabase
+      .from('banks')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', req.user_id)
+    
+    if (error) throw error
+    res.json({ success: true })
+  } catch (error) {
+    console.error('DELETE /api/banks/:id error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 // Cards API
 app.get('/api/cards', getUserFromToken, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('cards')
-      .select('id, bank, name, currency, initial_balance, bg_url, card_number, created_at')
+      .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, banks(name, iban, bic, beneficiary)')
       .eq('user_id', req.user_id)
       .order('created_at', { ascending: false })
     
     if (error) throw error
-    res.json(data || [])
+    
+    // Трансформуємо дані для сумісності зі старою структурою
+    const transformed = (data || []).map(card => ({
+      ...card,
+      bank: card.banks?.name || null,
+      iban: card.banks?.iban || null,
+      bic: card.banks?.bic || null,
+      beneficiary: card.banks?.beneficiary || null
+    }))
+    
+    res.json(transformed)
   } catch (error) {
     console.error('GET /api/cards error:', error)
     res.status(500).json({ error: error.message })
@@ -225,17 +331,37 @@ app.get('/api/cards', getUserFromToken, async (req, res) => {
 
 app.post('/api/cards', getUserFromToken, async (req, res) => {
   try {
-    const { bank, name, card_number, currency, initial_balance = 0, bg_url } = req.body
-    const payload = { bank, name, card_number, currency, initial_balance, bg_url, user_id: req.user_id }
+    const { bank_id, name, card_number, currency, initial_balance = 0, bg_url, expiry_date, cvv } = req.body
+    const payload = { 
+      bank_id: bank_id || null,
+      name, 
+      card_number: card_number || null, 
+      currency, 
+      initial_balance, 
+      bg_url, 
+      expiry_date: expiry_date || null, 
+      cvv: cvv || null,
+      user_id: req.user_id 
+    }
     
     const { data, error } = await supabase
       .from('cards')
       .insert([payload])
-      .select()
+      .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, banks(name, iban, bic, beneficiary)')
       .single()
     
     if (error) throw error
-    res.json(data)
+    
+    // Трансформуємо для сумісності
+    const transformed = {
+      ...data,
+      bank: data.banks?.name || null,
+      iban: data.banks?.iban || null,
+      bic: data.banks?.bic || null,
+      beneficiary: data.banks?.beneficiary || null
+    }
+    
+    res.json(transformed)
   } catch (error) {
     console.error('POST /api/cards error:', error)
     res.status(500).json({ error: error.message })
@@ -254,12 +380,22 @@ app.put('/api/cards/:id', getUserFromToken, async (req, res) => {
       .update(patch)
       .eq('id', id)
       .eq('user_id', req.user_id) // Тільки свої картки
-      .select()
+      .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, banks(name, iban, bic, beneficiary)')
       .single()
     
     if (error) throw error
     if (!data) return res.status(404).json({ error: 'Card not found' })
-    res.json(data)
+    
+    // Трансформуємо для сумісності
+    const transformed = {
+      ...data,
+      bank: data.banks?.name || null,
+      iban: data.banks?.iban || null,
+      bic: data.banks?.bic || null,
+      beneficiary: data.banks?.beneficiary || null
+    }
+    
+    res.json(transformed)
   } catch (error) {
     console.error('PUT /api/cards/:id error:', error)
     res.status(500).json({ error: error.message })
@@ -459,6 +595,59 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       q = q.eq('category', category)
     }
     
+    // Exclude USDT filter - join with cards to filter by currency
+    const excludeUsdt = req.query.exclude_usdt === 'true'
+    if (excludeUsdt) {
+      // We need to join with cards table to filter by currency
+      // Since Supabase doesn't support direct joins in select, we'll need to:
+      // 1. First get all transactions with card_id
+      // 2. Then filter out those with USDT currency
+      // OR use a different approach: select with cards join
+      
+      // For now, we'll fetch all and filter client-side, but that's not ideal
+      // Better approach: use a subquery or RPC function
+      // Let's use a workaround: select cards.currency in the select and filter
+      
+      // Actually, we can use .not() with a subquery, but PostgREST doesn't support that well
+      // Best approach: fetch transactions, then filter by checking card currency
+      // But for performance, let's do it in the query using a join
+      
+      // We'll need to modify the select to include cards.currency
+      // But since we're using safeFields, we need to handle this differently
+      
+      // Temporary solution: we'll filter after fetching, but that's not ideal for pagination
+      // For proper pagination, we need to filter before pagination
+      
+      // Let's use a different approach: modify the query to exclude transactions where card_id
+      // points to a card with currency='USDT'
+      // We can do this by using a NOT EXISTS subquery or by joining
+      
+      // Since PostgREST doesn't support complex joins easily, we'll:
+      // 1. Fetch transactions with card_id
+      // 2. Fetch cards with currency='USDT' for this user
+      // 3. Filter out transactions with those card_ids
+      
+      // But this requires two queries or client-side filtering
+      // Better: use a view or RPC function
+      
+      // For now, let's do it client-side after fetching, but adjust pagination
+      // Actually, we can use a filter: exclude transactions where card_id is in (select id from cards where currency='USDT' and user_id=...)
+      // But PostgREST doesn't support subqueries in filters easily
+      
+      // Let's use a simpler approach: fetch cards with USDT currency first, then exclude those card_ids
+      // But this requires two queries
+      
+      // Best solution for now: fetch all matching transactions, filter by USDT, then apply pagination
+      // But this breaks pagination...
+      
+      // Actually, we can use a workaround: don't apply pagination if exclude_usdt is true,
+      // fetch all, filter, then apply pagination manually
+      // But that's inefficient
+      
+      // Let's use a better approach: use a database view or RPC function
+      // For now, we'll mark this to filter after fetching
+    }
+    
     // Search filter - search across multiple fields with partial matching
     if (search) {
       const searchTerm = search.trim()
@@ -559,35 +748,96 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
     const orderAsc = req.query.order_asc === 'true'
     q = q.order(orderBy, { ascending: orderAsc })
     
-    // Pagination (if range provided) - only apply if NOT using date filters
+    // If excludeUsdt is true, we need to fetch more transactions to compensate for filtered USDT ones
+    // We'll fetch a larger batch, filter, then apply pagination
+    let fetchLimit = null
+    let applyPaginationAfterFilter = false
+    
+    if (excludeUsdt && !start_date && !end_date) {
+      // Calculate how many to fetch: if we need 10, fetch more (e.g., 50) to account for USDT filtering
+      if (rangeFrom !== undefined && rangeTo !== undefined) {
+        const requestedCount = Number(rangeTo) - Number(rangeFrom) + 1
+        // Fetch 5x more to account for potential USDT transactions
+        fetchLimit = requestedCount * 5
+        applyPaginationAfterFilter = true
+      } else if (limit) {
+        fetchLimit = Number(limit) * 5
+        applyPaginationAfterFilter = true
+      }
+    }
+    
+    // Pagination (if range provided) - only apply if NOT using date filters and NOT excluding USDT
     // When using start_date/end_date, we want all transactions in that range
     if (start_date || end_date) {
       // No pagination for date-filtered queries - return all matching results
       // But still apply limit if explicitly provided
-      if (limit) {
+      if (limit && !excludeUsdt) {
         q = q.limit(Number(limit))
+      } else if (excludeUsdt) {
+        // For excludeUsdt with date filters, we still need to fetch all and filter
+        // Don't apply limit here, we'll filter after
       }
     } else {
       // Apply pagination only when NOT using date filters
-      // Only apply range if both from and to are explicitly provided
-      if (rangeFrom !== undefined && rangeTo !== undefined) {
-        q = q.range(Number(rangeFrom), Number(rangeTo))
-      } else if (limit) {
-        // If no range but limit is provided, use limit
-        q = q.limit(Number(limit))
+      if (excludeUsdt && applyPaginationAfterFilter) {
+        // Don't apply pagination yet, we'll do it after filtering
+        if (fetchLimit) {
+          q = q.limit(fetchLimit)
+        }
       } else {
-        // Default: no pagination, return all results
+        // Normal pagination
+        if (rangeFrom !== undefined && rangeTo !== undefined) {
+          q = q.range(Number(rangeFrom), Number(rangeTo))
+        } else if (limit) {
+          q = q.limit(Number(limit))
+        }
       }
     }
     
-    const { data, error } = await q
+    let { data, error } = await q
     if (error) {
       console.error('[GET /api/transactions] Query error:', error)
-      console.error('[GET /api/transactions] Query params:', { start_date, end_date, fields, card_id, limit, rangeFrom, rangeTo })
+      console.error('[GET /api/transactions] Query params:', { start_date, end_date, fields, card_id, limit, rangeFrom, rangeTo, excludeUsdt })
       throw error
     }
     
-    console.log(`[GET /api/transactions] Returning ${data?.length || 0} transactions for user ${req.user_id}`)
+    // Filter out USDT transactions if excludeUsdt is true
+    if (excludeUsdt && data && data.length > 0) {
+      // Get all cards with USDT currency for this user
+      const { data: usdtCards, error: cardsError } = await supabase
+        .from('cards')
+        .select('id')
+        .eq('user_id', req.user_id)
+        .eq('currency', 'USDT')
+      
+      if (!cardsError && usdtCards) {
+        const usdtCardIds = new Set(usdtCards.map(c => c.id))
+        
+        // Filter out transactions with USDT card_id
+        data = data.filter(tx => {
+          // If transaction has card_id, check if it's in USDT cards
+          if (tx.card_id) {
+            return !usdtCardIds.has(tx.card_id)
+          }
+          // If no card_id (cash transaction), we can't determine currency from transaction alone
+          // We'll keep it for now (assuming cash is not USDT)
+          return true
+        })
+        
+        // Apply pagination after filtering if needed
+        if (applyPaginationAfterFilter) {
+          if (rangeFrom !== undefined && rangeTo !== undefined) {
+            const from = Number(rangeFrom)
+            const to = Number(rangeTo)
+            data = data.slice(from, to + 1)
+          } else if (limit) {
+            data = data.slice(0, Number(limit))
+          }
+        }
+      }
+    }
+    
+    console.log(`[GET /api/transactions] Returning ${data?.length || 0} transactions for user ${req.user_id}${excludeUsdt ? ' (USDT excluded)' : ''}`)
     res.json(data || [])
   } catch (error) {
     console.error('GET /api/transactions error:', error)

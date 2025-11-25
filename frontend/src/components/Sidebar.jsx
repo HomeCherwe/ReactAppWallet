@@ -82,13 +82,12 @@ export default function Sidebar({ className = '' }){
           />
           
           {/* Мобільна версія: іконка карток */}
-          <NavItem 
-            icon={CreditCard} 
-            label="Картки"
-            active={isActive('/cards')}
-            onClick={() => navigate('/cards')}
-            className="sm:hidden"
-          />
+              <NavItem 
+                icon={CreditCard} 
+                label="Картки"
+                active={isActive('/cards')}
+                onClick={() => navigate('/cards')}
+              />
         </div>
         
         {/* Мобільна версія: аватарка з правого боку (absolute positioning) */}

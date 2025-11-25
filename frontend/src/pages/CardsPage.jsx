@@ -3,7 +3,7 @@ import CardsManager from '../components/CardsManager'
 export default function CardsPage() {
   return (
     <div className="w-full">
-      <CardsManager />
+      <CardsManager groupByBank={true} showActions={true} />
     </div>
   )
 }

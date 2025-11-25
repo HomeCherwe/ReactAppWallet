@@ -23,7 +23,7 @@ async function fileToBase64(file) {
   })
 }
 
-export async function createCard({ bank, name, card_number, currency, initial_balance = 0, file }) {
+export async function createCard({ bank_id, name, card_number, currency, initial_balance = 0, expiry_date, cvv, file }) {
   let bg_url = null
   if (file) {
     bg_url = await fileToBase64(file)
@@ -31,7 +31,7 @@ export async function createCard({ bank, name, card_number, currency, initial_ba
 
   const data = await apiFetch('/api/cards', {
     method: 'POST',
-    body: JSON.stringify({ bank, name, card_number, currency, initial_balance, bg_url })
+    body: JSON.stringify({ bank_id, name, card_number, currency, initial_balance, expiry_date, cvv, bg_url })
   })
   
   // Інвалідувати кеш карток після створення
