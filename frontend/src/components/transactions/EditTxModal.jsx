@@ -7,6 +7,7 @@ import { listCards } from '../../api/cards'
 import useMonoRates from '../../hooks/useMonoRates'
 import { getApiUrl } from '../../utils.jsx'
 import toast from 'react-hot-toast'
+import { X } from 'lucide-react'
 
 // Функція для безпечного обчислення математичних виразів
 function calculateExpression(value) {
@@ -637,7 +638,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             onMouseDown={stopCamera}
           >
-            <div className="w-full h-full sm:w-full sm:max-w-lg sm:h-auto sm:bg-white sm:rounded-2xl overflow-hidden flex flex-col" onMouseDown={e=>e.stopPropagation()}>
+            <div className="w-full h-full sm:w-full sm:max-w-lg sm:h-auto sm:bg-white sm:rounded-2xl overflow-hidden flex flex-col relative" onMouseDown={e=>e.stopPropagation()}>
               <div className="relative bg-black flex-1 flex items-center justify-center min-h-0">
                 <video 
                   ref={videoRef} 
@@ -647,15 +648,24 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
                 />
                 <canvas ref={canvasRef} className="hidden" />
               </div>
-              {/* Кнопки для мобільних - завжди видимі внизу */}
-              <div className="pb-4 sm:pb-0 p-4 sm:p-3 bg-black/90 sm:bg-white flex items-center justify-between gap-3 sm:justify-end flex-shrink-0" style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
+              
+              {/* Кнопки для мобільних - завжди видимі внизу з затемненим прозорим фоном */}
+              <div 
+                className="pb-4 sm:pb-0 p-4 sm:p-3 flex items-center justify-between gap-3 sm:justify-end flex-shrink-0" 
+                style={{ 
+                  paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
+                  background: 'linear-gradient(to top, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.5) 50%, transparent 100%)'
+                }}
+              >
                 {/* Кнопка скасувати зліва */}
                 <button 
-                  className="px-4 py-2 text-white bg-transparent hover:bg-white/10 rounded-lg font-medium transition-colors sm:text-gray-700 sm:bg-gray-100 sm:hover:bg-gray-200" 
+                  className="w-10 h-10 sm:w-8 sm:h-8 rounded-full bg-black/50 hover:bg-black/70 backdrop-blur-sm flex items-center justify-center text-white transition-colors"
                   onClick={stopCamera}
+                  title="Скасувати"
                 >
-                  СКАСУВАТИ
+                  <X size={20} className="sm:w-4 sm:h-4" />
                 </button>
+                
                 {/* Кругла кнопка для фотографування (як на iPhone) - по центру */}
                 <button 
                   className="w-16 h-16 sm:w-14 sm:h-14 rounded-full bg-white border-4 border-white shadow-lg flex items-center justify-center hover:scale-105 active:scale-95 transition-transform flex-shrink-0"
@@ -667,8 +677,9 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
                 >
                   <div className="w-12 h-12 sm:w-10 sm:h-10 rounded-full bg-white"></div>
                 </button>
+                
                 {/* Заглушка для вирівнювання */}
-                <div className="w-16 sm:w-0"></div>
+                <div className="w-10 sm:w-0"></div>
               </div>
             </div>
           </motion.div>
