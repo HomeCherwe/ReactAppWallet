@@ -7,6 +7,7 @@ export function cn(...inputs){ return twMerge(clsx(inputs)) }
 // Helper to normalize API URL (remove trailing slash)
 export function getApiUrl() {
   // Перевірка, чи є збережений API URL в localStorage (для мобільних пристроїв)
+  // Це має найвищий пріоритет
   const savedApiUrl = localStorage.getItem('api_url_override')
   if (savedApiUrl) {
     const normalized = savedApiUrl.endsWith('/') ? savedApiUrl.slice(0, -1) : savedApiUrl
@@ -15,6 +16,21 @@ export function getApiUrl() {
       return normalized.replace('http://', 'https://')
     }
     return normalized
+  }
+  
+  // Перевірка, чи є VITE_API_URL в env (другий пріоритет)
+  const envApiUrl = import.meta.env.VITE_API_URL
+  if (envApiUrl) {
+    let url = envApiUrl.endsWith('/') ? envApiUrl.slice(0, -1) : envApiUrl
+    
+    // Якщо сайт завантажений через HTTPS, але URL використовує HTTP, замінити на HTTPS
+    // (крім localhost, бо localhost зазвичай не має HTTPS)
+    const isHttps = window.location.protocol === 'https:'
+    if (isHttps && url.startsWith('http://') && !url.includes('localhost') && !url.includes('127.0.0.1')) {
+      url = url.replace('http://', 'https://')
+    }
+    
+    return url
   }
   
   // Визначаємо протокол на основі поточного протоколу сторінки
@@ -32,15 +48,8 @@ export function getApiUrl() {
     return `${protocol}://${hostname}:${port}`
   }
   
-  // За замовчуванням або з env
-  let url = import.meta.env.VITE_API_URL || 'http://localhost:8787'
-  
-  // Якщо сайт завантажений через HTTPS, але URL використовує HTTP, замінити на HTTPS
-  if (isHttps && url.startsWith('http://') && !url.includes('localhost') && !url.includes('127.0.0.1')) {
-    url = url.replace('http://', 'https://')
-  }
-  
-  return url.endsWith('/') ? url.slice(0, -1) : url
+  // За замовчуванням для локальної розробки
+  return 'http://localhost:8787'
 }
 
 // Helper to get auth token from Supabase session
