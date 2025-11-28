@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, Edit2, Trash2, Calendar, CreditCard, DollarSign, Repeat, Users } from 'lucide-react'
+import { Plus, Edit2, Trash2, Calendar, CreditCard, DollarSign, Repeat, Users, Play } from 'lucide-react'
 import { apiFetch } from '../utils.jsx'
 import { listCards } from '../api/cards'
 import { getTransactionCategories } from '../api/transactions'
@@ -220,6 +220,20 @@ export default function SubscriptionsPage() {
     } catch (e) {
       console.error('Failed to toggle subscription:', e)
       toast.error('Не вдалося змінити статус')
+    }
+  }
+
+  const handleCreateTransaction = async (sub) => {
+    try {
+      const response = await apiFetch(`/api/subscriptions/${sub.id}/create-transaction`, {
+        method: 'POST'
+      })
+      toast.success('Транзакцію створено!')
+      // Оновлюємо список підписок (можливо, щось змінилося)
+      loadData()
+    } catch (e) {
+      console.error('Failed to create transaction from subscription:', e)
+      toast.error('Не вдалося створити транзакцію')
     }
   }
 
@@ -498,6 +512,13 @@ export default function SubscriptionsPage() {
                   >
                     <span className="hidden sm:inline">{sub.is_active ? 'Деактивувати' : 'Активувати'}</span>
                     <span className="sm:hidden">{sub.is_active ? 'Вимк' : 'Увімк'}</span>
+                  </button>
+                  <button
+                    onClick={() => handleCreateTransaction(sub)}
+                    className="p-1.5 sm:p-2 text-gray-600 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                    title="Створити транзакцію"
+                  >
+                    <Play size={16} className="sm:w-[18px] sm:h-[18px]" />
                   </button>
                   <button
                     onClick={() => handleOpenParticipants(sub)}

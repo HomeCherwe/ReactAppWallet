@@ -1632,6 +1632,192 @@ function calculateNextExecution(frequency, day_of_week, day_of_month, last_execu
   return nextDate.toISOString()
 }
 
+// Функція для обробки підписок всіх користувачів (використовується в таймері)
+async function processAllUsersSubscriptions() {
+  try {
+    const now = new Date()
+    const nowISO = now.toISOString()
+    
+    // Знаходимо всі активні підписки, які потребують виконання
+    // Використовуємо service role key, щоб обійти RLS і отримати всіх користувачів
+    const { data: dueSubscriptions, error: fetchError } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('is_active', true)
+      .lte('next_execution_at', nowISO)
+    
+    if (fetchError) {
+      console.error('[Auto Subscriptions] Error fetching subscriptions:', fetchError)
+      return
+    }
+    
+    if (!dueSubscriptions || dueSubscriptions.length === 0) {
+      return // Немає підписок для обробки
+    }
+    
+    console.log(`[Auto Subscriptions] Found ${dueSubscriptions.length} subscription(s) to process`)
+    
+    let processed = 0
+    const errors = []
+    
+    // Обробляємо підписки для кожного користувача
+    for (const sub of dueSubscriptions) {
+      try {
+        // Get card name and bank name for display
+        let cardDisplayName = null
+        if (sub.card_id) {
+          const { data: cardData } = await supabase
+            .from('cards')
+            .select('name, banks(name)')
+            .eq('id', sub.card_id)
+            .single()
+          if (cardData) {
+            const bankName = cardData.banks?.name || ''
+            const cardName = cardData.name || ''
+            cardDisplayName = bankName && cardName ? `${bankName} ${cardName}` : (cardName || bankName || null)
+          }
+        }
+        
+        // Create transaction
+        const amount = sub.is_expense ? -Math.abs(sub.amount) : Math.abs(sub.amount)
+        
+        // Формуємо опис транзакції
+        let transactionNote = ''
+        if (sub.note && sub.note.trim()) {
+          transactionNote = `${sub.note} | `
+        }
+        transactionNote += `${sub.name} (автоматично створено через підписки)`
+        
+        // Використовуємо category з підписки, або 'Підписки' за замовчуванням
+        const transactionCategory = sub.category || 'Підписки'
+        
+        const { data: transaction, error: txError } = await supabase
+          .from('transactions')
+          .insert([{
+            user_id: sub.user_id,
+            amount,
+            card_id: sub.card_id,
+            card: cardDisplayName,
+            category: transactionCategory,
+            note: transactionNote,
+            created_at: sub.next_execution_at // Use scheduled date
+          }])
+          .select()
+          .single()
+        
+        if (txError) {
+          errors.push({ subscription: sub.id, user: sub.user_id, error: txError.message })
+          console.error(`[Auto Subscriptions] Error creating transaction for subscription ${sub.id}:`, txError)
+          continue
+        }
+        
+        // Calculate next execution
+        const nextExecution = calculateNextExecution(
+          sub.frequency,
+          sub.day_of_week,
+          sub.day_of_month,
+          sub.next_execution_at
+        )
+        
+        // Update subscription
+        const { error: updateError } = await supabase
+          .from('subscriptions')
+          .update({
+            last_executed_at: sub.next_execution_at,
+            next_execution_at: nextExecution
+          })
+          .eq('id', sub.id)
+        
+        if (updateError) {
+          errors.push({ subscription: sub.id, user: sub.user_id, error: updateError.message })
+          console.error(`[Auto Subscriptions] Error updating subscription ${sub.id}:`, updateError)
+          continue
+        }
+        
+        processed++
+        console.log(`[Auto Subscriptions] ✅ Processed subscription "${sub.name}" for user ${sub.user_id}`)
+      } catch (err) {
+        errors.push({ subscription: sub.id, user: sub.user_id, error: err.message })
+        console.error(`[Auto Subscriptions] Error processing subscription ${sub.id}:`, err)
+      }
+    }
+    
+    if (processed > 0) {
+      console.log(`[Auto Subscriptions] ✅ Successfully processed ${processed} subscription(s)`)
+    }
+    if (errors.length > 0) {
+      console.error(`[Auto Subscriptions] ❌ Errors processing ${errors.length} subscription(s):`, errors)
+    }
+  } catch (error) {
+    console.error('[Auto Subscriptions] Fatal error:', error)
+  }
+}
+
+// Запускаємо автоматичну обробку підписок
+// Перевіряємо тільки о 00:00 кожного дня
+let subscriptionsTimeout = null
+
+function getNextMidnight() {
+  const now = new Date()
+  const midnight = new Date()
+  midnight.setHours(0, 0, 0, 0)
+  midnight.setDate(midnight.getDate() + 1) // Наступна північ
+  
+  const msUntilMidnight = midnight.getTime() - now.getTime()
+  return msUntilMidnight
+}
+
+function scheduleNextCheck() {
+  // Очищаємо попередній таймер, якщо є
+  if (subscriptionsTimeout) {
+    clearTimeout(subscriptionsTimeout)
+  }
+  
+  const msUntilMidnight = getNextMidnight()
+  
+  subscriptionsTimeout = setTimeout(() => {
+    console.log('[Auto Subscriptions] 🕛 Midnight reached - processing subscriptions')
+    processAllUsersSubscriptions()
+    
+    // Плануємо наступну перевірку
+    scheduleNextCheck()
+  }, msUntilMidnight)
+  
+  const nextCheckDate = new Date(Date.now() + msUntilMidnight)
+  console.log(`[Auto Subscriptions] ✅ Timer scheduled - next check at ${nextCheckDate.toLocaleString('uk-UA')}`)
+}
+
+function startSubscriptionsTimer() {
+  // Перевіряємо, чи вже пройшла північ сьогодні
+  const now = new Date()
+  const todayMidnight = new Date()
+  todayMidnight.setHours(0, 0, 0, 0)
+  
+  // Якщо зараз після півночі, перевіряємо одразу
+  if (now >= todayMidnight) {
+    const hoursSinceMidnight = now.getHours()
+    const minutesSinceMidnight = now.getMinutes()
+    
+    // Якщо минуло менше 1 хвилини після півночі, перевіряємо
+    // Або якщо це перший запуск і вже пройшла північ
+    if (hoursSinceMidnight === 0 && minutesSinceMidnight < 1) {
+      console.log('[Auto Subscriptions] 🕛 Processing subscriptions immediately (just after midnight)')
+      processAllUsersSubscriptions()
+    }
+  }
+  
+  // Плануємо наступну перевірку на північ
+  scheduleNextCheck()
+}
+
+function stopSubscriptionsTimer() {
+  if (subscriptionsTimeout) {
+    clearTimeout(subscriptionsTimeout)
+    subscriptionsTimeout = null
+    console.log('[Auto Subscriptions] ⏹️  Timer stopped')
+  }
+}
+
 // Process subscriptions - check and execute due subscriptions
 app.post('/api/subscriptions/process', getUserFromToken, async (req, res) => {
   try {
@@ -1657,16 +1843,18 @@ app.post('/api/subscriptions/process', getUserFromToken, async (req, res) => {
     
     for (const sub of dueSubscriptions) {
       try {
-        // Get card currency if card_id exists
-        let transactionCurrency = 'UAH' // default
+        // Get card name and bank name for display
+        let cardDisplayName = null
         if (sub.card_id) {
           const { data: cardData } = await supabase
             .from('cards')
-            .select('currency')
+            .select('name, banks(name)')
             .eq('id', sub.card_id)
             .single()
-          if (cardData?.currency) {
-            transactionCurrency = cardData.currency
+          if (cardData) {
+            const bankName = cardData.banks?.name || ''
+            const cardName = cardData.name || ''
+            cardDisplayName = bankName && cardName ? `${bankName} ${cardName}` : (cardName || bankName || null)
           }
         }
         
@@ -1690,8 +1878,8 @@ app.post('/api/subscriptions/process', getUserFromToken, async (req, res) => {
           .insert([{
             user_id: req.user_id,
             amount,
-            currency: transactionCurrency,
             card_id: sub.card_id,
+            card: cardDisplayName,
             category: transactionCategory,
             note: transactionNote,
             created_at: sub.next_execution_at // Use scheduled date
@@ -1739,6 +1927,76 @@ app.post('/api/subscriptions/process', getUserFromToken, async (req, res) => {
     })
   } catch (error) {
     console.error('POST /api/subscriptions/process error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Manually create transaction from subscription
+app.post('/api/subscriptions/:id/create-transaction', getUserFromToken, async (req, res) => {
+  try {
+    const subscriptionId = req.params.id
+    
+    // Get subscription
+    const { data: subscription, error: subError } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('id', subscriptionId)
+      .eq('user_id', req.user_id)
+      .single()
+    
+    if (subError || !subscription) {
+      return res.status(404).json({ error: 'Subscription not found' })
+    }
+    
+    // Get card name and bank name for display
+    let cardDisplayName = null
+    if (subscription.card_id) {
+      const { data: cardData } = await supabase
+        .from('cards')
+        .select('name, banks(name)')
+        .eq('id', subscription.card_id)
+        .single()
+      if (cardData) {
+        const bankName = cardData.banks?.name || ''
+        const cardName = cardData.name || ''
+        cardDisplayName = bankName && cardName ? `${bankName} ${cardName}` : (cardName || bankName || null)
+      }
+    }
+    
+    // Create transaction
+    const amount = subscription.is_expense ? -Math.abs(subscription.amount) : Math.abs(subscription.amount)
+    
+    // Формуємо опис транзакції
+    let transactionNote = ''
+    if (subscription.note && subscription.note.trim()) {
+      transactionNote = `${subscription.note} | `
+    }
+    transactionNote += `${subscription.name} (створено вручну через підписки)`
+    
+    // Використовуємо category з підписки, або 'Підписки' за замовчуванням
+    const transactionCategory = subscription.category || 'Підписки'
+    
+    const { data: transaction, error: txError } = await supabase
+      .from('transactions')
+      .insert([{
+        user_id: req.user_id,
+        amount,
+        card_id: subscription.card_id,
+        card: cardDisplayName,
+        category: transactionCategory,
+        note: transactionNote
+      }])
+      .select()
+      .single()
+    
+    if (txError) {
+      console.error('Error creating transaction from subscription:', txError)
+      return res.status(500).json({ error: txError.message })
+    }
+    
+    res.json({ success: true, transaction })
+  } catch (error) {
+    console.error('POST /api/subscriptions/:id/create-transaction error:', error)
     res.status(500).json({ error: error.message })
   }
 })
@@ -3090,5 +3348,20 @@ if (process.env.NODE_ENV !== 'production' || process.env.VERCEL !== '1') {
     console.log(`API on http://localhost:${port}`)
     console.log(`API доступний з мережі на порту ${port}`)
     console.log(`Для доступу з телефону використовуйте IP-адресу вашого комп'ютера`)
+    
+    // Запускаємо таймер для автоматичної обробки підписок
+    startSubscriptionsTimer()
   })
+} else {
+  // Для Vercel serverless - запускаємо таймер одразу
+  // Але на Vercel serverless functions не підтримують довготривалі таймери
+  // Краще використовувати Vercel Cron Jobs або інший сервіс
+  console.warn('[Auto Subscriptions] ⚠️  Vercel serverless mode - subscriptions timer may not work reliably')
+  console.warn('[Auto Subscriptions] 💡 Consider using Vercel Cron Jobs for production')
+  // Спробуємо запустити, але це може не працювати на serverless
+  try {
+    startSubscriptionsTimer()
+  } catch (e) {
+    console.error('[Auto Subscriptions] Failed to start timer in serverless mode:', e)
+  }
 }
