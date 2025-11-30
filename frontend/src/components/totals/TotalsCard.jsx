@@ -27,6 +27,10 @@ export default function TotalsCard({ title = 'Total balance' }) {
   const touchStartX = useRef(0)
   const touchStartY = useRef(0)
 
+  const initializedRef = useRef(false)
+  const lastSavedIdxRef = useRef(null)
+  const lastSavedIsVisibleRef = useRef(null)
+
   // init from PreferencesContext (один запит на проєкт)
   useEffect(() => {
     if (prefsLoading) return
@@ -39,20 +43,28 @@ export default function TotalsCard({ title = 'Total balance' }) {
       setIsVisible(totals.isVisible)
     }
     setIdx(loadedIdx)
+    // Зберігаємо початкові значення для порівняння
+    lastSavedIdxRef.current = loadedIdx
+    lastSavedIsVisibleRef.current = totals.isVisible !== undefined ? totals.isVisible : true
     setPrefsLoaded(true)
-    // Записати дефолт у БД один раз після ініціалізації (щоб зафіксувати стан)
-    setTimeout(() => {
-      updatePreferencesSection('totals', { section: loadedIdx, isVisible })
-        .catch(e => console.error('Failed to save totals preferences after load:', e))
-    }, 700)
+    initializedRef.current = true
+    // НЕ записуємо під час ініціалізації - тільки при зміні користувачем
   }, [prefsLoading, preferences])
 
-  // persist section changes to DB (з debounce)
+  // persist section changes to DB (з debounce) - тільки якщо значення дійсно змінилося
   useEffect(() => {
-    if (!prefsLoaded) return
+    if (!prefsLoaded || !initializedRef.current) return
     
-    // Зберігаємо тільки після того, як preferences завантажені
-    // Це запобігає перезапису preferences при ініціалізації
+    // Перевіряємо, чи значення дійсно змінилося від збереженого
+    if (idx === lastSavedIdxRef.current && isVisible === lastSavedIsVisibleRef.current) {
+      return // Нічого не змінилося, не записуємо
+    }
+    
+    // Оновлюємо збережені значення
+    lastSavedIdxRef.current = idx
+    lastSavedIsVisibleRef.current = isVisible
+    
+    // Зберігаємо тільки якщо це дійсно зміна користувача
     const timeoutId = setTimeout(() => {
       updatePreferencesSection('totals', {
         section: idx,

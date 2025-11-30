@@ -10,7 +10,7 @@ import DetailsModal from './DetailsModal'
 import CreateTxModal from './CreateTxModal'
 import EditTxModal from './EditTxModal'
 import TransferModal from './TransferModal'
-import { apiFetch } from '../../utils.jsx'
+import { apiFetch, getApiUrl } from '../../utils.jsx'
 import { listTransactions, deleteTransaction, archiveTransaction, deleteTransactions, getTransactionCategories } from '../../api/transactions'
 import { txBus } from '../../utils/txBus'
 import { listCards } from '../../api/cards'
@@ -67,6 +67,7 @@ export default function MonthlyPayment() {
 
   const listRef = useRef(null)
   const saveFiltersTimeoutRef = useRef(null)
+  const lastSavedFiltersRef = useRef(null) // Зберігаємо останні збережені значення
 
   async function fetchPage({ append = false, search = '', txType = transactionType, category = selectedCategory } = {}) {
     if (append) setLoadingMore(true); else setLoading(true)
@@ -131,6 +132,13 @@ export default function MonthlyPayment() {
           setShowUsdt(filters.showUsdt)
         }
       }
+      // Зберігаємо початкові значення для порівняння
+      lastSavedFiltersRef.current = {
+        pageSize: filters.pageSize || 10,
+        transactionType: filters.transactionType || 'all',
+        category: filters.category || '',
+        showUsdt: typeof filters.showUsdt === 'boolean' ? filters.showUsdt : true
+      }
       setFiltersLoaded(true)
     } catch (e) {
       console.error('Failed to load filters:', e)
@@ -163,24 +171,40 @@ export default function MonthlyPayment() {
     fetchPage({ append: false, search: query, txType: transactionType, category: selectedCategory })
   }
 
-  // Save filters to DB when they change (with debounce)
+  // Save filters to DB when they change (with debounce) - тільки якщо значення дійсно змінилося
   useEffect(() => {
-    if (!filtersLoaded) return // Don't save until filters are loaded from DB
+    if (!filtersLoaded || !lastSavedFiltersRef.current) return // Don't save until filters are loaded from DB
+    
+    // Перевіряємо, чи значення дійсно змінилося від збереженого
+    const currentFilters = {
+      pageSize,
+      transactionType,
+      category: selectedCategory || '',
+      showUsdt
+    }
+    
+    const lastSaved = lastSavedFiltersRef.current
+    if (
+      currentFilters.pageSize === lastSaved.pageSize &&
+      currentFilters.transactionType === lastSaved.transactionType &&
+      currentFilters.category === lastSaved.category &&
+      currentFilters.showUsdt === lastSaved.showUsdt
+    ) {
+      return // Нічого не змінилося, не записуємо
+    }
+    
+    // Оновлюємо збережені значення
+    lastSavedFiltersRef.current = { ...currentFilters }
     
     // Clear existing timeout
     if (saveFiltersTimeoutRef.current) {
       clearTimeout(saveFiltersTimeoutRef.current)
     }
     
-    // Save after 500ms debounce
+    // Save after 500ms debounce - тільки якщо це дійсно зміна користувача
     saveFiltersTimeoutRef.current = setTimeout(async () => {
       try {
-        await updatePreferencesSection('transactionsFilters', {
-          pageSize,
-          transactionType,
-          category: selectedCategory || '',
-          showUsdt
-        })
+        await updatePreferencesSection('transactionsFilters', currentFilters)
       } catch (e) {
         console.error('Failed to save transaction filters:', e)
       }
@@ -449,10 +473,47 @@ export default function MonthlyPayment() {
                     <input
                       type="checkbox"
                       checked={showUsdt}
-                      onChange={(e) => {
-                        setShowUsdt(e.target.checked)
+                      onChange={async (e) => {
+                        const newValue = e.target.checked
+                        setShowUsdt(newValue)
                         setSelectedIds(new Set()) // Clear selection when filter changes
                         setOffset(0) // Reset offset when filter changes
+                        
+                        try {
+                          // Отримуємо поточні налаштування
+                          const currentPrefs = preferences || {}
+                          const currentFilters = currentPrefs.transactionsFilters || {}
+                          
+                          // Формуємо об'єкт для збереження
+                          const prefsToSave = {
+                            ...currentPrefs,
+                            transactionsFilters: {
+                              ...currentFilters,
+                              showUsdt: newValue
+                            }
+                          }
+                          
+                          // Отримуємо токен
+                          const { data: { session } } = await supabase.auth.getSession()
+                          const token = session?.access_token
+                          
+                          // Прямий виклик API
+                          const apiUrl = getApiUrl()
+                          const response = await fetch(`${apiUrl}/api/preferences`, {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                              'Authorization': `Bearer ${token}`
+                            },
+                            body: JSON.stringify({ preferences: prefsToSave })
+                          })
+                          
+                          if (!response.ok) {
+                            throw new Error('Помилка збереження')
+                          }
+                        } catch (error) {
+                          console.error('Failed to save showUsdt:', error)
+                        }
                       }}
                       className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                     />

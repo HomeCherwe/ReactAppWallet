@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
@@ -462,6 +462,9 @@ export default function CardsManager({ groupByBank = false, showActions = true }
   const [activeId, setActiveId] = useState(null)
   const [bankViewModalOpen, setBankViewModalOpen] = useState(false)
   const [viewingBank, setViewingBank] = useState(null)
+  
+  // Зберігаємо останні збережені значення для порівняння
+  const lastSavedCardsPrefsRef = useRef(null)
   const [prefsLoaded, setPrefsLoaded] = useState(false)
   
   const sensors = useSensors(
@@ -490,6 +493,14 @@ export default function CardsManager({ groupByBank = false, showActions = true }
       
       const showFavorites = preferences?.cards?.showFavoritesOnly
       if (typeof showFavorites === 'boolean') setShowFavoritesOnly(showFavorites)
+      
+      // Зберігаємо початкові значення для порівняння
+      lastSavedCardsPrefsRef.current = {
+        selectedBanks: Array.isArray(banks) ? banks : [],
+        favoriteCardIds: Array.isArray(favorites) ? favorites : [],
+        cardOrder: Array.isArray(order) ? order : [],
+        showFavoritesOnly: typeof showFavorites === 'boolean' ? showFavorites : false
+      }
     } catch (e) {
       console.error('Failed to load cards preferences:', e)
     } finally {
@@ -497,17 +508,46 @@ export default function CardsManager({ groupByBank = false, showActions = true }
     }
   }, [prefsLoading, preferences])
 
-  // persist filter changes to DB (з debounce)
+  // persist filter changes to DB (з debounce) - тільки якщо значення дійсно змінилося
   useEffect(() => {
-    if (!prefsLoaded) return
+    if (!prefsLoaded || !lastSavedCardsPrefsRef.current) return
     
+    // Перевіряємо, чи значення дійсно змінилося від збереженого
+    const currentPrefs = {
+      selectedBanks,
+      favoriteCardIds,
+      cardOrder,
+      showFavoritesOnly
+    }
+    
+    const lastSaved = lastSavedCardsPrefsRef.current
+    
+    // Порівнюємо масиви та булеві значення
+    const arraysEqual = (a, b) => {
+      if (a.length !== b.length) return false
+      return a.every((val, idx) => val === b[idx])
+    }
+    
+    if (
+      arraysEqual(currentPrefs.selectedBanks, lastSaved.selectedBanks) &&
+      arraysEqual(currentPrefs.favoriteCardIds, lastSaved.favoriteCardIds) &&
+      arraysEqual(currentPrefs.cardOrder, lastSaved.cardOrder) &&
+      currentPrefs.showFavoritesOnly === lastSaved.showFavoritesOnly
+    ) {
+      return // Нічого не змінилося, не записуємо
+    }
+    
+    // Оновлюємо збережені значення
+    lastSavedCardsPrefsRef.current = {
+      selectedBanks: [...currentPrefs.selectedBanks],
+      favoriteCardIds: [...currentPrefs.favoriteCardIds],
+      cardOrder: [...currentPrefs.cardOrder],
+      showFavoritesOnly: currentPrefs.showFavoritesOnly
+    }
+    
+    // Зберігаємо тільки якщо це дійсно зміна користувача
     const timeoutId = setTimeout(() => {
-      updatePreferencesSection('cards', {
-        selectedBanks,
-        favoriteCardIds,
-        cardOrder,
-        showFavoritesOnly
-      })
+      updatePreferencesSection('cards', currentPrefs)
     }, 500) // Debounce 500ms
     
     return () => clearTimeout(timeoutId)

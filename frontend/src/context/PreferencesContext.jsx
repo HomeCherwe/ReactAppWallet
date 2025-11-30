@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { apiFetch } from '../utils.jsx'
-import { setCachedPreferences, getCachedPreferences, invalidatePreferencesCache, setCacheUpdateCallback } from '../api/preferences'
+import { setCachedPreferences, getCachedPreferences, invalidatePreferencesCache, setCacheUpdateCallback, setPreferencesLoaded, clearPendingUpdates } from '../api/preferences'
 
 const PreferencesContext = createContext({
   preferences: null,
@@ -54,6 +54,7 @@ export function PreferencesProvider({ children }) {
     if (!userId) {
       setPreferences(null)
       setCachedPreferences(null)
+      setPreferencesLoaded(false)
       return
     }
 
@@ -62,6 +63,9 @@ export function PreferencesProvider({ children }) {
     if (cached && loadedRef.current) {
       console.log('[PreferencesContext] Використовую кеш, не завантажую з БД')
       setPreferences(cached)
+      // ВАЖЛИВО: Встановлюємо прапорець, що preferences завантажені
+      // Це дозволяє компонентам записувати зміни навіть якщо використовується кеш
+      setPreferencesLoaded(true)
       return
     }
 
@@ -70,6 +74,10 @@ export function PreferencesProvider({ children }) {
     setError(null)
 
     try {
+      // Очищаємо всі pending оновлення перед завантаженням
+      // Це запобігає запису старих даних під час завантаження
+      clearPendingUpdates()
+      
       // Робимо запит тільки якщо кешу немає
       const prefs = await apiFetch('/api/preferences') || {}
       console.log('[PreferencesContext] Отримано з БД:', prefs)
@@ -78,6 +86,10 @@ export function PreferencesProvider({ children }) {
       // Але НЕ викликаємо callback, щоб не перезаписати локальні зміни
       setCachedPreferences(prefs, true) // skipCallback = true
       loadedRef.current = true
+      
+      // Встановлюємо прапорець, що preferences завантажені
+      // Це дозволяє компонентам записувати зміни
+      setPreferencesLoaded(true)
       
       setPreferences(prefs)
       console.log('[PreferencesContext] Preferences завантажено')
@@ -107,6 +119,7 @@ export function PreferencesProvider({ children }) {
     if (!userId) {
       setPreferences(null)
       setCachedPreferences(null)
+      setPreferencesLoaded(false)
       loadedRef.current = false
       return
     }

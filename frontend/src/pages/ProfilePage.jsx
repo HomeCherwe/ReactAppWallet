@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase, invalidateUserCache } from '../lib/supabase'
 import { motion } from 'framer-motion'
 import { User, Mail, Save, Upload, Key, CreditCard, Copy, Eye, EyeOff, RefreshCw, BarChart3, LogOut } from 'lucide-react'
@@ -95,13 +95,22 @@ export default function ProfilePage() {
     loadApiKey()
   }, [])
   
+  // Зберігаємо початкове значення для порівняння
+  const lastSavedShowUsdtInChartRef = useRef(null)
+  const dashboardSettingsLoadedRef = useRef(false)
+
   // Load dashboard settings
   useEffect(() => {
     if (prefsLoading) return
     const dashboard = preferences?.dashboard || {}
     if (typeof dashboard.showUsdtInChart === 'boolean') {
       setShowUsdtInChart(dashboard.showUsdtInChart)
+      lastSavedShowUsdtInChartRef.current = dashboard.showUsdtInChart
+    } else {
+      // Якщо значення немає в БД, використовуємо за замовчуванням true
+      lastSavedShowUsdtInChartRef.current = true
     }
+    dashboardSettingsLoadedRef.current = true
   }, [prefsLoading, preferences])
 
   // Load API Key
@@ -554,20 +563,44 @@ export default function ProfilePage() {
                   onChange={async (e) => {
                     const newValue = e.target.checked
                     setShowUsdtInChart(newValue)
+                    
                     try {
-                      // Отримуємо поточні налаштування dashboard
-                      const currentDashboard = preferences?.dashboard || {}
-                      // Оновлюємо тільки showUsdtInChart, зберігаючи інші налаштування
-                      // Використовуємо immediate=true для негайного збереження без debounce
-                      await updatePreferencesSection('dashboard', {
-                        ...currentDashboard,
-                        showUsdtInChart: newValue
-                      }, true)
+                      // Отримуємо поточні налаштування
+                      const currentPrefs = preferences || {}
+                      const currentDashboard = currentPrefs.dashboard || {}
+                      
+                      // Формуємо об'єкт для збереження
+                      const prefsToSave = {
+                        ...currentPrefs,
+                        dashboard: {
+                          ...currentDashboard,
+                          showUsdtInChart: newValue
+                        }
+                      }
+                      
+                      // Отримуємо токен
+                      const { data: { session } } = await supabase.auth.getSession()
+                      const token = session?.access_token
+                      
+                      // Прямий виклик API
+                      const apiUrl = getApiUrl()
+                      const response = await fetch(`${apiUrl}/api/preferences`, {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({ preferences: prefsToSave })
+                      })
+                      
+                      if (!response.ok) {
+                        throw new Error('Помилка збереження')
+                      }
+                      
                       toast.success('Налаштування збережено')
                     } catch (error) {
-                      console.error('Failed to save dashboard settings:', error)
+                      console.error('Failed to save:', error)
                       toast.error('Не вдалося зберегти налаштування')
-                      // Відкатуємо зміну при помилці
                       setShowUsdtInChart(!newValue)
                     }
                   }}
