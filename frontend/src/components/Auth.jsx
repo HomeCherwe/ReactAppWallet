@@ -24,7 +24,7 @@ export default function Auth() {
       // Remove any trailing slashes and hash
       redirectTo = redirectTo.split('#')[0].replace(/\/$/, '') || redirectTo
       
-      console.log('Redirecting to:', redirectTo) // Debug log
+       // Debug log
       
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',

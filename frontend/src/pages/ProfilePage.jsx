@@ -3,9 +3,9 @@ import { supabase, invalidateUserCache } from '../lib/supabase'
 import { motion } from 'framer-motion'
 import { User, Mail, Save, Upload, Key, CreditCard, Copy, Eye, EyeOff, RefreshCw, BarChart3, LogOut } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { getUserAPIs, updatePreferencesSection, getApiKey, generateApiKey, getPreferencesSection } from '../api/preferences'
+import { getUserAPIs, getApiKey, generateApiKey } from '../api/preferences'
 import { getApiUrl } from '../utils.jsx'
-import { usePreferences } from '../context/PreferencesContext'
+import { useSettingsStore } from '../store/useSettingsStore'
 import ConfirmModal from '../components/ConfirmModal'
 
 export default function ProfilePage() {
@@ -30,9 +30,11 @@ export default function ProfilePage() {
   const [apiKeyLoading, setApiKeyLoading] = useState(false)
   const [apiKeyGenerating, setApiKeyGenerating] = useState(false)
   
-  // Dashboard settings
-  const { preferences, loading: prefsLoading } = usePreferences()
-  const [showUsdtInChart, setShowUsdtInChart] = useState(true)
+  // Dashboard settings - використовуємо новий store
+  const settings = useSettingsStore((state) => state.settings)
+  const updateNestedSetting = useSettingsStore((state) => state.updateNestedSetting)
+  const getNestedSetting = useSettingsStore((state) => state.getNestedSetting)
+  const showUsdtInChart = getNestedSetting('dashboard.showUsdtInChart', true)
   
   // Logout modal
   const [showLogoutModal, setShowLogoutModal] = useState(false)
@@ -95,23 +97,8 @@ export default function ProfilePage() {
     loadApiKey()
   }, [])
   
-  // Зберігаємо початкове значення для порівняння
-  const lastSavedShowUsdtInChartRef = useRef(null)
-  const dashboardSettingsLoadedRef = useRef(false)
-
-  // Load dashboard settings
-  useEffect(() => {
-    if (prefsLoading) return
-    const dashboard = preferences?.dashboard || {}
-    if (typeof dashboard.showUsdtInChart === 'boolean') {
-      setShowUsdtInChart(dashboard.showUsdtInChart)
-      lastSavedShowUsdtInChartRef.current = dashboard.showUsdtInChart
-    } else {
-      // Якщо значення немає в БД, використовуємо за замовчуванням true
-      lastSavedShowUsdtInChartRef.current = true
-    }
-    dashboardSettingsLoadedRef.current = true
-  }, [prefsLoading, preferences])
+  // Dashboard settings - використовуємо новий store напряму
+  // showUsdtInChart вже отримується з store через getNestedSetting
 
   // Load API Key
   const loadApiKey = async () => {
@@ -560,49 +547,11 @@ export default function ProfilePage() {
                 <input
                   type="checkbox"
                   checked={showUsdtInChart}
-                  onChange={async (e) => {
+                  onChange={(e) => {
                     const newValue = e.target.checked
-                    setShowUsdtInChart(newValue)
-                    
-                    try {
-                      // Отримуємо поточні налаштування
-                      const currentPrefs = preferences || {}
-                      const currentDashboard = currentPrefs.dashboard || {}
-                      
-                      // Формуємо об'єкт для збереження
-                      const prefsToSave = {
-                        ...currentPrefs,
-                        dashboard: {
-                          ...currentDashboard,
-                          showUsdtInChart: newValue
-                        }
-                      }
-                      
-                      // Отримуємо токен
-                      const { data: { session } } = await supabase.auth.getSession()
-                      const token = session?.access_token
-                      
-                      // Прямий виклик API
-                      const apiUrl = getApiUrl()
-                      const response = await fetch(`${apiUrl}/api/preferences`, {
-                        method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                          'Authorization': `Bearer ${token}`
-                        },
-                        body: JSON.stringify({ preferences: prefsToSave })
-                      })
-                      
-                      if (!response.ok) {
-                        throw new Error('Помилка збереження')
-                      }
-                      
-                      toast.success('Налаштування збережено')
-                    } catch (error) {
-                      console.error('Failed to save:', error)
-                      toast.error('Не вдалося зберегти налаштування')
-                      setShowUsdtInChart(!newValue)
-                    }
+                    // Оновлюємо локальний стейт (джерело правди) - автоматично зберігається через debounce
+                    updateNestedSetting('dashboard.showUsdtInChart', newValue)
+                    toast.success('Налаштування збережено')
                   }}
                   className="sr-only peer"
                 />

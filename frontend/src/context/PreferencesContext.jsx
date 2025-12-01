@@ -61,7 +61,7 @@ export function PreferencesProvider({ children }) {
     // Перевіряємо чи є кеш (може бути встановлений з API функцій)
     const cached = getCachedPreferences()
     if (cached && loadedRef.current) {
-      console.log('[PreferencesContext] Використовую кеш, не завантажую з БД')
+      
       setPreferences(cached)
       // ВАЖЛИВО: Встановлюємо прапорець, що preferences завантажені
       // Це дозволяє компонентам записувати зміни навіть якщо використовується кеш
@@ -69,7 +69,7 @@ export function PreferencesProvider({ children }) {
       return
     }
 
-    console.log('[PreferencesContext] Завантажую preferences з БД...')
+    
     setLoading(true)
     setError(null)
 
@@ -79,8 +79,22 @@ export function PreferencesProvider({ children }) {
       clearPendingUpdates()
       
       // Робимо запит тільки якщо кешу немає
-      const prefs = await apiFetch('/api/preferences') || {}
-      console.log('[PreferencesContext] Отримано з БД:', prefs)
+      // Додаємо timeout, щоб не блокувати завантаження сторінки
+      
+      const prefsPromise = apiFetch('/api/preferences')
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('PreferencesContext timeout')), 3000) // 3 секунди - не блокуємо завантаження
+      })
+      
+      let prefs = {}
+      try {
+        prefs = await Promise.race([prefsPromise, timeoutPromise]) || {}
+        
+      } catch (e) {
+        // Не блокуємо завантаження - просто використовуємо порожній об'єкт
+        console.warn('[PreferencesContext] ⚠️ Timeout or error loading preferences (non-blocking), using empty object:', e.message)
+        prefs = {}
+      }
       
       // Зберігаємо в глобальний кеш для синхронізації з API функціями
       // Але НЕ викликаємо callback, щоб не перезаписати локальні зміни
@@ -92,7 +106,7 @@ export function PreferencesProvider({ children }) {
       setPreferencesLoaded(true)
       
       setPreferences(prefs)
-      console.log('[PreferencesContext] Preferences завантажено')
+      
     } catch (e) {
       setError(e)
       console.error('[PreferencesContext] Failed to load preferences:', e)

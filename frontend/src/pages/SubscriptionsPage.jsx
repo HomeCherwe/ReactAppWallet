@@ -80,32 +80,32 @@ export default function SubscriptionsPage() {
       e.stopPropagation()
     }
     
-    console.log('[SubscriptionsPage] handleSave called', { editing, form })
+    
     
     if (!form.name || !form.amount) {
-      console.log('[SubscriptionsPage] Validation failed', { name: form.name, amount: form.amount })
+      
       toast.error('Заповніть всі обов\'язкові поля')
       return
     }
     
-    console.log('[SubscriptionsPage] Validation passed, proceeding...')
+    
 
     try {
-      console.log('[SubscriptionsPage] Saving subscription...', { editing, form })
+      
       
       if (editing) {
         const response = await apiFetch(`/api/subscriptions/${editing.id}`, {
           method: 'PUT',
           body: JSON.stringify(form)
         })
-        console.log('[SubscriptionsPage] Update response:', response)
+        
         toast.success('Підписку оновлено!')
       } else {
         const response = await apiFetch('/api/subscriptions', {
           method: 'POST',
           body: JSON.stringify(form)
         })
-        console.log('[SubscriptionsPage] Create response:', response)
+        
         toast.success('Підписку створено!')
       }
       
@@ -549,7 +549,7 @@ export default function SubscriptionsPage() {
       <BaseModal
         open={modalOpen}
         onClose={() => {
-          console.log('[SubscriptionsPage] Modal onClose called')
+          
           setModalOpen(false)
           setEditing(null)
         }}
@@ -557,14 +557,14 @@ export default function SubscriptionsPage() {
       >
         <form
           onSubmit={(e) => {
-            console.log('[SubscriptionsPage] Form submitted', e)
+            
             e.preventDefault()
             e.stopPropagation()
             handleSave(e)
             return false
           }}
           onClick={(e) => {
-            console.log('[SubscriptionsPage] Form clicked', e.target)
+            
             e.stopPropagation()
           }}
           className="space-y-4"
@@ -785,15 +785,15 @@ export default function SubscriptionsPage() {
             <button
               type="submit"
               onClick={(e) => {
-                console.log('[SubscriptionsPage] Submit button clicked!', e)
+                
                 e.preventDefault()
                 e.stopPropagation()
-                console.log('[SubscriptionsPage] Calling handleSave...')
+                
                 handleSave(e)
                 return false
               }}
               onMouseDown={(e) => {
-                console.log('[SubscriptionsPage] Button mouseDown!', e)
+                
                 e.stopPropagation()
               }}
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors cursor-pointer relative z-10"

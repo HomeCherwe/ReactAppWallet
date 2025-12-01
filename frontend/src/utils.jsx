@@ -55,12 +55,15 @@ export function getApiUrl() {
 // Helper to get auth token from Supabase session
 export async function getAuthToken() {
   try {
-    // Try to get session first
+    // Try to get session first with timeout
     let session = null
     try {
-      const { data, error } = await supabase.auth.getSession()
+      const sessionPromise = supabase.auth.getSession()
+      const sessionTimeout = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('getSession timeout')), 1500) // 1.5 секунди max
+      })
+      const { data, error } = await Promise.race([sessionPromise, sessionTimeout])
       if (error) {
-        console.error('[getAuthToken] Error getting session:', error)
         // Fallback: try to get from localStorage directly if getSession fails
         try {
           const storageKey = `sb-${import.meta.env.VITE_SUPABASE_URL?.split('//')[1]?.split('.')[0]}-auth-token`
@@ -68,45 +71,33 @@ export async function getAuthToken() {
           if (stored) {
             const parsed = JSON.parse(stored)
             session = parsed
-            console.log('[getAuthToken] Retrieved session from localStorage fallback')
           }
         } catch (e) {
-          console.warn('[getAuthToken] localStorage fallback failed:', e)
+          // Ignore
         }
       } else {
         session = data?.session
       }
     } catch (sessionError) {
-      console.error('[getAuthToken] Exception getting session:', sessionError)
-      // Try localStorage fallback
+      // Try localStorage fallback on timeout/error
       try {
         const storageKey = `sb-${import.meta.env.VITE_SUPABASE_URL?.split('//')[1]?.split('.')[0]}-auth-token`
         const stored = localStorage.getItem(storageKey)
         if (stored) {
           const parsed = JSON.parse(stored)
           session = parsed
-          console.log('[getAuthToken] Retrieved session from localStorage fallback (after exception)')
         }
       } catch (e) {
-        console.warn('[getAuthToken] localStorage fallback failed:', e)
+        // Ignore
       }
     }
     
-    if (!session) {
-      console.warn('[getAuthToken] No session found')
+    if (!session || !session.access_token) {
       return null
     }
     
-    if (!session.access_token) {
-      console.warn('[getAuthToken] Session exists but no access_token')
-      return null
-    }
-    
-    // Log token info (first 20 chars for debugging)
-    console.log(`[getAuthToken] Token found: ${session.access_token.substring(0, 20)}... (length: ${session.access_token.length})`)
     return session.access_token
   } catch (error) {
-    console.error('[getAuthToken] Exception:', error)
     return null
   }
 }
@@ -127,11 +118,9 @@ export function checkStorageUsage() {
     const usageMB = (total / (1024 * 1024)).toFixed(2)
     const quotaMB = (quota / (1024 * 1024)).toFixed(2)
     const percentage = ((total / quota) * 100).toFixed(1)
-    console.log(`[Storage] Usage: ${usageMB}MB / ${quotaMB}MB (${percentage}%)`)
     
     // Log largest items
     items.sort((a, b) => b.size - a.size)
-    console.log('[Storage] Largest items:', items.slice(0, 5).map(i => ({ key: i.key, size: (i.size / 1024).toFixed(2) + 'KB' })))
     
     return { used: total, quota, percentage: parseFloat(percentage), items }
   } catch (e) {
@@ -166,7 +155,6 @@ export function clearOldStorageData() {
         // Clear old data (especially large base64 images)
         const size = localStorage[key].length + key.length
         if (size > 100 * 1024) { // Items larger than 100KB
-          console.log(`[Storage] Clearing large item: ${key} (${(size / 1024).toFixed(2)}KB)`)
           localStorage.removeItem(key)
           cleared++
           clearedSize += size
@@ -175,8 +163,6 @@ export function clearOldStorageData() {
     }
     
     if (cleared > 0) {
-      const clearedMB = (clearedSize / (1024 * 1024)).toFixed(2)
-      console.log(`[Storage] Cleared ${cleared} items, freed ${clearedMB}MB`)
       return { cleared, freed: clearedSize }
     }
     
@@ -189,21 +175,40 @@ export function clearOldStorageData() {
 
 // Helper to make API requests with automatic auth token injection
 export async function apiFetch(endpoint, options = {}) {
-  let token = await getAuthToken()
+  const startTime = Date.now()
+  
+  // Get token with timeout - не блокуємо запити
+  let token = null
+  try {
+    const tokenPromise = getAuthToken()
+    const tokenTimeout = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('getAuthToken timeout')), 2000) // 2 секунди max
+    })
+    token = await Promise.race([tokenPromise, tokenTimeout])
+  } catch (error) {
+    // Якщо токен не отримано - продовжуємо без нього (для публічних endpoints це OK)
+    token = null
+  }
   
   // Check storage usage if token is missing (might be quota issue)
   if (!token && !endpoint.includes('/public') && !endpoint.includes('/auth')) {
     const usage = checkStorageUsage()
     // If storage is over 80% full, try to clear old data
     if (usage && usage.percentage > 80) {
-      console.warn('[apiFetch] Storage quota high, attempting to clear old data...')
       clearOldStorageData()
       // Retry getting token after clearing
       token = await getAuthToken()
     }
   }
   
-  const url = endpoint.startsWith('http') ? endpoint : `${getApiUrl()}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`
+  const apiUrl = getApiUrl()
+  
+  if (!apiUrl || apiUrl === 'undefined' || apiUrl.includes('undefined')) {
+    console.error(`[apiFetch] ❌ CRITICAL: Invalid API URL: ${apiUrl}`)
+    throw new Error(`Invalid API URL: ${apiUrl}`)
+  }
+  
+  const url = endpoint.startsWith('http') ? endpoint : `${apiUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`
   
   const headers = {
     'Content-Type': 'application/json',
@@ -212,19 +217,28 @@ export async function apiFetch(endpoint, options = {}) {
   
   if (token) {
     headers['Authorization'] = `Bearer ${token}`
-  } else {
-    // Log warning if token is missing for non-public endpoints
-    if (!endpoint.includes('/public') && !endpoint.includes('/auth')) {
-      console.warn(`[apiFetch] No auth token for ${endpoint}`)
-    }
   }
   
   try {
-    const response = await fetch(url, {
+    const fetchStartTime = Date.now()
+    
+    // Add timeout wrapper for fetch
+    const fetchPromise = fetch(url, {
       ...options,
       headers,
       signal: options.signal, // Support AbortController
     })
+    
+    // Add 15 second timeout to detect hanging requests
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => {
+        // Не логуємо таймаут - просто відхиляємо проміс
+        reject(new Error(`Fetch timeout after 15s for ${endpoint}`))
+      }, 15000)
+    })
+    
+    const response = await Promise.race([fetchPromise, timeoutPromise])
+    const fetchTime = Date.now() - fetchStartTime
     
     // Check if request was aborted before processing response
     if (options.signal?.aborted) {
@@ -239,21 +253,29 @@ export async function apiFetch(endpoint, options = {}) {
       } catch {
         // If response is not JSON, use status text
       }
+      console.error(`[apiFetch] ❌ Error response: ${response.status} ${response.statusText}`, errorMessage)
       throw new Error(errorMessage)
     }
     
     // Try to parse JSON, if fails return empty object
     try {
-      return await response.json()
+      const data = await response.json()
+      return data
     } catch {
       return {}
     }
   } catch (error) {
+    const totalTime = Date.now() - startTime
     // Re-throw AbortError so it can be handled by caller
     if (error.name === 'AbortError' || options.signal?.aborted) {
       throw error
     }
-    // Re-throw other errors
+    // Не логуємо таймаути - просто відхиляємо
+    if (error.message && error.message.includes('timeout')) {
+      throw error
+    }
+    // Re-throw other errors (але не логуємо таймаути)
+    console.error(`[apiFetch] ❌ Error fetching ${endpoint}:`, error)
     throw error
   }
 }

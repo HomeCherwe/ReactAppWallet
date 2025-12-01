@@ -11,8 +11,7 @@ import { CreditCard, Plus, X, Pencil, Trash2, Filter, Copy, Building2, Star, Eye
 import { txBus } from '../utils/txBus'
 import toast from 'react-hot-toast'
 import BaseModal from './BaseModal'
-import { updatePreferencesSection } from '../api/preferences'
-import { usePreferences } from '../context/PreferencesContext'
+import { useSettingsStore } from '../store/useSettingsStore'
 
 const GRADS = [
   'from-indigo-500 via-fuchsia-500 to-amber-400',
@@ -198,8 +197,8 @@ function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false,
                 }}
                 onMouseDown={(e) => e.stopPropagation()}
               >
-                <Pencil size={12} /> <span className="hidden sm:inline">Edit</span>
-              </button>
+            <Pencil size={12} /> <span className="hidden sm:inline">Edit</span>
+          </button>
               <button 
                 className="px-1.5 sm:px-2 py-1 sm:py-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-[10px] sm:text-xs inline-flex items-center gap-1" 
                 onClick={(e) => {
@@ -209,8 +208,8 @@ function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false,
                 }}
                 onMouseDown={(e) => e.stopPropagation()}
               >
-                <Trash2 size={12} /> <span className="hidden sm:inline">Delete</span>
-              </button>
+            <Trash2 size={12} /> <span className="hidden sm:inline">Delete</span>
+          </button>
             </>
           )}
         </div>
@@ -339,9 +338,32 @@ function CardModal({ open, initial, onClose, onSubmit, banks = [] }) {
 
   const submit = async (e) => {
     e?.preventDefault?.()
-    // If no preview and editing, user removed image - pass special flag
-    const fileToSubmit = previewUrl === null && initial ? 'REMOVE' : file
-    await onSubmit(form, fileToSubmit)
+    
+    // Валідація форми
+    if (!form.name || !form.name.trim()) {
+      toast.error('Введіть назву картки')
+      return
+    }
+    
+    try {
+      // Визначаємо файл для відправки:
+      // - Якщо редагуємо і previewUrl === null, значить користувач видалив зображення -> 'REMOVE'
+      // - Якщо є новий файл -> file
+      // - Інакше -> null (немає файлу)
+      let fileToSubmit = null
+      if (previewUrl === null && initial) {
+        // Редагуємо і зображення видалено
+        fileToSubmit = 'REMOVE'
+      } else if (file && file instanceof File) {
+        // Є новий файл
+        fileToSubmit = file
+      }
+      
+      await onSubmit(form, fileToSubmit)
+    } catch (error) {
+      console.error('[CardModal] Error in submit:', error)
+      toast.error(error?.message || 'Помилка збереження картки')
+    }
   }
 
   return (
@@ -378,14 +400,14 @@ function CardModal({ open, initial, onClose, onSubmit, banks = [] }) {
           value={form.card_number}
           onChange={(e)=>setForm({...form, card_number:e.target.value})}
         />
-        <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-3">
           <select 
             className="border rounded-xl px-3 py-2" 
             value={form.currency} 
             onChange={(e)=>setForm({...form, currency:e.target.value})}
           >
-            <option>UAH</option><option>EUR</option><option>USD</option><option>GBP</option><option>PLN</option>
-          </select>
+                  <option>UAH</option><option>EUR</option><option>USD</option><option>GBP</option><option>PLN</option>
+                </select>
           <input 
             className="border rounded-xl px-3 py-2" 
             type="number" 
@@ -411,7 +433,7 @@ function CardModal({ open, initial, onClose, onSubmit, banks = [] }) {
             onChange={(e)=>setForm({...form, cvv:e.target.value.replace(/\D/g, '').slice(0, 4)})}
             maxLength={4}
           />
-        </div>
+              </div>
               <div>
                 <label className="text-sm text-gray-600 mb-1 block">Фонова картинка (опц.)</label>
                 <input type="file" accept="image/*" onChange={handleFileChange} className="text-sm"/>
@@ -445,7 +467,10 @@ function CardModal({ open, initial, onClose, onSubmit, banks = [] }) {
 }
 
 export default function CardsManager({ groupByBank = false, showActions = true }) {
-  const { preferences, loading: prefsLoading } = usePreferences()
+  // Використовуємо новий store
+  const settings = useSettingsStore((state) => state.settings)
+  const updateNestedSetting = useSettingsStore((state) => state.updateNestedSetting)
+  const initialized = useSettingsStore((state) => state.initialized)
   const [cards, setCards] = useState([])
   const [banks, setBanks] = useState([])
   const [loading, setLoading] = useState(true)
@@ -466,7 +491,7 @@ export default function CardsManager({ groupByBank = false, showActions = true }
   // Зберігаємо останні збережені значення для порівняння
   const lastSavedCardsPrefsRef = useRef(null)
   const [prefsLoaded, setPrefsLoaded] = useState(false)
-  
+
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -478,20 +503,20 @@ export default function CardsManager({ groupByBank = false, showActions = true }
     })
   )
 
-  // load persisted filter from PreferencesContext
+  // load persisted filter from settings store
   useEffect(() => {
-    if (prefsLoading) return
-    try {
-      const banks = preferences?.cards?.selectedBanks
-      if (Array.isArray(banks)) setSelectedBanks(banks)
+    if (!initialized || !settings) return
+      try {
+      const banks = settings?.cards?.selectedBanks
+          if (Array.isArray(banks)) setSelectedBanks(banks)
       
-      const favorites = preferences?.cards?.favoriteCardIds
+      const favorites = settings?.cards?.favoriteCardIds
       if (Array.isArray(favorites)) setFavoriteCardIds(favorites)
       
-      const order = preferences?.cards?.cardOrder
+      const order = settings?.cards?.cardOrder
       if (Array.isArray(order)) setCardOrder(order)
       
-      const showFavorites = preferences?.cards?.showFavoritesOnly
+      const showFavorites = settings?.cards?.showFavoritesOnly
       if (typeof showFavorites === 'boolean') setShowFavoritesOnly(showFavorites)
       
       // Зберігаємо початкові значення для порівняння
@@ -501,12 +526,12 @@ export default function CardsManager({ groupByBank = false, showActions = true }
         cardOrder: Array.isArray(order) ? order : [],
         showFavoritesOnly: typeof showFavorites === 'boolean' ? showFavorites : false
       }
-    } catch (e) {
-      console.error('Failed to load cards preferences:', e)
+      } catch (e) {
+        console.error('Failed to load cards preferences:', e)
     } finally {
-      setPrefsLoaded(true)
-    }
-  }, [prefsLoading, preferences])
+        setPrefsLoaded(true)
+      }
+  }, [initialized, settings])
 
   // persist filter changes to DB (з debounce) - тільки якщо значення дійсно змінилося
   useEffect(() => {
@@ -545,13 +570,9 @@ export default function CardsManager({ groupByBank = false, showActions = true }
       showFavoritesOnly: currentPrefs.showFavoritesOnly
     }
     
-    // Зберігаємо тільки якщо це дійсно зміна користувача
-    const timeoutId = setTimeout(() => {
-      updatePreferencesSection('cards', currentPrefs)
-    }, 500) // Debounce 500ms
-    
-    return () => clearTimeout(timeoutId)
-  }, [selectedBanks, favoriteCardIds, cardOrder, showFavoritesOnly, prefsLoaded])
+    // Оновлюємо через store (автоматично зберігається через debounce)
+    updateNestedSetting('cards', currentPrefs)
+  }, [selectedBanks, favoriteCardIds, cardOrder, showFavoritesOnly, prefsLoaded, updateNestedSetting])
 
   const load = async () => {
     setLoading(true)
@@ -612,7 +633,7 @@ export default function CardsManager({ groupByBank = false, showActions = true }
     
     // Фільтр по банках
     if (selectedBanks.length > 0) {
-      const s = new Set(selectedBanks)
+    const s = new Set(selectedBanks)
       filtered = filtered.filter(c => s.has(c.bank))
     }
     
@@ -724,15 +745,21 @@ export default function CardsManager({ groupByBank = false, showActions = true }
   }
 
   const handleCardSubmit = async (form, file) => {
+    if (!form || !form.name || !form.name.trim()) {
+      toast.error('Введіть назву картки')
+      return
+    }
+    
     const payload = {
       bank_id: form.bank_id || null,
-      name: form.name, 
+      name: form.name.trim(), 
       card_number: form.card_number || null,
-      currency: form.currency, 
+      currency: form.currency || 'EUR', 
       initial_balance: Number(form.initial_balance) || 0,
       expiry_date: form.expiry_date || null, 
       cvv: form.cvv || null
     }
+    
     try {
       if (editingCard?.id) { 
         await updateCard(editingCard.id, payload, file) 
@@ -743,8 +770,9 @@ export default function CardsManager({ groupByBank = false, showActions = true }
       setCardModalOpen(false); setEditingCard(null); await load()
       toast.success(editingCard?.id ? 'Картку оновлено' : 'Картку створено')
     } catch (e) {
-      console.error('handleCardSubmit error', e)
+      console.error('[CardsManager] handleCardSubmit error:', e)
       toast.error(e?.message || 'Помилка збереження картки')
+      throw e // Прокидаємо помилку далі, щоб CardModal міг її обробити
     }
   }
 
@@ -865,63 +893,63 @@ return (
                   Вибрані
                 </motion.button>
               </div>
-              <div className="relative">
-                <motion.button
-                  className="btn btn-soft text-xs inline-flex items-center gap-1"
-                  onClick={() => setFilterOpen(v => !v)}
-                  title="Фільтр за банком"
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  animate={{ 
-                    backgroundColor: selectedBanks.length > 0 ? '#f3f4f6' : undefined,
-                    borderColor: selectedBanks.length > 0 ? '#d1d5db' : undefined
-                  }}
-                  transition={{ duration: 0.2 }}
-                >
+          <div className="relative">
+            <motion.button
+              className="btn btn-soft text-xs inline-flex items-center gap-1"
+              onClick={() => setFilterOpen(v => !v)}
+              title="Фільтр за банком"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              animate={{ 
+                backgroundColor: selectedBanks.length > 0 ? '#f3f4f6' : undefined,
+                borderColor: selectedBanks.length > 0 ? '#d1d5db' : undefined
+              }}
+              transition={{ duration: 0.2 }}
+            >
+              <motion.div
+                animate={{ rotate: filterOpen ? 180 : 0 }}
+                transition={{ duration: 0.3, ease: "easeInOut" }}
+              >
+                <Filter size={16} />
+              </motion.div>
+              Фільтр
+              </motion.button>
+              <AnimatePresence>
+                {filterOpen && (
                   <motion.div
-                    animate={{ rotate: filterOpen ? 180 : 0 }}
-                    transition={{ duration: 0.3, ease: "easeInOut" }}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 6 }}
+                    className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-xl shadow-soft p-3 z-20"
                   >
-                    <Filter size={16} />
-                  </motion.div>
-                  Фільтр
-                </motion.button>
-                <AnimatePresence>
-                  {filterOpen && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 6 }}
-                      className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-xl shadow-soft p-3 z-20"
-                    >
-                      <div className="text-xs font-semibold text-gray-600 mb-2">Банки</div>
-                      <div className="max-h-56 overflow-auto pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-                        {uniqueBanks.length === 0 ? (
-                          <div className="text-xs text-gray-500">Немає банків</div>
-                        ) : uniqueBanks.map(b => (
-                          <label key={b} className="flex items-center gap-2 py-1 text-sm">
-                            <input
-                              type="checkbox"
-                              className="accent-black"
-                              checked={selectedBanks.includes(b)}
-                              onChange={() => toggleBank(b)}
-                            />
-                            <span>{b}</span>
-                          </label>
-                        ))}
-                      </div>
-                      <div className="mt-3 flex items-center justify-between">
-                        <button className="text-xs text-gray-600 hover:underline" onClick={clearFilter}>
+                    <div className="text-xs font-semibold text-gray-600 mb-2">Банки</div>
+                    <div className="max-h-56 overflow-auto pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                      {uniqueBanks.length === 0 ? (
+                        <div className="text-xs text-gray-500">Немає банків</div>
+                      ) : uniqueBanks.map(b => (
+                        <label key={b} className="flex items-center gap-2 py-1 text-sm">
+                          <input
+                            type="checkbox"
+                            className="accent-black"
+                            checked={selectedBanks.includes(b)}
+                            onChange={() => toggleBank(b)}
+                          />
+                          <span>{b}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="mt-3 flex items-center justify-between">
+                      <button className="text-xs text-gray-600 hover:underline" onClick={clearFilter}>
                           Показати всі
-                        </button>
-                        <button className="btn btn-primary text-xs py-1 px-3" onClick={() => setFilterOpen(false)}>
-                          Готово
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
+                      </button>
+                      <button className="btn btn-primary text-xs py-1 px-3" onClick={() => setFilterOpen(false)}>
+                        Готово
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+          </div>
             </>
           )}
           
@@ -939,8 +967,8 @@ return (
               )}
               {!groupByBank && (
                 <button onClick={() => openCreateCard()} className="btn btn-soft text-xs inline-flex items-center gap-1" title="Додати картку">
-                  <Plus size={16} /> Додати
-                </button>
+            <Plus size={16} /> Додати
+          </button>
               )}
             </>
           )}
@@ -954,17 +982,17 @@ return (
         !cardsByBank || cardsByBank.length === 0 ? (
           cards.length === 0 && banks.length === 0 ? (
             <EmptyCard onCreate={() => openCreateBank()} />
-          ) : (
-            <div className="rounded-2xl border border-dashed border-gray-300 p-6 text-center text-sm text-gray-600">
-              За обраними банками нічого не знайдено.
-              <button className="ml-2 underline" onClick={clearFilter}>Показати всі банки</button>
-            </div>
-          )
         ) : (
-          // ← робимо скрольним ТІЛЬКИ список карточок
-          <div className="flex-1 overflow-y-auto overflow-x-hidden -mx-5 -mb-5
-                          [scrollbar-width:none] [-ms-overflow-style:none]
-                          [&::-webkit-scrollbar]:hidden">
+          <div className="rounded-2xl border border-dashed border-gray-300 p-6 text-center text-sm text-gray-600">
+            За обраними банками нічого не знайдено.
+            <button className="ml-2 underline" onClick={clearFilter}>Показати всі банки</button>
+          </div>
+        )
+      ) : (
+        // ← робимо скрольним ТІЛЬКИ список карточок
+        <div className="flex-1 overflow-y-auto overflow-x-hidden -mx-5 -mb-5
+                        [scrollbar-width:none] [-ms-overflow-style:none]
+                        [&::-webkit-scrollbar]:hidden">
             <div className="space-y-6 px-5 pb-5"> {/* паддінг для карточок */}
               {cardsByBank.map(({ bankId, bank, cards: bankCards, iban, bic, beneficiary, expiryDates, cvvs }) => (
                 <div key={bankId || bank} className="bg-white rounded-2xl border-2 border-gray-200 shadow-md overflow-hidden">
@@ -1085,8 +1113,8 @@ return (
                             <span className="text-gray-600 font-medium">Терміни дії:</span>
                             {expiryDates.map((exp, idx) => (
                               <span key={idx} className="font-mono bg-white px-2 py-1 rounded border">{exp}</span>
-                            ))}
-                          </div>
+            ))}
+          </div>
                         )}
                         
                         {cvvs.length > 0 && (

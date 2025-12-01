@@ -95,7 +95,6 @@ async function getUserFromToken(req, res, next) {
       // Якщо токен не передано, перевіряємо чи передано user_id напряму (для спрощення)
       if (req.body?.user_id) {
         req.user_id = req.body.user_id
-        console.log(`[getUserFromToken] Using user_id from body: ${req.user_id}`)
         return next()
       }
       console.warn(`[getUserFromToken] No token found for ${req.method} ${req.path}`)
@@ -119,7 +118,6 @@ async function getUserFromToken(req, res, next) {
     
     req.user_id = user.id
     req.user = user
-    console.log(`[getUserFromToken] Extracted user_id: ${req.user_id} for ${req.method} ${req.path}`)
     next()
   } catch (error) {
     console.error(`[getUserFromToken] Auth middleware error for ${req.method} ${req.path}:`, error.message || error)
@@ -155,7 +153,6 @@ async function getUserFromApiKey(req, res, next) {
     
     req.user_id = userPrefs.user_id
     req.user = { id: userPrefs.user_id }
-    console.log(`[getUserFromApiKey] Authenticated user_id: ${req.user_id}`)
     next()
   } catch (error) {
     console.error('[getUserFromApiKey] Error:', error)
@@ -332,8 +329,27 @@ app.get('/api/cards', getUserFromToken, async (req, res) => {
 app.post('/api/cards', getUserFromToken, async (req, res) => {
   try {
     const { bank_id, name, card_number, currency, initial_balance = 0, bg_url, expiry_date, cvv } = req.body
+    
+    // Отримуємо назву банку, якщо bank_id вказано
+    let bankName = null
+    if (bank_id) {
+      const { data: bankData, error: bankError } = await supabase
+        .from('banks')
+        .select('name')
+        .eq('id', bank_id)
+        .eq('user_id', req.user_id)
+        .single()
+      
+      if (bankError) {
+        console.warn('Failed to fetch bank name:', bankError)
+      } else if (bankData) {
+        bankName = bankData.name
+      }
+    }
+    
     const payload = { 
       bank_id: bank_id || null,
+      bank: bankName || 'Інші', // Заповнюємо bank (NOT NULL constraint)
       name, 
       card_number: card_number || null, 
       currency, 
@@ -355,7 +371,7 @@ app.post('/api/cards', getUserFromToken, async (req, res) => {
     // Трансформуємо для сумісності
     const transformed = {
       ...data,
-      bank: data.banks?.name || null,
+      bank: data.banks?.name || data.bank || null,
       iban: data.banks?.iban || null,
       bic: data.banks?.bic || null,
       beneficiary: data.banks?.beneficiary || null
@@ -375,6 +391,30 @@ app.put('/api/cards/:id', getUserFromToken, async (req, res) => {
     delete patch.id // Не дозволяємо змінювати id
     delete patch.user_id // Не дозволяємо змінювати user_id
     
+    // Якщо змінюється bank_id, потрібно оновити bank
+    if (patch.bank_id !== undefined) {
+      if (patch.bank_id) {
+        // Отримуємо назву банку
+        const { data: bankData, error: bankError } = await supabase
+          .from('banks')
+          .select('name')
+          .eq('id', patch.bank_id)
+          .eq('user_id', req.user_id)
+          .single()
+        
+        if (bankError) {
+          console.warn('Failed to fetch bank name:', bankError)
+        } else if (bankData) {
+          patch.bank = bankData.name
+        } else {
+          patch.bank = 'Інші'
+        }
+      } else {
+        // bank_id = null, встановлюємо bank = 'Інші'
+        patch.bank = 'Інші'
+      }
+    }
+    
     const { data, error } = await supabase
       .from('cards')
       .update(patch)
@@ -389,7 +429,7 @@ app.put('/api/cards/:id', getUserFromToken, async (req, res) => {
     // Трансформуємо для сумісності
     const transformed = {
       ...data,
-      bank: data.banks?.name || null,
+      bank: data.banks?.name || data.bank || null,
       iban: data.banks?.iban || null,
       bic: data.banks?.bic || null,
       beneficiary: data.banks?.beneficiary || null
@@ -470,7 +510,6 @@ app.get('/api/transactions/sum-by-card', getUserFromToken, async (req, res) => {
         out[row.card_id] = (out[row.card_id] || 0) + Number(row.amount || 0)
       }
       
-      console.log(`[sum-by-card] Using fallback, result: ${Object.keys(out).length} cards`)
       return res.json(out)
     }
     
@@ -481,7 +520,6 @@ app.get('/api/transactions/sum-by-card', getUserFromToken, async (req, res) => {
       out[row.card_id] = Number(row.total || 0)
     }
     
-    console.log(`[sum-by-card] RPC result: ${Object.keys(out).length} cards for user ${req.user_id}`)
     res.json(out)
   } catch (error) {
     console.error('GET /api/transactions/sum-by-card error:', error)
@@ -520,7 +558,6 @@ app.get('/api/totals/by-bucket', getUserFromToken, async (req, res) => {
       }
     }
     
-    console.log(`[totals-by-bucket] RPC result for user ${req.user_id}`)
     res.json(result || { cash: {}, cards: {}, savings: {} })
   } catch (error) {
     console.error('GET /api/totals/by-bucket error:', error)
@@ -837,7 +874,6 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       }
     }
     
-    console.log(`[GET /api/transactions] Returning ${data?.length || 0} transactions for user ${req.user_id}${excludeUsdt ? ' (USDT excluded)' : ''}`)
     res.json(data || [])
   } catch (error) {
     console.error('GET /api/transactions error:', error)
@@ -1282,6 +1318,7 @@ app.get('/api/preferences', getUserFromToken, async (req, res) => {
   }
 })
 
+// POST /api/preferences - зберегти весь об'єкт (legacy, для сумісності)
 app.post('/api/preferences', getUserFromToken, async (req, res) => {
   try {
     const { preferences } = req.body
@@ -1319,6 +1356,70 @@ app.post('/api/preferences', getUserFromToken, async (req, res) => {
     res.json({ success: true })
   } catch (error) {
     console.error('POST /api/preferences error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// PATCH /api/preferences - оновити тільки змінені поля (новий підхід)
+app.patch('/api/preferences', getUserFromToken, async (req, res) => {
+  try {
+    const { updates } = req.body
+    
+    if (!updates || typeof updates !== 'object') {
+      return res.status(400).json({ error: 'Invalid updates object' })
+    }
+    
+    // Отримуємо поточні налаштування з БД
+    const { data: existing, error: fetchError } = await supabase
+      .from('user_preferences')
+      .select('preferences')
+      .eq('user_id', req.user_id)
+      .single()
+    
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      throw fetchError
+    }
+    
+    // Поточні налаштування (або порожній об'єкт)
+    const currentPreferences = existing?.preferences || {}
+    
+    // Об'єднуємо: поточні + оновлення (оновлення мають пріоритет)
+    const mergedPreferences = {
+      ...currentPreferences,
+      ...updates
+    }
+    
+    // Для вкладених об'єктів робимо глибоке злиття
+    for (const key in updates) {
+      if (updates[key] && typeof updates[key] === 'object' && !Array.isArray(updates[key])) {
+        mergedPreferences[key] = {
+          ...(currentPreferences[key] || {}),
+          ...updates[key]
+        }
+      }
+    }
+    
+    // Don't save APIs in preferences - they go to separate column
+    const prefsWithoutAPIs = { ...mergedPreferences }
+    if (prefsWithoutAPIs.APIs) {
+      delete prefsWithoutAPIs.APIs
+    }
+    
+    // Upsert (insert or update)
+    const { error } = await supabase
+      .from('user_preferences')
+      .upsert({
+        user_id: req.user_id,
+        preferences: prefsWithoutAPIs
+      }, {
+        onConflict: 'user_id'
+      })
+    
+    if (error) throw error
+    
+    res.json({ success: true })
+  } catch (error) {
+    console.error('PATCH /api/preferences error:', error)
     res.status(500).json({ error: error.message })
   }
 })
@@ -1655,7 +1756,6 @@ async function processAllUsersSubscriptions() {
       return // Немає підписок для обробки
     }
     
-    console.log(`[Auto Subscriptions] Found ${dueSubscriptions.length} subscription(s) to process`)
     
     let processed = 0
     const errors = []
@@ -1735,7 +1835,6 @@ async function processAllUsersSubscriptions() {
         }
         
         processed++
-        console.log(`[Auto Subscriptions] ✅ Processed subscription "${sub.name}" for user ${sub.user_id}`)
       } catch (err) {
         errors.push({ subscription: sub.id, user: sub.user_id, error: err.message })
         console.error(`[Auto Subscriptions] Error processing subscription ${sub.id}:`, err)
@@ -1743,7 +1842,6 @@ async function processAllUsersSubscriptions() {
     }
     
     if (processed > 0) {
-      console.log(`[Auto Subscriptions] ✅ Successfully processed ${processed} subscription(s)`)
     }
     if (errors.length > 0) {
       console.error(`[Auto Subscriptions] ❌ Errors processing ${errors.length} subscription(s):`, errors)
@@ -1776,7 +1874,6 @@ function scheduleNextCheck() {
   const msUntilMidnight = getNextMidnight()
   
   subscriptionsTimeout = setTimeout(() => {
-    console.log('[Auto Subscriptions] 🕛 Midnight reached - processing subscriptions')
     processAllUsersSubscriptions()
     
     // Плануємо наступну перевірку
@@ -1784,7 +1881,6 @@ function scheduleNextCheck() {
   }, msUntilMidnight)
   
   const nextCheckDate = new Date(Date.now() + msUntilMidnight)
-  console.log(`[Auto Subscriptions] ✅ Timer scheduled - next check at ${nextCheckDate.toLocaleString('uk-UA')}`)
 }
 
 function startSubscriptionsTimer() {
@@ -1801,7 +1897,6 @@ function startSubscriptionsTimer() {
     // Якщо минуло менше 1 хвилини після півночі, перевіряємо
     // Або якщо це перший запуск і вже пройшла північ
     if (hoursSinceMidnight === 0 && minutesSinceMidnight < 1) {
-      console.log('[Auto Subscriptions] 🕛 Processing subscriptions immediately (just after midnight)')
       processAllUsersSubscriptions()
     }
   }
@@ -1814,7 +1909,6 @@ function stopSubscriptionsTimer() {
   if (subscriptionsTimeout) {
     clearTimeout(subscriptionsTimeout)
     subscriptionsTimeout = null
-    console.log('[Auto Subscriptions] ⏹️  Timer stopped')
   }
 }
 
@@ -2615,7 +2709,6 @@ app.post('/api/generate-api-key', getUserFromToken, async function (req, res) {
       })
     }
     
-    console.log(`[generate-api-key] Generated API key for user ${req.user_id}`)
     
     res.status(200).json({
       success: true,
@@ -2841,7 +2934,6 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
     // Перевірка чи вже виконується синхронізація для цього користувача
     const lastSync = syncBinanceInProgress.get(userId)
     if (lastSync && (now - lastSync) < 30000) { // 30 секунд мінімальний інтервал
-      console.log(`[syncBinance] Sync already in progress for user ${userId}, skipping`)
       return sendResponse(200, {
         success: true,
         synced: false,
@@ -2855,21 +2947,12 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
     // Створюємо Promise з timeout
     const syncPromise = (async () => {
       try {
-      console.log(`[syncBinance] Starting sync for user_id: ${userId}`)
-      
       // Get API keys from database instead of .env
-    const { data: prefs, error: prefsError } = await supabase
-      .from('user_preferences')
-      .select('apis')
-      .eq('user_id', req.user_id)
-      .single()
-    
-    console.log(`[syncBinance] Database query result:`, { 
-      hasData: !!prefs, 
-      apis: prefs?.apis,
-      error: prefsError?.message,
-      errorCode: prefsError?.code 
-    })
+      const { data: prefs, error: prefsError } = await supabase
+        .from('user_preferences')
+        .select('apis')
+        .eq('user_id', req.user_id)
+        .single()
     
     if (prefsError && prefsError.code !== 'PGRST116') {
       console.error('[syncBinance] Error fetching apis:', prefsError)
@@ -2882,34 +2965,10 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
     
     const APIs = prefs?.apis || {}
     const binanceAPIs = APIs.binance || {}
-    const apiKey = binanceAPIs.api_key || process.env.BINANCE_API_KEY // Fallback to .env
-    const apiSecret = binanceAPIs.api_secret || process.env.BINANCE_API_SECRET // Fallback to .env
+      const apiKey = binanceAPIs.api_key || process.env.BINANCE_API_KEY // Fallback to .env
+      const apiSecret = binanceAPIs.api_secret || process.env.BINANCE_API_SECRET // Fallback to .env
 
-    console.log(`[syncBinance] API keys:`, {
-      fromDB: {
-        hasApiKey: !!binanceAPIs.api_key,
-        hasApiSecret: !!binanceAPIs.api_secret,
-        apiKeyLength: binanceAPIs.api_key?.length || 0,
-        apiSecretLength: binanceAPIs.api_secret?.length || 0
-      },
-      fromEnv: {
-        hasApiKey: !!process.env.BINANCE_API_KEY,
-        hasApiSecret: !!process.env.BINANCE_API_SECRET
-      },
-      final: {
-        hasApiKey: !!apiKey,
-        hasApiSecret: !!apiSecret
-      }
-    })
-
-    if (!apiKey || !apiSecret) {
-      console.log('[syncBinance] Binance API keys not configured in database or .env, skipping sync')
-      console.log('[syncBinance] Available data:', { 
-        apis: prefs?.apis,
-        binanceAPIs,
-        envApiKey: !!process.env.BINANCE_API_KEY,
-        envApiSecret: !!process.env.BINANCE_API_SECRET
-      })
+      if (!apiKey || !apiSecret) {
       // finally блок видалить userId з Map
       return sendResponse(200, { 
         success: true, 
@@ -2930,7 +2989,6 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
         .single()
       if (!exactErr && exactCard) {
         binanceCard = exactCard
-        console.log(`✅ Found Binance Spot card (exact): id=${binanceCard.id}`)
       } else {
         const { data: anyCard, error: anyErr } = await supabase
           .from('cards')
@@ -2944,7 +3002,6 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
         }
         if (anyCard) {
           binanceCard = anyCard
-          console.log(`⚠️ Using Binance card fallback: "${binanceCard.bank} ${binanceCard.name}" (id=${binanceCard.id})`)
         }
       }
       if (!binanceCard) {
@@ -2992,9 +3049,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
       // Total balance = initial + transactions
       dbBalance = initialBalance + transactionsSum
       
-      console.log(`Initial balance: ${initialBalance}`)
-      console.log(`Transactions sum (${transactions?.length || 0} txs): ${transactionsSum}`)
-      console.log(`Total DB balance: ${dbBalance}`)
+
     } catch (error) {
       console.error('Error calculating balance:', error)
       return sendResponse(500, { 
@@ -3057,15 +3112,12 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
     })
 
     if (allBalances.length === 0) {
-      console.log('No balances found on Binance')
       return sendResponse(200, { 
         success: true, 
         synced: false, 
         message: 'Binance sync skipped: No balances found on Binance' 
       })
     }
-
-    console.log(`Found ${allBalances.length} coins with balance:`, allBalances.map(b => b.asset).join(', '))
 
     // Get prices for all coins in USDT with cache
     let pricesResponse
@@ -3135,7 +3187,6 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
           valueUSD = amount * prices[symbolBUSD]
           balanceBreakdown.push(`${asset}: ${amount.toFixed(8)} × $${prices[symbolBUSD].toFixed(2)} = $${valueUSD.toFixed(2)}`)
         } else {
-          console.log(`Warning: No USDT price found for ${asset}, skipping`)
           continue
         }
       }
@@ -3145,15 +3196,8 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
 
     const difference = binanceBalanceUSD - dbBalance
 
-    console.log(`\nBalance breakdown:`)
-    balanceBreakdown.forEach(line => console.log(`  ${line}`))
-    console.log(`\nTotal Binance balance: $${binanceBalanceUSD.toFixed(2)} USD`)
-    console.log(`DB balance (from transactions): $${dbBalance.toFixed(2)} USD`)
-    console.log(`Difference: ${difference > 0 ? '+' : ''}${difference.toFixed(2)} USD`)
-
     // Skip if difference is between -5 and +5 (to avoid syncing small fluctuations)
     if (difference > -5 && difference < 5) {
-      console.log(`Difference ${difference > 0 ? '+' : ''}${difference.toFixed(2)} USD is within -5 to +5 threshold, skipping sync`)
       // finally блок видалить userId з Map
       return sendResponse(200, { 
         success: true, 
@@ -3196,7 +3240,6 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
       })
       
       if (hasDuplicate) {
-        console.log(`[syncBinance] Duplicate transaction detected (difference: ${difference.toFixed(2)}), skipping`)
         // finally блок видалить userId з Map
         return sendResponse(200, {
           success: true,
@@ -3216,8 +3259,6 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
       created_at: new Date().toISOString()
     }
 
-    console.log(`Creating transaction with user_id: ${binanceCard.user_id}, card_id: ${binanceCard.id}`)
-
     const { data: newTx, error: txError } = await supabase
       .from('transactions')
       .insert([txPayload])
@@ -3233,8 +3274,6 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
         message: `Failed to create sync transaction: ${txError.message || 'Unknown error'}`
       })
     }
-
-    console.log(`Sync transaction created: ${newTx.id}, amount: ${difference}`)
 
     return sendResponse(200, {
       success: true,
@@ -3347,7 +3386,6 @@ if (process.env.NODE_ENV !== 'production' || process.env.VERCEL !== '1') {
   app.listen(port, '0.0.0.0', () => {
     console.log(`API on http://localhost:${port}`)
     console.log(`API доступний з мережі на порту ${port}`)
-    console.log(`Для доступу з телефону використовуйте IP-адресу вашого комп'ютера`)
     
     // Запускаємо таймер для автоматичної обробки підписок
     startSubscriptionsTimer()

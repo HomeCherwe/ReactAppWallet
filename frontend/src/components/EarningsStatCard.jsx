@@ -5,13 +5,15 @@ import { txBus } from '../utils/txBus'
 import useMonoRates from '../hooks/useMonoRates'
 import { listCards } from '../api/cards'
 import { apiFetch } from '../utils.jsx'
-import { updatePreferencesSection } from '../api/preferences'
-import { usePreferences } from '../context/PreferencesContext'
+import { useSettingsStore } from '../store/useSettingsStore'
 
 export default function EarningsStatCard({ title, mode, currency: initialCurrency }) {
-  const { preferences, loading: prefsLoading } = usePreferences()
+  // Використовуємо новий store
+  const settings = useSettingsStore((state) => state.settings)
+  const updateNestedSetting = useSettingsStore((state) => state.updateNestedSetting)
+  const initialized = useSettingsStore((state) => state.initialized)
   // mode: 'earning' or 'spending'
-  const [selectedCurrency, setSelectedCurrency] = useState(initialCurrency || null)
+  const [selectedCurrency, setSelectedCurrency] = useState(initialCurrency || 'ALL_UAH')
   const [prefsLoaded, setPrefsLoaded] = useState(false)
   const [loading, setLoading] = useState(true)
   const [total, setTotal] = useState(0)
@@ -19,45 +21,54 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
   const currencies = ['UAH', 'EUR', 'USD', 'USDT']
   const rates = useMonoRates()
   const saveTimeoutRef = useRef(null)
+  const lastSavedCurrencyRef = useRef(null) // Відстежуємо останнє збережене значення
   const delta = useMemo(() => {
     if (prevTotal === 0) return 0
     return Math.round(((total - prevTotal) / Math.abs(prevTotal)) * 100)
   }, [total, prevTotal])
 
-  // Init preferences from context (single fetch per session)
+  // Init preferences from settings store (single fetch per session)
   useEffect(() => {
-    if (prefsLoading) return
-    const modePrefs = preferences?.earningsStat?.[mode]
-    if (modePrefs && modePrefs.currency !== undefined) {
-      setSelectedCurrency(modePrefs.currency || null)
+    if (!initialized || !settings) return
+    const modePrefs = settings?.earningsStat?.[mode]
+    // Завантажуємо тільки якщо currency не null і не undefined (включаючи "ALL_UAH" та "ALL_EUR")
+    if (modePrefs && modePrefs.currency !== undefined && modePrefs.currency !== null && modePrefs.currency !== '') {
+      setSelectedCurrency(modePrefs.currency)
+      lastSavedCurrencyRef.current = modePrefs.currency // Зберігаємо початкове значення
+    } else {
+      // Якщо значення немає в БД або null, встановлюємо "ALL_UAH" за замовчуванням
+      const defaultCurrency = 'ALL_UAH'
+      setSelectedCurrency(defaultCurrency)
+      lastSavedCurrencyRef.current = defaultCurrency
     }
     setPrefsLoaded(true)
-  }, [prefsLoading, preferences, mode])
+  }, [initialized, settings, mode]) // НЕ додаємо selectedCurrency в залежності, щоб уникнути циклу
 
-  // Save preferences to DB when changed (with debounce)
+  // Save preferences to DB when changed (через store з debounce) - тільки якщо значення дійсно змінилося
   useEffect(() => {
     if (!prefsLoaded) return
-
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current)
+    
+    // Перевіряємо, чи значення дійсно змінилося
+    if (selectedCurrency === lastSavedCurrencyRef.current) {
+      return // Нічого не змінилося, не записуємо
     }
+    
+    // Оновлюємо збережене значення
+    lastSavedCurrencyRef.current = selectedCurrency
 
-    saveTimeoutRef.current = setTimeout(async () => {
-      try {
-        const earningsStat = { ...(preferences?.earningsStat || {}) }
-        earningsStat[mode] = { currency: selectedCurrency || null }
-        await updatePreferencesSection('earningsStat', earningsStat)
-      } catch (e) {
-        console.error('Failed to save earnings stat preferences:', e)
-      }
-    }, 500)
-
-    return () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current)
-      }
+    // Оновлюємо через store (автоматично зберігається через debounce)
+    // НЕ зберігаємо null - якщо selectedCurrency null або undefined, не зберігаємо поле
+    const earningsStat = { ...(settings?.earningsStat || {}) }
+    
+    // Зберігаємо тільки якщо значення не null і не undefined (включаючи "ALL_UAH" та "ALL_EUR")
+    if (selectedCurrency !== null && selectedCurrency !== undefined && selectedCurrency !== '') {
+      earningsStat[mode] = { currency: selectedCurrency }
+      updateNestedSetting('earningsStat', earningsStat)
+    } else {
+      // Якщо null/undefined/порожнє, НЕ зберігаємо взагалі (не викликаємо updateNestedSetting)
+      // Це означає, що поле залишиться як є в БД, або буде видалено при наступному оновленні
     }
-  }, [selectedCurrency, prefsLoaded, mode])
+  }, [selectedCurrency, prefsLoaded, mode, updateNestedSetting, settings]) // Видалено settings з залежностей, щоб уникнути циклу
 
   // Захист від дублювання через AbortController
   const abortControllerRef = useRef(null)
@@ -335,7 +346,8 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
           value={selectedCurrency || 'ALL_UAH'}
           onChange={(e) => {
             const val = e.target.value
-            setSelectedCurrency(val === 'ALL_UAH' ? null : (val || null))
+            // Зберігаємо значення як є (включаючи "ALL_UAH" та "ALL_EUR")
+            setSelectedCurrency(val || 'ALL_UAH')
           }}
         >
           <option value="ALL_UAH">ALL to UAH</option>

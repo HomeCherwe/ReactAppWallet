@@ -16,7 +16,7 @@ export function useRealtimeTransactions() {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user || !mounted) return
 
-      console.log('[Realtime] Підписуюсь на зміни транзакцій для user:', user.id)
+      
 
       // Підписуємось на зміни в таблиці transactions для поточного користувача
       const channel = supabase
@@ -30,7 +30,7 @@ export function useRealtimeTransactions() {
             filter: `user_id=eq.${user.id}`
           },
           (payload) => {
-            console.log('[Realtime] Transaction change detected:', payload.eventType, payload.new || payload.old)
+            
             
             // Викликаємо txBus для сповіщення всіх компонентів
             if (payload.eventType === 'INSERT' && payload.new) {
@@ -40,7 +40,7 @@ export function useRealtimeTransactions() {
               if (newTx.archives === true || newTx.archives === 'true') {
                 return
               }
-              console.log('[Realtime] Нова транзакція додана:', newTx.id)
+              
               txBus.emit({ 
                 type: 'INSERT',
                 transaction: newTx,
@@ -53,7 +53,7 @@ export function useRealtimeTransactions() {
               const oldTx = payload.old
               // Якщо транзакцію архівовано, це еквівалентно видаленню
               if (updatedTx.archives === true || updatedTx.archives === 'true') {
-                console.log('[Realtime] Транзакція архівована:', updatedTx.id)
+                
                 txBus.emit({ 
                   type: 'DELETE',
                   transaction: updatedTx,
@@ -61,7 +61,7 @@ export function useRealtimeTransactions() {
                   delta: -Number(updatedTx.amount || 0)
                 })
               } else {
-                console.log('[Realtime] Транзакція оновлена:', updatedTx.id)
+                
                 txBus.emit({ 
                   type: 'UPDATE',
                   transaction: updatedTx,
@@ -73,7 +73,7 @@ export function useRealtimeTransactions() {
             } else if (payload.eventType === 'DELETE' && payload.old) {
               // Транзакція видалена
               const deletedTx = payload.old
-              console.log('[Realtime] Транзакція видалена:', deletedTx.id)
+              
               txBus.emit({ 
                 type: 'DELETE',
                 transaction: deletedTx,
@@ -84,9 +84,9 @@ export function useRealtimeTransactions() {
           }
         )
         .subscribe((status) => {
-          console.log('[Realtime] Subscription status:', status)
+          
           if (status === 'SUBSCRIBED') {
-            console.log('[Realtime] ✅ Успішно підписано на зміни транзакцій')
+            
           } else if (status === 'CHANNEL_ERROR') {
             console.error('[Realtime] ❌ Помилка підписки на зміни транзакцій')
           }
@@ -99,7 +99,7 @@ export function useRealtimeTransactions() {
     return () => {
       mounted = false
       if (subscriptionRef.current) {
-        console.log('[Realtime] Відписуюсь від змін транзакцій')
+        
         supabase.removeChannel(subscriptionRef.current)
         subscriptionRef.current = null
       }

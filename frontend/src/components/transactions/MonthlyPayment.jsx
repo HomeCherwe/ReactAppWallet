@@ -14,11 +14,14 @@ import { apiFetch, getApiUrl } from '../../utils.jsx'
 import { listTransactions, deleteTransaction, archiveTransaction, deleteTransactions, getTransactionCategories } from '../../api/transactions'
 import { txBus } from '../../utils/txBus'
 import { listCards } from '../../api/cards'
-import { updatePreferencesSection } from '../../api/preferences'
-import { usePreferences } from '../../context/PreferencesContext'
+import { useSettingsStore } from '../../store/useSettingsStore'
 
 export default function MonthlyPayment() {
-  const { preferences, loading: prefsLoading } = usePreferences()
+  // Використовуємо новий store
+  const settings = useSettingsStore((state) => state.settings)
+  const updateNestedSetting = useSettingsStore((state) => state.updateNestedSetting)
+  const getNestedSetting = useSettingsStore((state) => state.getNestedSetting)
+  const initialized = useSettingsStore((state) => state.initialized)
   // remove duplicates by `id`, preserving first occurrence order
   function dedupeById(arr) {
     const seen = new Set()
@@ -112,25 +115,23 @@ export default function MonthlyPayment() {
     loadCategories()
   }, []) // Завантажуємо тільки один раз при монтуванні
 
-  // Load filters from context preferences (окремо від категорій)
+  // Load filters from settings store (окремо від категорій)
   useEffect(() => {
-    if (prefsLoading || !preferences) return
+    if (!initialized || !settings) return
     
     try {
-      if (preferences.transactionsFilters) {
-        const filters = preferences.transactionsFilters
-        if (filters.pageSize) {
-          setPageSize(filters.pageSize)
-        }
-        if (filters.transactionType) {
-          setTransactionType(filters.transactionType)
-        }
-        if (filters.category !== undefined) {
-          setSelectedCategory(filters.category || '')
-        }
-        if (typeof filters.showUsdt === 'boolean') {
-          setShowUsdt(filters.showUsdt)
-        }
+      const filters = settings.transactionsFilters || {}
+      if (filters.pageSize) {
+        setPageSize(filters.pageSize)
+      }
+      if (filters.transactionType) {
+        setTransactionType(filters.transactionType)
+      }
+      if (filters.category !== undefined) {
+        setSelectedCategory(filters.category || '')
+      }
+      if (typeof filters.showUsdt === 'boolean') {
+        setShowUsdt(filters.showUsdt)
       }
       // Зберігаємо початкові значення для порівняння
       lastSavedFiltersRef.current = {
@@ -144,7 +145,7 @@ export default function MonthlyPayment() {
       console.error('Failed to load filters:', e)
       setFiltersLoaded(true)
     }
-  }, [prefsLoading, preferences]) // Тільки для фільтрів, не для категорій
+  }, [initialized, settings]) // Тільки для фільтрів, не для категорій
 
   useEffect(() => {
     // Wait for filters to be loaded from DB before fetching
@@ -171,7 +172,7 @@ export default function MonthlyPayment() {
     fetchPage({ append: false, search: query, txType: transactionType, category: selectedCategory })
   }
 
-  // Save filters to DB when they change (with debounce) - тільки якщо значення дійсно змінилося
+  // Save filters to DB when they change (через store з debounce) - тільки якщо значення дійсно змінилося
   useEffect(() => {
     if (!filtersLoaded || !lastSavedFiltersRef.current) return // Don't save until filters are loaded from DB
     
@@ -196,26 +197,9 @@ export default function MonthlyPayment() {
     // Оновлюємо збережені значення
     lastSavedFiltersRef.current = { ...currentFilters }
     
-    // Clear existing timeout
-    if (saveFiltersTimeoutRef.current) {
-      clearTimeout(saveFiltersTimeoutRef.current)
-    }
-    
-    // Save after 500ms debounce - тільки якщо це дійсно зміна користувача
-    saveFiltersTimeoutRef.current = setTimeout(async () => {
-      try {
-        await updatePreferencesSection('transactionsFilters', currentFilters)
-      } catch (e) {
-        console.error('Failed to save transaction filters:', e)
-      }
-    }, 500)
-    
-    return () => {
-      if (saveFiltersTimeoutRef.current) {
-        clearTimeout(saveFiltersTimeoutRef.current)
-      }
-    }
-  }, [pageSize, transactionType, selectedCategory, showUsdt, filtersLoaded])
+    // Оновлюємо через store (автоматично зберігається через debounce)
+    updateNestedSetting('transactionsFilters', currentFilters)
+  }, [pageSize, transactionType, selectedCategory, showUsdt, filtersLoaded, updateNestedSetting])
 
   const handleFilterChange = (newType, newCategory) => {
     setTransactionType(newType)
@@ -473,47 +457,20 @@ export default function MonthlyPayment() {
                     <input
                       type="checkbox"
                       checked={showUsdt}
-                      onChange={async (e) => {
+                      onChange={(e) => {
                         const newValue = e.target.checked
                         setShowUsdt(newValue)
                         setSelectedIds(new Set()) // Clear selection when filter changes
                         setOffset(0) // Reset offset when filter changes
-                        
-                        try {
-                          // Отримуємо поточні налаштування
-                          const currentPrefs = preferences || {}
-                          const currentFilters = currentPrefs.transactionsFilters || {}
-                          
-                          // Формуємо об'єкт для збереження
-                          const prefsToSave = {
-                            ...currentPrefs,
-                            transactionsFilters: {
-                              ...currentFilters,
-                              showUsdt: newValue
-                            }
-                          }
-                          
-                          // Отримуємо токен
-                          const { data: { session } } = await supabase.auth.getSession()
-                          const token = session?.access_token
-                          
-                          // Прямий виклик API
-                          const apiUrl = getApiUrl()
-                          const response = await fetch(`${apiUrl}/api/preferences`, {
-                            method: 'POST',
-                            headers: {
-                              'Content-Type': 'application/json',
-                              'Authorization': `Bearer ${token}`
-                            },
-                            body: JSON.stringify({ preferences: prefsToSave })
-                          })
-                          
-                          if (!response.ok) {
-                            throw new Error('Помилка збереження')
-                          }
-                        } catch (error) {
-                          console.error('Failed to save showUsdt:', error)
+
+                        // Оновлюємо через store (автоматично зберігається через debounce)
+                        const currentFilters = settings?.transactionsFilters || {}
+                        const filtersToSave = {
+                          ...currentFilters,
+                          showUsdt: newValue
                         }
+                        updateNestedSetting('transactionsFilters', filtersToSave)
+                        toast.success('Налаштування збережено')
                       }}
                       className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                     />

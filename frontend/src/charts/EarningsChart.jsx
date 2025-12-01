@@ -12,8 +12,7 @@ import { createPortal } from 'react-dom'
 import { supabase } from '../lib/supabase'
 import { apiFetch } from '../utils.jsx'
 import { txBus } from '../utils/txBus'
-import { updatePreferencesSection } from '../api/preferences'
-import { usePreferences } from '../context/PreferencesContext'
+import { useSettingsStore } from '../store/useSettingsStore'
 import { listCards } from '../api/cards'
 import useMonoRates from '../hooks/useMonoRates'
 
@@ -407,12 +406,16 @@ function computeChartData(txsArg, modeArg, fromArg, toArg, currencyArg) {
 
 
 export default function EarningsChart(){
-  const { preferences, loading: prefsLoading } = usePreferences()
+  // Використовуємо новий store
+  const settings = useSettingsStore((state) => state.settings)
+  const updateNestedSetting = useSettingsStore((state) => state.updateNestedSetting)
+  const getNestedSetting = useSettingsStore((state) => state.getNestedSetting)
+  const initialized = useSettingsStore((state) => state.initialized)
   const rates = useMonoRates()
   const [mode, setMode] = useState('earning') // 'earning' | 'spending'
   
   // Dashboard settings
-  const showUsdtInChart = preferences?.dashboard?.showUsdtInChart !== false // default true
+  const showUsdtInChart = getNestedSetting('dashboard.showUsdtInChart', true)
   const [from, setFrom] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0,10)
   })
@@ -450,16 +453,16 @@ export default function EarningsChart(){
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  // Ініціалізувати з контексту (один запит на проєкт)
+  // Ініціалізувати з settings store (один запит на проєкт)
   useEffect(() => {
-    if (prefsLoading) return
-    const chart = preferences?.chart || {}
+    if (!initialized || !settings) return
+    const chart = settings?.chart || {}
     if (chart.currency) setCurrency(chart.currency)
     if (chart.mode) setMode(chart.mode)
     if (chart.from) setFrom(chart.from)
     if (chart.appliedFrom) setAppliedFrom(chart.appliedFrom)
     setPrefsLoaded(true)
-  }, [prefsLoading, preferences])
+  }, [initialized, settings])
 
   // displayData is what is currently visible. We render a single chart and
   // let Recharts animate bar heights. When the user requests an animated
@@ -693,22 +696,19 @@ export default function EarningsChart(){
     fetchData({ showLoading: true }) 
   }, [])
 
-  // Зберегти налаштування в БД при зміні (з debounce)
+  // Зберегти налаштування в БД при зміні (через store з debounce)
   useEffect(() => {
     if (!prefsLoaded) return // Не зберігаємо налаштування поки вони не завантажились
     
-    const timeoutId = setTimeout(() => {
-      updatePreferencesSection('chart', {
-        currency,
-        mode,
-        from,
-        appliedFrom
-        // to та appliedTo не зберігаємо - завжди сьогоднішня дата
-      })
-    }, 500) // Debounce 500ms
-    
-    return () => clearTimeout(timeoutId)
-  }, [currency, mode, from, appliedFrom, prefsLoaded])
+    // Оновлюємо через store (автоматично зберігається через debounce)
+    updateNestedSetting('chart', {
+      currency,
+      mode,
+      from,
+      appliedFrom
+      // to та appliedTo не зберігаємо - завжди сьогоднішня дата
+    })
+  }, [currency, mode, from, appliedFrom, prefsLoaded, updateNestedSetting])
 
   // handler for clicking a bar (desktop) — open day modal for clicked iso
   const handleBarClick = (data) => {

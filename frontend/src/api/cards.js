@@ -25,7 +25,8 @@ async function fileToBase64(file) {
 
 export async function createCard({ bank_id, name, card_number, currency, initial_balance = 0, expiry_date, cvv, file }) {
   let bg_url = null
-  if (file) {
+  // Перевіряємо, чи file дійсно є File/Blob об'єктом
+  if (file && file instanceof File) {
     bg_url = await fileToBase64(file)
   }
 
@@ -47,8 +48,8 @@ export async function updateCard(id, patch, file) {
   if (file === 'REMOVE') {
     finalPatch.bg_url = null
   }
-  // If file provided, convert to base64
-  else if (file && typeof file === 'object') {
+  // If file provided and it's a File/Blob, convert to base64
+  else if (file && file instanceof File) {
     finalPatch.bg_url = await fileToBase64(file)
   }
 

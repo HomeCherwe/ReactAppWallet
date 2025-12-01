@@ -5,14 +5,16 @@ import { fetchTotalsByBucket } from '../../api/totals'
 import { txBus } from '../../utils/txBus'
 import BalanceCard from './BalanceCard'
 import TotalsGrid from './TotalsGrid'
-import { updatePreferencesSection } from '../../api/preferences'
-import { usePreferences } from '../../context/PreferencesContext'
+import { useSettingsStore } from '../../store/useSettingsStore'
 import useMonoRates from '../../hooks/useMonoRates'
 
 const ORDER = ['UAH','EUR','USD','PLN','GBP','CHF','CZK','HUF']
 
 export default function TotalsCard({ title = 'Total balance' }) {
-  const { preferences, loading: prefsLoading } = usePreferences()
+  // Використовуємо новий store
+  const settings = useSettingsStore((state) => state.settings)
+  const updateNestedSetting = useSettingsStore((state) => state.updateNestedSetting)
+  const initialized = useSettingsStore((state) => state.initialized)
   const [loading, setLoading] = useState(true)
   const [idx, setIdx] = useState(0) // За замовчуванням All (індекс 0)
   const [isVisible, setIsVisible] = useState(true)
@@ -31,11 +33,11 @@ export default function TotalsCard({ title = 'Total balance' }) {
   const lastSavedIdxRef = useRef(null)
   const lastSavedIsVisibleRef = useRef(null)
 
-  // init from PreferencesContext (один запит на проєкт)
+  // init from settings store (один запит на проєкт)
   useEffect(() => {
-    if (prefsLoading) return
+    if (!initialized || !settings) return
     let loadedIdx = 0
-    const totals = preferences?.totals || {}
+    const totals = settings?.totals || {}
     if (typeof totals.section === 'number' && totals.section >= 0 && totals.section <= 3) {
       loadedIdx = totals.section
     }
@@ -49,9 +51,9 @@ export default function TotalsCard({ title = 'Total balance' }) {
     setPrefsLoaded(true)
     initializedRef.current = true
     // НЕ записуємо під час ініціалізації - тільки при зміні користувачем
-  }, [prefsLoading, preferences])
+  }, [initialized, settings])
 
-  // persist section changes to DB (з debounce) - тільки якщо значення дійсно змінилося
+  // persist section changes to DB (через store з debounce) - тільки якщо значення дійсно змінилося
   useEffect(() => {
     if (!prefsLoaded || !initializedRef.current) return
     
@@ -64,18 +66,12 @@ export default function TotalsCard({ title = 'Total balance' }) {
     lastSavedIdxRef.current = idx
     lastSavedIsVisibleRef.current = isVisible
     
-    // Зберігаємо тільки якщо це дійсно зміна користувача
-    const timeoutId = setTimeout(() => {
-      updatePreferencesSection('totals', {
-        section: idx,
-        isVisible
-      }).catch(e => {
-        console.error('Failed to save totals preferences:', e)
-      })
-    }, 500) // Debounce 500ms
-    
-    return () => clearTimeout(timeoutId)
-  }, [idx, isVisible, prefsLoaded])
+    // Оновлюємо через store (автоматично зберігається через debounce)
+    updateNestedSetting('totals', {
+      section: idx,
+      isVisible
+    })
+  }, [idx, isVisible, prefsLoaded, updateNestedSetting])
 
   // Перехоплюємо колесо лише всередині картки
   useEffect(() => {

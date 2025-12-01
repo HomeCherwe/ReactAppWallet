@@ -30,7 +30,7 @@ supabase.auth.getUser = async () => {
   }
   
   // Якщо кешу немає, робимо реальний запит
-  console.log(`[getUser Cache MISS] Request ${getUserCallCount} - fetching from server...`)
+  
   const result = await originalGetUser()
   
   // Зберігаємо в кеш
