@@ -71,6 +71,8 @@ export default function MonthlyPayment() {
   const listRef = useRef(null)
   const saveFiltersTimeoutRef = useRef(null)
   const lastSavedFiltersRef = useRef(null) // Зберігаємо останні збережені значення
+  const lastSelectedIndexRef = useRef(null) // Зберігаємо індекс останньої виділеної транзакції для Shift+click
+  const shiftKeyPressedRef = useRef(false) // Зберігаємо стан Shift клавіші
 
   async function fetchPage({ append = false, search = '', txType = transactionType, category = selectedCategory } = {}) {
     if (append) setLoadingMore(true); else setLoading(true)
@@ -97,6 +99,7 @@ export default function MonthlyPayment() {
       setRows(dedupeById(txs))
       setOffset(txs.length)
       setSelectedIds(new Set()) // Очистити вибір при завантаженні нової сторінки
+      lastSelectedIndexRef.current = null // Скинути останній виділений індекс
     }
     setHasMore(txs.length === pageSize)
     if (append) setLoadingMore(false); else setLoading(false)
@@ -114,6 +117,28 @@ export default function MonthlyPayment() {
     }
     loadCategories()
   }, []) // Завантажуємо тільки один раз при монтуванні
+
+  // Відстежуємо стан Shift клавіші глобально
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Shift') {
+        shiftKeyPressedRef.current = true
+      }
+    }
+    const handleKeyUp = (e) => {
+      if (e.key === 'Shift') {
+        shiftKeyPressedRef.current = false
+      }
+    }
+    
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
+  }, [])
 
   // Load filters from settings store (окремо від категорій)
   useEffect(() => {
@@ -232,7 +257,11 @@ export default function MonthlyPayment() {
       setRows(prev => prev.filter(r => r.id !== pendingDelete.id))
       try {
         // inform other components: deleted tx reduces balance
-        txBus.emit({ card_id: pendingDelete.card_id || null, delta: Number(pendingDelete.amount || 0) * -1 })
+        txBus.emit({ 
+          type: 'DELETE',
+          card_id: pendingDelete.card_id || null, 
+          delta: Number(pendingDelete.amount || 0) * -1 
+        })
       } catch (e) { console.error('emit delete event failed', e) }
       toast.success('Транзакцію видалено')
     } catch (e) {
@@ -251,7 +280,11 @@ export default function MonthlyPayment() {
       setRows(prev => prev.filter(r => r.id !== pendingDelete.id))
       try {
         // inform other components: archived tx reduces balance
-        txBus.emit({ card_id: pendingDelete.card_id || null, delta: Number(pendingDelete.amount || 0) * -1 })
+        txBus.emit({ 
+          type: 'DELETE',
+          card_id: pendingDelete.card_id || null, 
+          delta: Number(pendingDelete.amount || 0) * -1 
+        })
       } catch (e) { console.error('emit archive event failed', e) }
       toast.success('Транзакцію архівовано')
     } catch (e) {
@@ -268,24 +301,58 @@ export default function MonthlyPayment() {
     setRows(prev => dedupeById([tx, ...prev]))
   }
 
-  const handleSelect = (txId, checked) => {
-    setSelectedIds(prev => {
-      const newSet = new Set(prev)
-      if (checked) {
-        newSet.add(txId)
-      } else {
-        newSet.delete(txId)
-      }
-      return newSet
-    })
+  const handleSelect = (txId, checked, index, event) => {
+    // Перевіряємо shiftKey з event або з глобального стану
+    const shiftKey = event?.shiftKey || shiftKeyPressedRef.current || false
+    
+    // Якщо натиснуто Shift і є останній виділений індекс - виділяємо діапазон
+    if (shiftKey && lastSelectedIndexRef.current !== null && checked) {
+      const startIndex = Math.min(lastSelectedIndexRef.current, index)
+      const endIndex = Math.max(lastSelectedIndexRef.current, index)
+      
+      setSelectedIds(prev => {
+        const newSet = new Set(prev)
+        // Виділяємо всі транзакції в діапазоні
+        for (let i = startIndex; i <= endIndex; i++) {
+          if (rows[i]) {
+            newSet.add(rows[i].id)
+          }
+        }
+        return newSet
+      })
+      
+      // Оновлюємо останній виділений індекс
+      lastSelectedIndexRef.current = index
+    } else {
+      // Звичайне виділення/зняття виділення
+      setSelectedIds(prev => {
+        const newSet = new Set(prev)
+        if (checked) {
+          newSet.add(txId)
+          lastSelectedIndexRef.current = index // Зберігаємо індекс останньої виділеної
+        } else {
+          newSet.delete(txId)
+          // Якщо зняли виділення з останньої виділеної - скидаємо ref
+          if (lastSelectedIndexRef.current === index) {
+            lastSelectedIndexRef.current = null
+          }
+        }
+        return newSet
+      })
+    }
   }
 
   const handleSelectAll = (checked) => {
     // Since USDT filtering is now done on backend, we can use rows directly
     if (checked) {
       setSelectedIds(new Set(rows.map(tx => tx.id)))
+      // Встановлюємо останній виділений індекс на останній елемент
+      if (rows.length > 0) {
+        lastSelectedIndexRef.current = rows.length - 1
+      }
     } else {
       setSelectedIds(new Set())
+      lastSelectedIndexRef.current = null
     }
   }
 
@@ -312,6 +379,7 @@ export default function MonthlyPayment() {
       deletedTxs.forEach(tx => {
         try {
           txBus.emit({ 
+            type: 'DELETE',
             card_id: tx.card_id || null, 
             delta: Number(tx.amount || 0) * -1 
           })
@@ -322,9 +390,50 @@ export default function MonthlyPayment() {
       
       toast.success(`Видалено ${result.deleted || idsArray.length} транзакцій`)
       setSelectedIds(new Set())
+      lastSelectedIndexRef.current = null // Reset last selected index
     } catch (e) {
       console.error('Bulk delete error:', e)
       toast.error('Не вдалося видалити транзакції')
+    } finally {
+      setBulkDeleteLoading(false)
+    }
+  }
+
+  const handleBulkArchive = async () => {
+    if (selectedIds.size === 0) return
+    
+    const idsArray = Array.from(selectedIds)
+    setBulkDeleteOpen(false)
+    setBulkDeleteLoading(true)
+    
+    try {
+      // Архівуємо кожну транзакцію окремо (немає bulk archive API)
+      const archivePromises = idsArray.map(id => archiveTransaction(id))
+      await Promise.all(archivePromises)
+      
+      // Оновити список транзакцій
+      setRows(prev => prev.filter(r => !selectedIds.has(r.id)))
+      
+      // Emit txBus events для кожної заархівованої транзакції
+      const archivedTxs = rows.filter(tx => selectedIds.has(tx.id))
+      archivedTxs.forEach(tx => {
+        try {
+          txBus.emit({ 
+            type: 'DELETE',
+            card_id: tx.card_id || null, 
+            delta: Number(tx.amount || 0) * -1 
+          })
+        } catch (e) { 
+          console.error('emit archive event failed', e) 
+        }
+      })
+      
+      toast.success(`Заархівовано ${idsArray.length} транзакцій`)
+      setSelectedIds(new Set())
+      lastSelectedIndexRef.current = null // Reset last selected index
+    } catch (e) {
+      console.error('Bulk archive error:', e)
+      toast.error('Не вдалося заархівувати транзакції')
     } finally {
       setBulkDeleteLoading(false)
     }
@@ -461,6 +570,7 @@ export default function MonthlyPayment() {
                         const newValue = e.target.checked
                         setShowUsdt(newValue)
                         setSelectedIds(new Set()) // Clear selection when filter changes
+                        lastSelectedIndexRef.current = null // Reset last selected index
                         setOffset(0) // Reset offset when filter changes
 
                         // Оновлюємо через store (автоматично зберігається через debounce)
@@ -501,6 +611,7 @@ export default function MonthlyPayment() {
                     onChange={(e) => {
                       handleFilterChange(e.target.value, selectedCategory)
                       setSelectedIds(new Set()) // Clear selection when filter changes
+                      lastSelectedIndexRef.current = null // Reset last selected index
                     }}
                     className="text-xs border border-gray-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
@@ -515,6 +626,7 @@ export default function MonthlyPayment() {
                     onChange={(e) => {
                       handleFilterChange(transactionType, e.target.value)
                       setSelectedIds(new Set()) // Clear selection when filter changes
+                      lastSelectedIndexRef.current = null // Reset last selected index
                     }}
                     className="text-xs border border-gray-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-[120px]"
                   >
@@ -535,7 +647,7 @@ export default function MonthlyPayment() {
                 Транзакції не знайдено за обраними фільтрами
               </div>
             ) : (
-              rows.map((tx) => {
+              rows.map((tx, index) => {
                 // prefer transaction's own currency if present; otherwise use card currency by card_id
                 const currency = (tx.currency || cardMap[tx.card_id] || null)
                 return (
@@ -552,7 +664,7 @@ export default function MonthlyPayment() {
                       onAskDelete={askDelete}
                       onEdit={openEdit}
                       selected={selectedIds.has(tx.id)}
-                      onSelect={handleSelect}
+                      onSelect={(txId, checked, event) => handleSelect(txId, checked, index, event)}
                     />
                   </motion.div>
                 )
@@ -615,6 +727,7 @@ export default function MonthlyPayment() {
         open={bulkDeleteOpen}
         transactions={rows.filter(tx => selectedIds.has(tx.id))}
         onDelete={handleBulkDelete}
+        onArchive={handleBulkArchive}
         onCancel={() => { setBulkDeleteOpen(false) }}
       />
       <Toaster position="top-right" />

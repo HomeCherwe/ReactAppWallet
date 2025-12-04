@@ -418,12 +418,30 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
 
         if (oldCard === newCard) {
           const delta = newAmount - oldAmount
-          if (newCard && delta) txBus.emit({ card_id: newCard, delta })
+          if (newCard && delta) {
+            txBus.emit({ 
+              type: 'UPDATE',
+              card_id: newCard, 
+              delta 
+            })
+          }
         } else {
           // remove effect from old card
-          if (oldCard) txBus.emit({ card_id: oldCard, delta: -oldAmount })
+          if (oldCard) {
+            txBus.emit({ 
+              type: 'UPDATE',
+              card_id: oldCard, 
+              delta: -oldAmount 
+            })
+          }
           // apply effect to new card
-          if (newCard) txBus.emit({ card_id: newCard, delta: newAmount })
+          if (newCard) {
+            txBus.emit({ 
+              type: 'UPDATE',
+              card_id: newCard, 
+              delta: newAmount 
+            })
+          }
         }
       } catch (e) {
         console.error('emit tx update event failed', e)

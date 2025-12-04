@@ -363,7 +363,11 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
       onSaved?.(data)
       onClose()
       // інформуємо інші віджети
-      txBus.emit({ card_id: data.card_id || null, delta: Number(data.amount || 0) })
+      txBus.emit({ 
+        type: 'CREATE',
+        card_id: data.card_id || null, 
+        delta: Number(data.amount || 0) 
+      })
     } catch (e) {
       console.error('Create tx error:', e)
       toast.error(e?.message || 'Не вдалося зберегти транзакцію')

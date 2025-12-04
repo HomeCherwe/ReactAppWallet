@@ -133,13 +133,16 @@ export default function TotalsCard({ title = 'Total balance' }) {
     // subscribe to transaction events so totals update live
     if (txBus && typeof txBus.subscribe === 'function') {
       unsub = txBus.subscribe(async (evt) => {
-        try {
-          const resp = await fetchTotalsByBucket()
-          if (!mounted) return
-          setData(resp || { cash:{}, cards:{}, savings:{} })
-        } catch (e) {
-          console.error('refresh totals failed', e)
-        }
+        // Невелика затримка, щоб дати серверу час обробити зміни
+        setTimeout(async () => {
+          try {
+            const resp = await fetchTotalsByBucket()
+            if (!mounted) return
+            setData(resp || { cash:{}, cards:{}, savings:{} })
+          } catch (e) {
+            console.error('refresh totals failed', e)
+          }
+        }, 500) // 500ms затримка для синхронізації з сервером
       })
     }
 

@@ -19,6 +19,16 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+    // Support SPA routing - redirect all routes to index.html
+    historyApiFallback: true,
+  },
+  // For production build - ensure all routes work
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: undefined,
+      },
+    },
   },
 })
 

@@ -38,6 +38,9 @@ export default function DeleteTxModal({ open, transaction, transactions, onDelet
                 Загальна сума: <strong>{totalAmount > 0 ? '+' : ''}{totalAmount.toFixed(2)}</strong>
               </p>
             )}
+            <p className="text-xs text-gray-500 mt-3">
+              Оберіть дію для цих транзакцій:
+            </p>
           </>
         ) : (
           <>
@@ -60,13 +63,13 @@ export default function DeleteTxModal({ open, transaction, transactions, onDelet
           <Trash2 size={16} />
           {isBulk ? 'Видалити назавжди' : 'Видалити назавжди'}
         </button>
-        {!isBulk && onArchive && (
+        {onArchive && (
           <button
             className="flex items-center justify-center gap-2 rounded-xl py-2.5 font-medium text-sm bg-gray-700 text-white hover:bg-gray-800 transition-colors"
             onClick={onArchive}
           >
             <Archive size={16} />
-            В архів
+            {isBulk ? 'Заархівувати всі' : 'В архів'}
           </button>
         )}
         <button

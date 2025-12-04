@@ -7,6 +7,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { listCards, createCard, updateCard, deleteCard } from '../api/cards'
 import { listBanks, createBank, updateBank, deleteBank } from '../api/banks'
 import { sumTransactionsByCard } from '../api/transactions'
+import { invalidateSumByCardCache } from '../utils/dataCache'
 import { CreditCard, Plus, X, Pencil, Trash2, Filter, Copy, Building2, Star, Eye } from 'lucide-react'
 import { txBus } from '../utils/txBus'
 import toast from 'react-hot-toast'
@@ -609,9 +610,33 @@ export default function CardsManager({ groupByBank = false, showActions = true }
   useEffect(() => { load() }, [groupByBank])
 
   useEffect(() => {
-    const off = txBus.subscribe(({ card_id, delta }) => {
-      if (!card_id || !delta) return
-      setCards(prev => prev.map(c => c.id === card_id ? { ...c, _balance: Number(c._balance || 0) + Number(delta || 0) } : c))
+    const off = txBus.subscribe(async ({ card_id, delta, type }) => {
+      // Якщо є delta і card_id - оновлюємо баланс через delta (швидко для оптимістичного оновлення)
+      if (card_id && delta) {
+        setCards(prev => prev.map(c => c.id === card_id ? { ...c, _balance: Number(c._balance || 0) + Number(delta || 0) } : c))
+      }
+      
+      // Після змін транзакцій перезавантажуємо баланси з сервера для точності
+      // Це гарантує, що баланси завжди правильні, навіть якщо delta був неправильним
+      if (type === 'CREATE' || type === 'UPDATE' || type === 'DELETE') {
+        // Невелика затримка, щоб дати серверу час обробити зміни
+        setTimeout(async () => {
+          try {
+            // Інвалідуємо кеш перед завантаженням нових даних
+            invalidateSumByCardCache()
+            
+            const sums = await sumTransactionsByCard()
+            setCards(prev => prev.map(c => {
+              const initial = Number(c.initial_balance || 0)
+              const txSum = Number(sums[c.id] || 0)
+              const balance = initial + txSum
+              return { ...c, _balance: balance }
+            }))
+          } catch (e) {
+            console.error('Failed to reload balances after transaction change:', e)
+          }
+        }, 500) // 500ms затримка для синхронізації з сервером
+      }
     })
     return off
   }, [])

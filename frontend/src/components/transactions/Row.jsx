@@ -19,9 +19,20 @@ export default function Row({ tx, currency, onDetails, onAskDelete, onEdit, sele
           <input
             type="checkbox"
             checked={selected || false}
-            onChange={(e) => onSelect(tx.id, e.target.checked)}
+            onChange={(e) => {
+              // onChange викликається, але shiftKey тут може бути недоступний
+              // Тому використовуємо onClick для обробки Shift
+            }}
+            onClick={(e) => {
+              e.stopPropagation()
+              // Перевіряємо shiftKey - в onClick він має бути доступний
+              const shiftKey = e.shiftKey || (e.nativeEvent && e.nativeEvent.shiftKey) || false
+              const newChecked = !selected
+              // Створюємо синтетичний event з shiftKey
+              const syntheticEvent = { shiftKey }
+              onSelect(tx.id, newChecked, syntheticEvent)
+            }}
             className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-            onClick={(e) => e.stopPropagation()}
           />
         )}
         <div>
