@@ -210,6 +210,9 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
       
       const receiptTotal = Math.abs(Number(parsed.totalAmount || 0))
       const currentAmount = parseFloat(form.amount || '0')
+      // determine transaction currency (prefer explicit tx.currency, fallback to card currency)
+      const selectedCard = cards.find(c => c.id === form.cardId)
+      const txCurrency = (originalRef.current?.currency || selectedCard?.currency || 'UAH').toUpperCase()
       
       // Обробка merchant (може бути string або object {name, address})
       let merchantName = null
@@ -235,9 +238,15 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
       
       // Обробка суми: якщо сума така сама - не міняємо, якщо інша - додаємо
       let newAmount = currentAmount
-      if (Math.abs(receiptTotal - currentAmount) > 0.01) {
-        // Суми різні - додаємо
-        newAmount = currentAmount + receiptTotal
+      // If currencies mismatch, do not sum the receipt to the existing transaction amount
+      if (txCurrency && billCur && txCurrency !== billCur) {
+        toast.warn(`Валюта чека (${billCur}) відрізняється від валюти транзакції (${txCurrency}). Сума не буде додана.`)
+        // leave newAmount as currentAmount
+      } else {
+        if (Math.abs(receiptTotal - currentAmount) > 0.01) {
+          // Суми різні - додаємо
+          newAmount = currentAmount + receiptTotal
+        }
       }
       // Якщо суми однакові - залишаємо currentAmount без змін
       

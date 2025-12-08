@@ -277,17 +277,33 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
     }
   }
   
-  const note = buildNoteFromItems(parsed.items || [], billCur, derivedRate, parsed.merchant)
+      const note = buildNoteFromItems(parsed.items || [], billCur, derivedRate, parsed.merchant)
 
-      setForm(f => ({
-        ...f,
-        kind: 'expense',
-        amount: String(total || ''),
-        category: f.category || ((parsed.items || []).length ? 'Продукти' : ''),
-        note,
-        merchantName, // Зберігаємо для передачі в payload
-        merchantAddress // Зберігаємо для передачі в payload
-      }))
+      // If user already entered an amount and currencies mismatch, do not overwrite it
+      const existingAmount = parseFloat(form.amount || '0')
+      const selectedCard = cards.find(c => c.id === form.cardId)
+      const cardCurrency = (selectedCard?.currency || 'UAH').toUpperCase()
+      if (existingAmount > 0 && cardCurrency && billCur && cardCurrency !== billCur) {
+        toast.warn(`Валюта чека (${billCur}) відрізняється від валюти картки (${cardCurrency}). Поле суми не буде змінено.`)
+        setForm(f => ({
+          ...f,
+          kind: 'expense',
+          category: f.category || ((parsed.items || []).length ? 'Продукти' : ''),
+          note,
+          merchantName, // Зберігаємо для передачі в payload
+          merchantAddress // Зберігаємо для передачі в payload
+        }))
+      } else {
+        setForm(f => ({
+          ...f,
+          kind: 'expense',
+          amount: String(total || ''),
+          category: f.category || ((parsed.items || []).length ? 'Продукти' : ''),
+          note,
+          merchantName, // Зберігаємо для передачі в payload
+          merchantAddress // Зберігаємо для передачі в payload
+        }))
+      }
 
       setShowReceiptActions(false)
       toast.success('Чек розпізнано, поля заповнено')
