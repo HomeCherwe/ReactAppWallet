@@ -240,7 +240,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
       let newAmount = currentAmount
       // If currencies mismatch, do not sum the receipt to the existing transaction amount
       if (txCurrency && billCur && txCurrency !== billCur) {
-        toast.warn(`Валюта чека (${billCur}) відрізняється від валюти транзакції (${txCurrency}). Сума не буде додана.`)
+        toast(`Валюта чека (${billCur}) відрізняється від валюти транзакції (${txCurrency}). Сума не буде додана.`, { duration: 5000 })
         // leave newAmount as currentAmount
       } else {
         if (Math.abs(receiptTotal - currentAmount) > 0.01) {
@@ -624,25 +624,12 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
 
               {/* Додавання чека */}
               <div className="mt-1">
-                {!showReceiptActions ? (
-                  <button type="button" className="w-full rounded-xl border px-3 py-2 hover:bg-gray-50"
-                          onClick={()=>setShowReceiptActions(true)}>
-                    Додати чек
-                  </button>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    <button type="button" className="rounded-xl border px-3 py-2 hover:bg-gray-50"
-                            onClick={onPickFile} disabled={parsing}>
-                      Додати фото
-                    </button>
-                    <button type="button" className="rounded-xl border px-3 py-2 hover:bg-gray-50"
-                            onClick={startCamera} disabled={parsing}>
-                      Сфотографувати
-                    </button>
-                    <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={onFileChange}/>
-                    {parsing && <div className="col-span-2 text-xs text-gray-500">Обробка чека…</div>}
-                  </div>
-                )}
+                <button type="button" className="w-full rounded-xl border px-3 py-2 hover:bg-gray-50"
+                        onClick={onPickFile} disabled={parsing}>
+                  Додати чек
+                </button>
+                <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={onFileChange}/>
+                {parsing && <div className="mt-2 text-xs text-gray-500">Обробка чека…</div>}
               </div>
 
               <div className="mt-2 flex gap-2">

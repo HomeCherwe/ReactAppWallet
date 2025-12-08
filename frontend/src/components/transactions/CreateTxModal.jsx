@@ -284,7 +284,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
       const selectedCard = cards.find(c => c.id === form.cardId)
       const cardCurrency = (selectedCard?.currency || 'UAH').toUpperCase()
       if (existingAmount > 0 && cardCurrency && billCur && cardCurrency !== billCur) {
-        toast.warn(`Валюта чека (${billCur}) відрізняється від валюти картки (${cardCurrency}). Поле суми не буде змінено.`)
+        toast(`Валюта чека (${billCur}) відрізняється від валюти картки (${cardCurrency}). Поле суми не буде змінено.`, { duration: 5000 })
         setForm(f => ({
           ...f,
           kind: 'expense',
@@ -550,25 +550,12 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
               {/* rate input removed - using Monobank rates via useMonoRates */}
 
               <div className="mt-1">
-                {!showReceiptActions ? (
-                  <button type="button" className="w-full rounded-xl border px-3 py-2 hover:bg-gray-50"
-                          onClick={()=>setShowReceiptActions(true)}>
-                    Додати чек
-                  </button>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    <button type="button" className="rounded-xl border px-3 py-2 hover:bg-gray-50"
-                            onClick={onPickFile} disabled={parsing}>
-                      Додати фото
-                    </button>
-                    <button type="button" className="rounded-xl border px-3 py-2 hover:bg-gray-50"
-                            onClick={startCamera} disabled={parsing}>
-                      Сфотографувати
-                    </button>
-                    <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={onFileChange}/>
-                    {parsing && <div className="col-span-2 text-xs text-gray-500">Обробка чека…</div>}
-                  </div>
-                )}
+                <button type="button" className="w-full rounded-xl border px-3 py-2 hover:bg-gray-50"
+                        onClick={onPickFile} disabled={parsing}>
+                  Додати чек
+                </button>
+                <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={onFileChange}/>
+                {parsing && <div className="mt-2 text-xs text-gray-500">Обробка чека…</div>}
               </div>
 
               <div className="mt-2 flex gap-2">
