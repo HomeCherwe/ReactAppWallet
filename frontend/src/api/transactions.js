@@ -61,6 +61,29 @@ export async function archiveTransaction(id) {
   invalidateSumByCardCache()
 }
 
+export async function unarchiveTransaction(id) {
+  await apiFetch(`/api/transactions/${id}/unarchive`, {
+    method: 'PATCH'
+  })
+  
+  // Інвалідувати кеш sum by card після розархівування транзакції
+  invalidateSumByCardCache()
+}
+
+export async function listArchivedTransactions({ from = 0, to = 999, search = '', transactionType = 'all', category = '', excludeUsdt = false } = {}) {
+  const params = new URLSearchParams({
+    from: from.toString(),
+    to: to.toString(),
+    archived: 'true',
+    ...(search && { search }),
+    ...(transactionType && transactionType !== 'all' && { transaction_type: transactionType }),
+    ...(category && { category }),
+    ...(excludeUsdt && { exclude_usdt: 'true' })
+  })
+
+  return await apiFetch(`/api/transactions?${params}`)
+}
+
 export async function deleteTransactions(ids) {
   if (!ids || !Array.isArray(ids) || ids.length === 0) {
     throw new Error('ids array is required')

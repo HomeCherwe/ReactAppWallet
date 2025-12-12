@@ -280,13 +280,17 @@ export default function CategoryPieChart() {
         // Об'єднуємо транзакції з карток та готівкові
         const transactions = [...cardTransactions, ...cashTransactions]
         
-        // Фільтруємо трансфери, Binance та Savings транзакції
+        // Фільтруємо трансфери, Binance, Savings та "ПОВЕРНЕННЯ" транзакції
         const filteredTransactions = transactions.filter(tx => {
           // Виключаємо трансфери
           if (tx.is_transfer) return false
           
           // Виключаємо категорію "ТРАНСФЕР"
           if (tx.category === 'ТРАНСФЕР') return false
+
+          // Виключаємо повернення (linked refunds)
+          if (String(tx.category || '').toUpperCase() === 'ПОВЕРНЕННЯ') return false
+          if (String(tx.note || '').includes('[refund_for:')) return false
           
           // Виключаємо Binance транзакції (перевіряємо по card_id або по card)
           if (tx.card_id && cardMap[tx.card_id]?.isBinance) return false

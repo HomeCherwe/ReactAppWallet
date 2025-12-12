@@ -1,7 +1,17 @@
 import { fmtDate, fmtAmount } from '../../utils/format'
-import { Trash2, Info, MapPin } from 'lucide-react'
+import { Trash2, Info, MapPin, RotateCcw } from 'lucide-react'
 
-export default function Row({ tx, currency, onDetails, onAskDelete, onEdit, selected, onSelect }) {
+export default function Row({
+  tx,
+  currency,
+  onDetails,
+  onAskDelete,
+  onEdit,
+  onRefund,
+  selected,
+  onSelect,
+  amountOverride,
+}) {
   const isExp = Number(tx.amount) < 0
   const bg = isExp ? 'bg-rose-500/10' : 'bg-emerald-500/10'
   const hover = isExp ? 'hover:bg-rose-500/20' : 'hover:bg-emerald-500/20'
@@ -66,42 +76,74 @@ export default function Row({ tx, currency, onDetails, onAskDelete, onEdit, sele
       </div>
 
       <div className="flex items-center gap-2">
-        <div className={`font-semibold text-sm ${isExp ? '' : 'text-emerald-600'}`}>
-          {fmtAmount(tx.amount, currency)}
-        </div>
+        {amountOverride ? (
+          <div className="flex flex-col items-end leading-tight">
+            <div className={`font-semibold text-sm ${Number(amountOverride.primaryAmount) < 0 ? '' : 'text-emerald-600'}`}>
+              {fmtAmount(amountOverride.primaryAmount, amountOverride.currency || currency)}
+            </div>
+            {amountOverride.secondaryAmount != null && (
+              <div className="text-[11px] text-gray-500">
+                {fmtAmount(amountOverride.secondaryAmount, amountOverride.currency || currency)}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className={`font-semibold text-sm ${isExp ? '' : 'text-emerald-600'}`}>
+            {fmtAmount(tx.amount, currency)}
+          </div>
+        )}
 
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            onAskDelete(tx)
-          }}
-          className="h-9 w-9 sm:h-7 sm:w-7 rounded-full bg-rose-500/10 hover:bg-rose-500/20 grid place-items-center text-rose-600"
-          title="Видалити"
-        >
-          <Trash2 size={14} />
-        </button>
+        {onRefund && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onRefund(tx)
+            }}
+            className="h-9 w-9 sm:h-7 sm:w-7 rounded-full bg-indigo-500/10 hover:bg-indigo-500/20 grid place-items-center text-indigo-600"
+            title="Повернення"
+          >
+            <RotateCcw size={14} />
+          </button>
+        )}
 
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            onDetails(tx, currency)
-          }}
-          className="h-9 w-9 sm:h-7 sm:w-7 rounded-full bg-gray-200/70 hover:bg-gray-300 grid place-items-center text-gray-700"
-          title="Деталі"
-        >
-          <Info size={14} />
-        </button>
+        {onAskDelete && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onAskDelete(tx)
+            }}
+            className="h-9 w-9 sm:h-7 sm:w-7 rounded-full bg-rose-500/10 hover:bg-rose-500/20 grid place-items-center text-rose-600"
+            title="Видалити"
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
 
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            onEdit(tx)
-          }}
-          className="h-9 w-9 sm:h-7 sm:w-7 rounded-full bg-amber-500/10 hover:bg-amber-500/20 grid place-items-center text-amber-600"
-          title="Редагувати"
-        >
-          ✏️
-        </button>
+        {onDetails && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onDetails(tx, currency)
+            }}
+            className="h-9 w-9 sm:h-7 sm:w-7 rounded-full bg-gray-200/70 hover:bg-gray-300 grid place-items-center text-gray-700"
+            title="Деталі"
+          >
+            <Info size={14} />
+          </button>
+        )}
+
+        {onEdit && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onEdit(tx)
+            }}
+            className="h-9 w-9 sm:h-7 sm:w-7 rounded-full bg-amber-500/10 hover:bg-amber-500/20 grid place-items-center text-amber-600"
+            title="Редагувати"
+          >
+            ✏️
+          </button>
+        )}
       </div>
     </div>
   )

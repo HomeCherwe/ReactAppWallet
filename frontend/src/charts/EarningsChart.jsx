@@ -235,6 +235,13 @@ function fmtLabel(iso) {
 function getIncludedTxIds(txsArg = [], modeArg = 'earning', currencyArg) {
   const included = new Set()
 
+  const isRefundTx = (t) => {
+    if (!t) return false
+    if (String(t.category || '').toUpperCase() === 'ПОВЕРНЕННЯ') return true
+    const note = String(t.note || '')
+    return note.includes('[refund_for:')
+  }
+
   // helper: normalize currency
   const curMatch = (t) => {
     const txCur = t.currency ? String(t.currency).toUpperCase() : undefined
@@ -246,6 +253,7 @@ function getIncludedTxIds(txsArg = [], modeArg = 'earning', currencyArg) {
   const transferGroups = new Map()
   for (const t of txsArg || []) {
     if (t.archives) continue
+    if (isRefundTx(t)) continue
     if (t.is_transfer && t.transfer_id) {
       const arr = transferGroups.get(t.transfer_id) || []
       arr.push(t)
@@ -257,6 +265,7 @@ function getIncludedTxIds(txsArg = [], modeArg = 'earning', currencyArg) {
   for (const t of txsArg || []) {
     if (t.archives) continue
     if (t.is_transfer) continue
+    if (isRefundTx(t)) continue
     // determine savings either from explicit flag or from card label
     const tIsSavings = !!t.is_savings || String(t.card || '').toLowerCase().includes('збер') || String(t.card || '').toLowerCase().includes('savings')
     if (tIsSavings) continue
@@ -761,6 +770,8 @@ export default function EarningsChart(){
   function computeChartData(txsArg, modeArg, fromArg, toArg, currencyArg) {
     const map = new Map()
     for (const t of txsArg || []) {
+      // skip refunds
+      if (String(t.category || '').toUpperCase() === 'ПОВЕРНЕННЯ' || String(t.note || '').includes('[refund_for:')) continue
       // skip transfer-internal transactions and savings (they shouldn't affect earnings chart)
       if (t.is_transfer) continue
       if (t.is_savings) continue

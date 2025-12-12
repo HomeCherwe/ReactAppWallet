@@ -148,8 +148,15 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
         // Перевіряємо перед виконанням запиту транзакцій
         if (abortController.signal.aborted || !mounted) return
 
+        const isRefundTx = (tx) => {
+          if (!tx) return false
+          if (String(tx.category || '').toUpperCase() === 'ПОВЕРНЕННЯ') return true
+          const note = String(tx.note || '')
+          return note.includes('[refund_for:')
+        }
+
         // Fetch transactions from this month
-        const fields = 'id,amount,created_at,is_transfer,transfer_role,transfer_id,archives,card,card_id'
+        const fields = 'id,amount,created_at,is_transfer,transfer_role,transfer_id,archives,card,card_id,category,note'
         const allTxs = await apiFetch(
           `/api/transactions?start_date=${firstDayThisMonth.toISOString()}&end_date=${firstDayNextMonth.toISOString()}&fields=${fields}&order_by=created_at&order_asc=true`,
           { signal: abortController.signal }
@@ -164,6 +171,7 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
         for (const tx of allTxs) {
           if (tx.archives) continue
           if (tx.is_transfer) continue
+          if (isRefundTx(tx)) continue
           
           // Check if transaction's card is savings
           const cardInfo = cardMap.get(tx.card_id) || { isSavings: false, isBinance: false, currency: 'UAH' }
@@ -214,7 +222,7 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
         if (abortController.signal.aborted || !mounted) return
 
         // Calculate previous month total
-        const prevMonthFields = 'id,amount,created_at,is_transfer,archives,card_id'
+        const prevMonthFields = 'id,amount,created_at,is_transfer,archives,card_id,category,note'
         let prevMonthTotal = 0
         try {
           const prevTxs = await apiFetch(
@@ -227,6 +235,7 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
           for (const tx of prevTxs) {
             if (tx.archives) continue
             if (tx.is_transfer) continue
+            if (isRefundTx(tx)) continue
             
             const cardInfo = cardMap.get(tx.card_id) || { isSavings: false, isBinance: false, currency: 'UAH' }
             if (cardInfo.isSavings) continue

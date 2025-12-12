@@ -615,8 +615,15 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       }
     }
     
-    // Archive filter
-    q = q.or('archives.is.null,archives.eq.false')
+    // Archive filter - if archived=true in query, show only archived, otherwise show only non-archived
+    const archived = req.query.archived
+    if (archived === 'true' || archived === true) {
+      // Фільтруємо тільки архівні транзакції (archives = true)
+      q = q.eq('archives', true)
+    } else {
+      // Фільтруємо тільки неархівні транзакції (archives = null або false)
+      q = q.or('archives.is.null,archives.eq.false')
+    }
     
     // Transaction type filter (expense/income)
     const transactionType = req.query.transaction_type
@@ -1106,6 +1113,24 @@ app.patch('/api/transactions/:id/archive', getUserFromToken, async (req, res) =>
     res.json({ success: true })
   } catch (error) {
     console.error('PATCH /api/transactions/:id/archive error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.patch('/api/transactions/:id/unarchive', getUserFromToken, async (req, res) => {
+  try {
+    const { id } = req.params
+    
+    const { error } = await supabase
+      .from('transactions')
+      .update({ archives: false })
+      .eq('id', id)
+      .eq('user_id', req.user_id)
+    
+    if (error) throw error
+    res.json({ success: true })
+  } catch (error) {
+    console.error('PATCH /api/transactions/:id/unarchive error:', error)
     res.status(500).json({ error: error.message })
   }
 })
