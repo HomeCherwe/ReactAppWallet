@@ -1,4 +1,4 @@
-import { Home, CreditCard, BarChart3, Settings, Wallet, ReceiptText, User, Repeat, Plus, Archive } from 'lucide-react'
+import { Home, CreditCard, BarChart3, Wallet, Repeat, Plus, Archive, HandCoins } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { supabase, cacheUser } from '../lib/supabase'
@@ -94,6 +94,13 @@ export default function Sidebar({ className = '' }){
                 label="Архів"
                 active={isActive('/archives')}
                 onClick={() => navigate('/archives')}
+              />
+              
+              <NavItem 
+                icon={HandCoins} 
+                label="Борги"
+                active={isActive('/debts')}
+                onClick={() => navigate('/debts')}
               />
         </div>
         

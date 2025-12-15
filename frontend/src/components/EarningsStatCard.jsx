@@ -148,15 +148,24 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
         // Перевіряємо перед виконанням запиту транзакцій
         if (abortController.signal.aborted || !mounted) return
 
-        const isRefundTx = (tx) => {
+        const isExcludedFromStats = (tx) => {
           if (!tx) return false
-          if (String(tx.category || '').toUpperCase() === 'ПОВЕРНЕННЯ') return true
+          // New rule: exclude from any stats when flag is true.
+          if (tx.exclude_from_stats === true || tx.exclude_from_stats === 'true' || tx.exclude_from_stats === 1) return true
+          // Safety/backward-compat: linked refund rows are not counted directly
+          if (tx.refund_for) return true
           const note = String(tx.note || '')
           return note.includes('[refund_for:')
         }
 
+        const amountForStats = (tx) => {
+          const v = tx?.amount_stat
+          if (v === null || v === undefined || v === '') return Number(tx?.amount || 0)
+          return Number(v || 0)
+        }
+
         // Fetch transactions from this month
-        const fields = 'id,amount,created_at,is_transfer,transfer_role,transfer_id,archives,card,card_id,category,note'
+        const fields = 'id,amount,amount_stat,exclude_from_stats,created_at,is_transfer,transfer_role,transfer_id,archives,card,card_id,category,note,refund_for'
         const allTxs = await apiFetch(
           `/api/transactions?start_date=${firstDayThisMonth.toISOString()}&end_date=${firstDayNextMonth.toISOString()}&fields=${fields}&order_by=created_at&order_asc=true`,
           { signal: abortController.signal }
@@ -167,18 +176,18 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
 
         // Apply filters: no archived, no transfers, no savings
         const included = new Set()
+        const effectiveCurrency = selectedCurrency || 'ALL_UAH'
 
         for (const tx of allTxs) {
           if (tx.archives) continue
           if (tx.is_transfer) continue
-          if (isRefundTx(tx)) continue
+          if (isExcludedFromStats(tx)) continue
           
           // Check if transaction's card is savings
           const cardInfo = cardMap.get(tx.card_id) || { isSavings: false, isBinance: false, currency: 'UAH' }
           if (cardInfo.isSavings) continue
 
           // Skip Binance transactions when calculating ALL to UAH or ALL to EUR
-          const effectiveCurrency = selectedCurrency || 'ALL_UAH'
           if ((effectiveCurrency === 'ALL_UAH' || effectiveCurrency === 'ALL_EUR') && cardInfo.isBinance) continue
 
           // Check currency match using card currency
@@ -187,7 +196,7 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
           // If selectedCurrency is a specific currency (not ALL), filter by it
           if (effectiveCurrency !== 'ALL_UAH' && effectiveCurrency !== 'ALL_EUR' && txCur !== effectiveCurrency) continue
 
-          const amt = Number(tx.amount || 0)
+          const amt = Number(amountForStats(tx) || 0)
           if (mode === 'spending') {
             if (amt >= 0) continue
             included.add(tx.id)
@@ -201,28 +210,20 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
         let currentTotal = 0
         for (const tx of allTxs) {
           if (!included.has(tx.id)) continue
-          const amt = Math.abs(Number(tx.amount || 0))
           const cardInfo = cardMap.get(tx.card_id) || { isSavings: false, isBinance: false, currency: 'UAH' }
           const txCur = cardInfo.currency
+          const absAmt = Math.abs(Number(amountForStats(tx) || 0))
           // Convert based on selected currency option
-          const effectiveCurrency = selectedCurrency || 'ALL_UAH'
-          if (effectiveCurrency === 'ALL_UAH') {
-            // Convert all to UAH
-            currentTotal += convertCurrency(amt, txCur, 'UAH')
-          } else if (effectiveCurrency === 'ALL_EUR') {
-            // Convert all to EUR
-            currentTotal += convertCurrency(amt, txCur, 'EUR')
-          } else {
-            // Show only selected currency (no conversion needed, already filtered)
-            currentTotal += amt
-          }
+          if (effectiveCurrency === 'ALL_UAH') currentTotal += convertCurrency(absAmt, txCur, 'UAH')
+          else if (effectiveCurrency === 'ALL_EUR') currentTotal += convertCurrency(absAmt, txCur, 'EUR')
+          else currentTotal += absAmt
         }
 
         // Перевіряємо перед виконанням запиту попереднього місяця
         if (abortController.signal.aborted || !mounted) return
 
         // Calculate previous month total
-        const prevMonthFields = 'id,amount,created_at,is_transfer,archives,card_id,category,note'
+        const prevMonthFields = 'id,amount,amount_stat,exclude_from_stats,created_at,is_transfer,archives,card_id,category,note,refund_for'
         let prevMonthTotal = 0
         try {
           const prevTxs = await apiFetch(
@@ -235,13 +236,12 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
           for (const tx of prevTxs) {
             if (tx.archives) continue
             if (tx.is_transfer) continue
-            if (isRefundTx(tx)) continue
+            if (isExcludedFromStats(tx)) continue
             
             const cardInfo = cardMap.get(tx.card_id) || { isSavings: false, isBinance: false, currency: 'UAH' }
             if (cardInfo.isSavings) continue
 
             // Skip Binance transactions when calculating ALL to UAH or ALL to EUR
-            const effectiveCurrency = selectedCurrency || 'ALL_UAH'
             if ((effectiveCurrency === 'ALL_UAH' || effectiveCurrency === 'ALL_EUR') && cardInfo.isBinance) continue
 
             const txCur = tx.currency ? String(tx.currency).toUpperCase() : cardInfo.currency
@@ -249,24 +249,15 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
             // If selectedCurrency is a specific currency (not ALL), filter by it
             if (effectiveCurrency !== 'ALL_UAH' && effectiveCurrency !== 'ALL_EUR' && txCur !== effectiveCurrency) continue
 
-            const amt = Number(tx.amount || 0)
-            let addAmt = 0
-            if (mode === 'spending' && amt < 0) {
-              addAmt = Math.abs(amt)
-            } else if (mode === 'earning' && amt > 0) {
-              addAmt = amt
-            }
-            // Convert based on selected currency option
-            if (effectiveCurrency === 'ALL_UAH') {
-              // Convert all to UAH
-              prevMonthTotal += convertCurrency(addAmt, txCur, 'UAH')
-            } else if (effectiveCurrency === 'ALL_EUR') {
-              // Convert all to EUR
-              prevMonthTotal += convertCurrency(addAmt, txCur, 'EUR')
-            } else {
-              // Show only selected currency (no conversion needed, already filtered)
-              prevMonthTotal += addAmt
-            }
+            const amt = Number(amountForStats(tx) || 0)
+            let addAbs = 0
+            if (mode === 'spending' && amt < 0) addAbs = Math.abs(amt)
+            else if (mode === 'earning' && amt > 0) addAbs = amt
+
+            if (!addAbs) continue
+            if (effectiveCurrency === 'ALL_UAH') prevMonthTotal += convertCurrency(addAbs, txCur, 'UAH')
+            else if (effectiveCurrency === 'ALL_EUR') prevMonthTotal += convertCurrency(addAbs, txCur, 'EUR')
+            else prevMonthTotal += addAbs
           }
         } catch (e) {
           console.error('Failed to fetch previous month transactions:', e)

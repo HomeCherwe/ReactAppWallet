@@ -64,7 +64,7 @@ export default function MonthlyPayment() {
     return res
   }
   const [rows, setRows] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [initialLoading, setInitialLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [cardMap, setCardMap] = useState({})
   const [selectedIds, setSelectedIds] = useState(new Set())
@@ -108,29 +108,64 @@ export default function MonthlyPayment() {
   const observerRef = useRef(null) // Для Intersection Observer
   const loadMoreTriggerRef = useRef(null) // Елемент для тригера завантаження
   const offsetRef = useRef(0) // Ref для зберігання поточного offset
+  const rowsRef = useRef([]) // актуальні rows для fetchPage (щоб уникнути stale closure)
+  const refreshDebounceRef = useRef(null)
 
-  const getRefundExpenseId = (note) => {
+  useEffect(() => {
+    rowsRef.current = rows || []
+  }, [rows])
+
+  const parseRefundForFromNote = (note) => {
     if (!note) return null
     const m = String(note).match(/\[refund_for:([0-9a-fA-F-]+)\]/)
     return m ? m[1] : null
   }
 
-  const ensureRefundTag = (note, expenseId) => {
-    const n = String(note || '').trim()
-    const tag = `[refund_for:${expenseId}]`
-    if (n.includes(tag)) return n
-    return n ? `${n} ${tag}` : tag
+  const stripLegacyRefundTagFromNote = (note) => {
+    if (!note) return note
+    // remove [refund_for:uuid] with optional leading whitespace
+    const cleaned = String(note).replace(/\s*\[refund_for:[0-9a-fA-F-]+\]/g, '').trim()
+    return cleaned || null
+  }
+
+  // Prefer DB column `refund_for`, fallback to legacy note tag
+  const getRefundParentId = (tx) => {
+    if (!tx) return null
+    return tx.refund_for || parseRefundForFromNote(tx.note)
+  }
+
+  const isExcludedFromStats = (tx) => {
+    return tx?.exclude_from_stats === true || tx?.exclude_from_stats === 'true' || tx?.exclude_from_stats === 1
+  }
+
+  const amountForStats = (tx) => {
+    const v = tx?.amount_stat
+    if (v === null || v === undefined || v === '') return Number(tx?.amount || 0)
+    return Number(v || 0)
   }
 
   const refundsByExpenseId = useMemo(() => {
     const map = {}
     for (const tx of rows || []) {
-      const expId = getRefundExpenseId(tx?.note)
+      const expId = getRefundParentId(tx)
       if (!expId) continue
       if (!map[expId]) map[expId] = []
       map[expId].push(tx)
     }
     return map
+  }, [rows])
+
+  // Hide refund transactions from the top-level list when their parent expense is already present,
+  // so they appear only as nested items (no duplicates). If parent isn't loaded yet (pagination),
+  // keep refund visible so user can still see it.
+  const visibleRows = useMemo(() => {
+    const all = rows || []
+    const ids = new Set(all.map(t => t?.id).filter(Boolean))
+    return all.filter((t) => {
+      const parentId = getRefundParentId(t)
+      if (!parentId) return true
+      return !ids.has(parentId)
+    })
   }, [rows])
 
   // ESC cancels refund-pick mode
@@ -147,10 +182,10 @@ export default function MonthlyPayment() {
   }, [refundPickExpenseId])
 
   async function fetchPage({ append = false, search = '', txType = transactionType, category = selectedCategory } = {}) {
-    if (append) setLoadingMore(true); else setLoading(true)
+    if (append) setLoadingMore(true)
 
-    // Use ref for offset to avoid stale closure issues
-    const from = append ? offsetRef.current : 0
+    // Use current rows length as offset (safe with inserts/deletes)
+    const from = append ? (rowsRef.current?.length || 0) : 0
     const to   = from + pageSize - 1
 
     // Get current user
@@ -165,33 +200,52 @@ export default function MonthlyPayment() {
   cards.forEach(c => { map[c.id] = c.currency || 'EUR' })
   setCardMap(map)
 
+    // Always fetch linked refund children for loaded expense parents so nested refunds survive refresh
+    // even when filters are not strictly "expense".
+    let refundChildren = []
+    try {
+      if ((txs || []).length > 0) {
+        const expenseIds = (txs || [])
+          .filter(t => Number(t?.amount || 0) < 0 && t?.id)
+          .map(t => t.id)
+        if (expenseIds.length > 0) {
+          const params = new URLSearchParams({
+            refund_for_in: expenseIds.join(','),
+            transaction_type: 'income',
+            // ensure we can still render nested rows
+            fields: 'id,created_at,amount,amount_stat,exclude_from_stats,category,note,archives,card,card_id,refund_for'
+          })
+          if (!showUsdt) params.set('exclude_usdt', 'true')
+          refundChildren = await apiFetch(`/api/transactions?${params}`) || []
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load refund children for expenses:', e)
+      refundChildren = []
+    }
+
+    const mergedTxs = dedupeById([...(txs || []), ...(refundChildren || [])])
+
     if (append) {
       setRows(prev => {
-        const newRows = dedupeById([...prev, ...txs])
-        // Update both state and ref - використовуємо довжину нових рядків як новий offset
+        const newRows = dedupeById([...(prev || []), ...(mergedTxs || [])])
         const newOffset = newRows.length
         offsetRef.current = newOffset
         setOffset(newOffset)
-        // hasMore = true якщо отримали рівно pageSize транзакцій (може бути ще більше)
-        // hasMore = false якщо отримали менше ніж pageSize (остання порція) або 0 (немає більше)
-        // Але якщо отримали менше ніж pageSize, це може означати останню порцію
-        // Тому hasMore = false тільки якщо отримали 0 транзакцій
-        const hasMoreData = txs.length > 0
-        setHasMore(hasMoreData)
+        setHasMore((txs || []).length > 0)
         return newRows
       })
+      setLoadingMore(false)
     } else {
-      setRows(dedupeById(txs))
-      offsetRef.current = txs.length
-      setOffset(txs.length)
+      const nextRows = dedupeById(mergedTxs)
+      setRows(nextRows)
+      offsetRef.current = nextRows.length
+      setOffset(nextRows.length)
       setSelectedIds(new Set()) // Очистити вибір при завантаженні нової сторінки
       lastSelectedIndexRef.current = null // Скинути останній виділений індекс
-      // hasMore = true якщо отримали хоча б одну транзакцію
-      // hasMore = false тільки якщо отримали 0 транзакцій
-      const hasMoreData = txs.length > 0
-      setHasMore(hasMoreData)
+      setHasMore((txs || []).length > 0)
+      setInitialLoading(false)
     }
-    if (append) setLoadingMore(false); else setLoading(false)
   }
 
   // Load categories once on mount (не залежить від preferences)
@@ -235,12 +289,12 @@ export default function MonthlyPayment() {
     
     try {
       const filters = settings.transactionsFilters || {}
-      if (filters.transactionType) {
-        setTransactionType(filters.transactionType)
-      }
-      if (filters.category !== undefined) {
-        setSelectedCategory(filters.category || '')
-      }
+          if (filters.transactionType) {
+            setTransactionType(filters.transactionType)
+          }
+          if (filters.category !== undefined) {
+            setSelectedCategory(filters.category || '')
+          }
       if (typeof filters.showUsdt === 'boolean') {
         setShowUsdt(filters.showUsdt)
       }
@@ -249,12 +303,12 @@ export default function MonthlyPayment() {
         transactionType: filters.transactionType || 'all',
         category: filters.category || '',
         showUsdt: typeof filters.showUsdt === 'boolean' ? filters.showUsdt : true
-      }
-      setFiltersLoaded(true)
-    } catch (e) {
+        }
+        setFiltersLoaded(true)
+      } catch (e) {
       console.error('Failed to load filters:', e)
-      setFiltersLoaded(true)
-    }
+        setFiltersLoaded(true)
+      }
   }, [initialized, settings]) // Тільки для фільтрів, не для категорій
 
   useEffect(() => {
@@ -264,17 +318,85 @@ export default function MonthlyPayment() {
     fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })
   }, [transactionType, selectedCategory, showUsdt, filtersLoaded]) // Re-fetch when filters or USDT toggle change
 
-  // Subscribe to txBus events to refresh list when transactions are created/updated
+  const txMatchesCurrentView = useCallback((tx) => {
+    if (!tx) return false
+    // dashboard shows only non-archived
+    if (tx.archives === true || tx.archives === 'true') return false
+    // USDT filter: based on card currency
+    if (!showUsdt) {
+      const cur = cardMap?.[tx.card_id]
+      if (String(cur || '').toUpperCase() === 'USDT') return false
+    }
+    if (transactionType === 'expense' && !(Number(tx.amount || 0) < 0)) return false
+    if (transactionType === 'income' && !(Number(tx.amount || 0) > 0)) return false
+    if (selectedCategory && String(tx.category || '') !== String(selectedCategory)) return false
+    return true
+  }, [transactionType, selectedCategory, showUsdt, cardMap])
+
+  const shouldKeepForNesting = useCallback((tx) => {
+    const parentId = getRefundParentId(tx)
+    if (!parentId) return false
+    // Keep refund children if their parent is already loaded (so nested view works even in expense-only filter)
+    return (rowsRef.current || []).some(r => r?.id === parentId)
+  }, [])
+
+  // Subscribe to txBus events to update list seamlessly (no loader/refetch spam)
   useEffect(() => {
     const unsubscribe = txBus.subscribe((event) => {
-      // Refresh transaction list when any transaction event occurs
-      // Якщо це нова транзакція (INSERT), оновлюємо список
-      if (event?.type === 'INSERT' || event?.type === 'UPDATE' || event?.type === 'DELETE' || !event?.type) {
-        fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })
+      if (!event) return
+      const type = event?.type
+
+      // Ignore "balance-only" events (e.g. {card_id, delta}) so we don't refresh list during sync spam
+      if (!type) return
+
+      // If user is searching, it's hard to reliably match server search locally.
+      // In that case, debounce a refresh (keeping current UI).
+      if (searchQuery && searchQuery.trim()) {
+        if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current)
+        refreshDebounceRef.current = setTimeout(() => {
+      fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })
+        }, 250)
+        return
       }
+
+      const tx = event?.transaction
+
+      if (type === 'INSERT' && tx) {
+        if (!txMatchesCurrentView(tx) && !shouldKeepForNesting(tx)) return
+        setRows(prev => dedupeById([tx, ...(prev || [])]))
+        return
+      }
+
+      if (type === 'UPDATE' && tx) {
+        if (!txMatchesCurrentView(tx) && !shouldKeepForNesting(tx)) {
+          setRows(prev => (prev || []).filter(r => r?.id !== tx.id))
+          return
+        }
+        setRows(prev => {
+          const exists = (prev || []).some(r => r?.id === tx.id)
+          if (!exists) return dedupeById([tx, ...(prev || [])])
+          return (prev || []).map(r => r?.id === tx.id ? { ...r, ...tx } : r)
+        })
+        return
+      }
+
+      if (type === 'DELETE' && tx) {
+        setRows(prev => (prev || []).filter(r => r?.id !== tx.id))
+        return
+      }
+
+      // Fallback: debounce a refresh for unexpected events
+      if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current)
+      refreshDebounceRef.current = setTimeout(() => {
+      fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })
+      }, 250)
     })
-    return unsubscribe
-  }, [searchQuery, transactionType, selectedCategory, showUsdt])
+
+    return () => {
+      if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current)
+      if (typeof unsubscribe === 'function') unsubscribe()
+    }
+  }, [searchQuery, transactionType, selectedCategory, showUsdt, txMatchesCurrentView])
 
   const handleSearch = (query) => {
     setSearchQuery(query)
@@ -372,7 +494,7 @@ export default function MonthlyPayment() {
         console.error('Failed to observe loadMoreTrigger:', e)
       }
     }, 200) // Small delay to ensure DOM is updated
-
+    
     return () => {
       clearTimeout(timeoutId)
       if (observerRef.current) {
@@ -413,7 +535,7 @@ export default function MonthlyPayment() {
   }
 
   // Group transactions by day
-  const groupedByDay = rows.reduce((acc, tx) => {
+  const groupedByDay = visibleRows.reduce((acc, tx) => {
     const dayKey = formatDateKey(tx.created_at)
     
     if (!acc[dayKey]) {
@@ -426,7 +548,8 @@ export default function MonthlyPayment() {
     }
     acc[dayKey].transactions.push(tx)
     // Денний підсумок: завжди в EUR
-    const amt = Number(tx.amount || 0)
+    if (isExcludedFromStats(tx)) return acc
+    const amt = amountForStats(tx)
     const txCurRaw = (tx.currency || cardMap[tx.card_id] || 'EUR')
     const txCur = String(txCurRaw).toUpperCase() === 'USDT' ? 'USD' : String(txCurRaw).toUpperCase()
     const inEUR = convertCurrency(amt, txCur, 'EUR')
@@ -474,15 +597,92 @@ export default function MonthlyPayment() {
     }
 
     try {
-      const newNote = ensureRefundTag(refundTx.note, expenseId)
-      await updateTransaction(refundTx.id, { note: newNote, count_as_income: false, category: 'ПОВЕРНЕННЯ' })
+      // 1) Mark refund tx as excluded from any stats
+      await updateTransaction(refundTx.id, { refund_for: expenseId, exclude_from_stats: true, count_as_income: false, category: 'ПОВЕРНЕННЯ' })
 
-      setRows(prev => prev.map(r => r.id === refundTx.id ? { ...r, note: newNote, count_as_income: false, category: 'ПОВЕРНЕННЯ' } : r))
+      // 2) Recompute and persist parent amount_stat = amount + sum(refunds)
+      const parent = (rowsRef.current || []).find(t => t?.id === expenseId) || null
+      const baseAmount = Number(parent?.amount || 0)
+
+      const params = new URLSearchParams({
+        refund_for: expenseId,
+        transaction_type: 'income',
+        fields: 'id,amount,refund_for,exclude_from_stats,archives'
+      })
+      const refunds = await apiFetch(`/api/transactions?${params}`) || []
+      const sumRefunds = (refunds || []).reduce((s, t) => {
+        if (t?.archives) return s
+        const a = Number(t?.amount || 0)
+        if (a <= 0) return s
+        return s + a
+      }, 0)
+      const newAmountStat = baseAmount + sumRefunds
+      await updateTransaction(expenseId, { amount_stat: newAmountStat, exclude_from_stats: false })
+
+      setRows(prev => (prev || []).map(r => {
+        if (r.id === refundTx.id) return { ...r, refund_for: expenseId, exclude_from_stats: true, count_as_income: false, category: 'ПОВЕРНЕННЯ' }
+        if (r.id === expenseId) return { ...r, amount_stat: newAmountStat, exclude_from_stats: false }
+        return r
+      }))
       toast.success('Повернення прив’язано')
       setRefundPickExpenseId(null)
     } catch (e) {
       console.error('Failed to link refund transaction:', e)
       toast.error('Не вдалося прив’язати повернення')
+    }
+  }
+
+  const cancelRefundLink = async (refundTx) => {
+    if (!refundTx?.id) return
+    if (!window.confirm('Скасувати повернення для цієї транзакції? Вона знову буде враховуватись у статистиці.')) return
+    try {
+      const parentId = getRefundParentId(refundTx)
+      const newNote = stripLegacyRefundTagFromNote(refundTx.note)
+      const payload = { refund_for: null, exclude_from_stats: false, count_as_income: true, category: null, note: newNote }
+      await updateTransaction(refundTx.id, payload)
+
+      const updated = { ...refundTx, ...payload }
+      
+      // Recompute parent amount_stat after unlink
+      if (parentId) {
+        const parent = (rowsRef.current || []).find(t => t?.id === parentId) || null
+        const baseAmount = Number(parent?.amount || 0)
+        const params = new URLSearchParams({
+          refund_for: parentId,
+          transaction_type: 'income',
+          fields: 'id,amount,refund_for,exclude_from_stats,archives'
+        })
+        const refunds = await apiFetch(`/api/transactions?${params}`) || []
+        const sumRefunds = (refunds || []).reduce((s, t) => {
+          if (t?.archives) return s
+          const a = Number(t?.amount || 0)
+          if (a <= 0) return s
+          return s + a
+        }, 0)
+        const newAmountStat = baseAmount + sumRefunds
+        await updateTransaction(parentId, { amount_stat: newAmountStat, exclude_from_stats: false })
+        setRows(prev => (prev || []).map(r => {
+          if (r.id === refundTx.id) return updated
+          if (r.id === parentId) return { ...r, amount_stat: newAmountStat, exclude_from_stats: false }
+          return r
+        }))
+      } else {
+        setRows(prev => (prev || []).map(r => r.id === refundTx.id ? updated : r))
+      }
+      try {
+        txBus.emit({
+          type: 'UPDATE',
+          transaction: updated,
+          oldTransaction: refundTx,
+          card_id: refundTx.card_id || null,
+          delta: 0,
+        })
+      } catch {}
+
+      toast.success('Повернення скасовано')
+    } catch (e) {
+      console.error('Failed to cancel refund:', e)
+      toast.error('Не вдалося скасувати повернення')
     }
   }
 
@@ -498,6 +698,10 @@ export default function MonthlyPayment() {
   }
   const askDelete = (tx) => { setPendingDelete(tx); setConfirmOpen(true) }
   const openEdit = (tx) => { setEditTx(tx); setEditOpen(true) }
+  const openEditFromDetails = (tx) => {
+    setShowDetails(false)
+    openEdit(tx)
+  }
 
   const handleDelete = async () => {
     if (!pendingDelete) return
@@ -563,8 +767,8 @@ export default function MonthlyPayment() {
         const newSet = new Set(prev)
         // Виділяємо всі транзакції в діапазоні
         for (let i = startIndex; i <= endIndex; i++) {
-          if (rows[i]) {
-            newSet.add(rows[i].id)
+          if (visibleRows[i]) {
+            newSet.add(visibleRows[i].id)
           }
         }
         return newSet
@@ -574,30 +778,30 @@ export default function MonthlyPayment() {
       lastSelectedIndexRef.current = index
     } else {
       // Звичайне виділення/зняття виділення
-      setSelectedIds(prev => {
-        const newSet = new Set(prev)
-        if (checked) {
-          newSet.add(txId)
+    setSelectedIds(prev => {
+      const newSet = new Set(prev)
+      if (checked) {
+        newSet.add(txId)
           lastSelectedIndexRef.current = index // Зберігаємо індекс останньої виділеної
-        } else {
-          newSet.delete(txId)
+      } else {
+        newSet.delete(txId)
           // Якщо зняли виділення з останньої виділеної - скидаємо ref
           if (lastSelectedIndexRef.current === index) {
             lastSelectedIndexRef.current = null
           }
-        }
-        return newSet
-      })
+      }
+      return newSet
+    })
     }
   }
 
   const handleSelectAll = (checked) => {
-    // Since USDT filtering is now done on backend, we can use rows directly
+    // Select only what is visible in the top-level list (refund children are nested)
     if (checked) {
-      setSelectedIds(new Set(rows.map(tx => tx.id)))
+      setSelectedIds(new Set(visibleRows.map(tx => tx.id)))
       // Встановлюємо останній виділений індекс на останній елемент
-      if (rows.length > 0) {
-        lastSelectedIndexRef.current = rows.length - 1
+      if (visibleRows.length > 0) {
+        lastSelectedIndexRef.current = visibleRows.length - 1
       }
     } else {
       setSelectedIds(new Set())
@@ -733,17 +937,10 @@ export default function MonthlyPayment() {
                   toast.dismiss(toastId)
                   toast.success(data.count ? `Синхронізовано ${data.count} транзакцій` : 'Синхронізація виконана')
                   
-                  // Emit txBus events for each new transaction to update all components
-                  if (data.transactions && data.transactions.length > 0) {
-                    data.transactions.forEach(tx => {
-                      txBus.emit({
-                        card_id: tx.card_id || null,
-                        delta: Number(tx.amount || 0)
-                      })
-                    })
-                  } else if (data.count > 0) {
-                    // If we got count but no transactions array (old API), just refresh the page
-                    fetchPage({ append: false, search: searchQuery })
+                  // Avoid txBus spam here; realtime will deliver INSERT/UPDATE/DELETE events.
+                  // Emit a single event so non-realtime clients/widgets can refresh once if needed.
+                  if ((data.transactions && data.transactions.length > 0) || data.count > 0) {
+                    try { txBus.emit({ type: 'SYNC' }) } catch {}
                   }
                 } catch (e) {
                   toast.dismiss()
@@ -788,28 +985,28 @@ export default function MonthlyPayment() {
         </form>
       </div>
 
-      {loading && !loadingMore ? (
+      {initialLoading && visibleRows.length === 0 ? (
         <div className="text-sm text-gray-500">Loading...</div>
-      ) : rows.length === 0 ? (
+      ) : visibleRows.length === 0 ? (
         <div className="text-sm text-gray-500">No transactions yet</div>
       ) : (
         <>
-          {rows.length > 0 && (
+          {visibleRows.length > 0 && (
             <div className="mb-2 pb-2 border-b border-gray-200">
               <div className="flex items-center justify-between gap-4 flex-wrap">
                 <div className="flex items-center gap-4 flex-wrap">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.size > 0 && selectedIds.size === rows.length && rows.length > 0}
-                      onChange={(e) => handleSelectAll(e.target.checked)}
-                      className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <span className="text-sm text-gray-600">
-                      Вибрати всі ({selectedIds.size}/{rows.length})
-                    </span>
-                  </label>
-                  
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                      checked={selectedIds.size > 0 && selectedIds.size === visibleRows.length && visibleRows.length > 0}
+                    onChange={(e) => handleSelectAll(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-sm text-gray-600">
+                      Вибрати всі ({selectedIds.size}/{visibleRows.length})
+                  </span>
+                </label>
+
                   {/* USDT Toggle */}
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -841,7 +1038,7 @@ export default function MonthlyPayment() {
                 </div>
 
                   {/* Filters */}
-                  <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap">
                   {/* Transaction type filter */}
                   <select
                     value={transactionType}
@@ -879,7 +1076,7 @@ export default function MonthlyPayment() {
             </div>
           )}
           <div ref={listRef} className="space-y-6">
-            {rows.length === 0 ? (
+            {visibleRows.length === 0 ? (
               <div className="text-sm text-gray-500 text-center py-4">
                 Транзакції не знайдено за обраними фільтрами
               </div>
@@ -910,53 +1107,62 @@ export default function MonthlyPayment() {
                     </div>
                     <div className="space-y-1">
                       {transactions.map((tx, idx) => {
-                        // prefer transaction's own currency if present; otherwise use card currency by card_id
+                // prefer transaction's own currency if present; otherwise use card currency by card_id
                         const currency = (tx.currency || cardMap[tx.card_id] || 'EUR')
                         const refundTxs = refundsByExpenseId?.[tx.id] || []
+                        const refundTxsSorted = refundTxs
+                          .slice()
+                          .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
                         let amountOverride = null
-                        if (refundTxs.length > 0) {
+                        // If backend provided amount_stat, show it as primary with original amount as secondary
+                        const originalAmt = Number(tx.amount || 0)
+                        const statAmt = amountForStats(tx)
+                        if (statAmt !== originalAmt) {
                           const baseCurRaw = (tx.currency || cardMap[tx.card_id] || 'EUR')
                           const baseCur = String(baseCurRaw).toUpperCase() === 'USDT' ? 'USD' : String(baseCurRaw).toUpperCase()
-                          let refundSum = 0
-                          for (const rtx of refundTxs) {
-                            const rAmt = Number(rtx?.amount || 0)
-                            if (rAmt <= 0) continue
-                            const rCurRaw = (rtx.currency || cardMap[rtx.card_id] || 'EUR')
-                            const rCur = String(rCurRaw).toUpperCase() === 'USDT' ? 'USD' : String(rCurRaw).toUpperCase()
-                            if (rCur === baseCur) {
-                              refundSum += rAmt
-                              continue
-                            }
-                            const converted = convertCurrency(rAmt, rCur, baseCur)
-                            if (converted != null && !Number.isNaN(converted)) refundSum += Number(converted)
-                          }
-                          if (refundSum !== 0) {
-                            const originalAmt = Number(tx.amount || 0)
-                            const netAmt = originalAmt + refundSum
-                            amountOverride = { primaryAmount: netAmt, secondaryAmount: originalAmt, currency: baseCur }
-                          }
+                          amountOverride = { primaryAmount: statAmt, secondaryAmount: originalAmt, currency: baseCur }
                         }
-                        // Find original index in rows array for selection handling
-                        const originalIndex = rows.findIndex(r => r.id === tx.id)
-                        return (
-                          <motion.div
-                            key={tx.id}
-                            initial={{ opacity: 0, y: 10, scale: 0.995 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            transition={{ duration: 0.25 }}
-                          >
-                            <Row
-                              tx={tx}
-                              currency={currency}
-                              onDetails={openDetails}
-                              onAskDelete={askDelete}
-                              onEdit={openEdit}
-                              onRefund={startRefund}
+                        // Find original index in visibleRows array for selection handling
+                        const originalIndex = visibleRows.findIndex(r => r.id === tx.id)
+                return (
+                  <motion.div
+                    key={tx.id}
+                    initial={{ opacity: 0, y: 10, scale: 0.995 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{ duration: 0.25 }}
+                  >
+                    <Row
+                      tx={tx}
+                      currency={currency}
+                      onDetails={openDetails}
+                      onAskDelete={askDelete}
+                      onRefund={startRefund}
+                      swipeActions
                               amountOverride={amountOverride}
-                              selected={selectedIds.has(tx.id)}
+                      selected={selectedIds.has(tx.id)}
                               onSelect={(txId, checked, event) => handleSelect(txId, checked, originalIndex, event)}
                             />
-                          </motion.div>
+
+                            {/* Nested refund transactions (linked by refund_for / legacy [refund_for:<id>] tag) */}
+                            {Number(tx.amount || 0) < 0 && refundTxsSorted.length > 0 && (
+                              <div className="mt-1 ml-6 pl-3 border-l-2 border-gray-200 space-y-1">
+                                {refundTxsSorted.map((rtx) => {
+                                  const rCurrency = (rtx.currency || cardMap[rtx.card_id] || 'EUR')
+                                  return (
+                                    <Row
+                                      key={rtx.id}
+                                      tx={rtx}
+                                      currency={rCurrency}
+                                      onDetails={openDetails}
+                                      onCancelRefund={cancelRefundLink}
+                                      compact
+                                      className="opacity-90"
+                                    />
+                                  )
+                                })}
+                              </div>
+                            )}
+                  </motion.div>
                         )
                       })}
                     </div>
@@ -964,9 +1170,9 @@ export default function MonthlyPayment() {
                 )
               })
             )}
-            
+
             {/* Infinite scroll trigger - always render when hasMore, even if empty */}
-            {hasMore && (
+          {hasMore && (
               <div 
                 ref={loadMoreTriggerRef} 
                 className="py-8 text-center min-h-[200px] flex items-center justify-center"
@@ -978,12 +1184,12 @@ export default function MonthlyPayment() {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
                     </svg>
-                  </div>
+            </div>
                 ) : (
-                  <div className="text-xs text-gray-400">Прокрутіть вниз для завантаження більше... (Завантажено: {rows.length})</div>
-                )}
-              </div>
-            )}
+                  <div className="text-xs text-gray-400">Прокрутіть вниз для завантаження більше... (Завантажено: {visibleRows.length})</div>
+          )}
+            </div>
+          )}
           </div>
         </>
       )}
@@ -993,6 +1199,7 @@ export default function MonthlyPayment() {
         tx={activeTx}
         currency={activeCurrency}
         onClose={() => setShowDetails(false)}
+        onEdit={openEditFromDetails}
       />
 
       <CreateTxModal

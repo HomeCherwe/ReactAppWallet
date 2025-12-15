@@ -235,11 +235,18 @@ function fmtLabel(iso) {
 function getIncludedTxIds(txsArg = [], modeArg = 'earning', currencyArg) {
   const included = new Set()
 
-  const isRefundTx = (t) => {
+  const isExcludedFromStats = (t) => {
     if (!t) return false
-    if (String(t.category || '').toUpperCase() === 'ПОВЕРНЕННЯ') return true
+    if (t.exclude_from_stats === true || t.exclude_from_stats === 'true' || t.exclude_from_stats === 1) return true
+    if (t.refund_for) return true
     const note = String(t.note || '')
     return note.includes('[refund_for:')
+  }
+
+  const amountForStats = (t) => {
+    const v = t?.amount_stat
+    if (v === null || v === undefined || v === '') return Number(t?.amount || 0)
+    return Number(v || 0)
   }
 
   // helper: normalize currency
@@ -253,7 +260,7 @@ function getIncludedTxIds(txsArg = [], modeArg = 'earning', currencyArg) {
   const transferGroups = new Map()
   for (const t of txsArg || []) {
     if (t.archives) continue
-    if (isRefundTx(t)) continue
+    if (isExcludedFromStats(t)) continue
     if (t.is_transfer && t.transfer_id) {
       const arr = transferGroups.get(t.transfer_id) || []
       arr.push(t)
@@ -265,12 +272,12 @@ function getIncludedTxIds(txsArg = [], modeArg = 'earning', currencyArg) {
   for (const t of txsArg || []) {
     if (t.archives) continue
     if (t.is_transfer) continue
-    if (isRefundTx(t)) continue
+    if (isExcludedFromStats(t)) continue
     // determine savings either from explicit flag or from card label
     const tIsSavings = !!t.is_savings || String(t.card || '').toLowerCase().includes('збер') || String(t.card || '').toLowerCase().includes('savings')
     if (tIsSavings) continue
     if (!curMatch(t)) continue
-    const amt = Number(t.amount || 0)
+    const amt = Number(amountForStats(t) || 0)
     if (modeArg === 'spending') {
       if (amt >= 0) continue
       included.add(t.id)
@@ -298,7 +305,7 @@ function getIncludedTxIds(txsArg = [], modeArg = 'earning', currencyArg) {
       if (srcSavings && !tgtSavings) {
         if (curMatch(tgt)) {
           // only count as income (positive amount)
-          if (modeArg === 'earning' && Number(tgt.amount || 0) > 0) included.add(tgt.id)
+          if (modeArg === 'earning' && Number(amountForStats(tgt) || 0) > 0) included.add(tgt.id)
         }
         continue
       }
@@ -306,7 +313,7 @@ function getIncludedTxIds(txsArg = [], modeArg = 'earning', currencyArg) {
       // to savings -> count only source as spending
       if (tgtSavings && !srcSavings) {
         if (curMatch(src)) {
-          if (modeArg === 'spending' && Number(src.amount || 0) < 0) included.add(src.id)
+          if (modeArg === 'spending' && Number(amountForStats(src) || 0) < 0) included.add(src.id)
           // if mode is earning, we shouldn't count the savings target
         }
         continue
@@ -321,7 +328,7 @@ function getIncludedTxIds(txsArg = [], modeArg = 'earning', currencyArg) {
     if (!single) continue
     // if 'to' and marked as count_as_income -> include as income
     if (single.transfer_role === 'to' && single.count_as_income) {
-      if (curMatch(single) && modeArg === 'earning' && Number(single.amount || 0) > 0) included.add(single.id)
+      if (curMatch(single) && modeArg === 'earning' && Number(amountForStats(single) || 0) > 0) included.add(single.id)
       continue
     }
     // if 'from' and is_savings -> skip expense from savings
@@ -336,6 +343,12 @@ function getIncludedTxIds(txsArg = [], modeArg = 'earning', currencyArg) {
 }
 
 function computeChartData(txsArg, modeArg, fromArg, toArg, currencyArg) {
+  const amountForStats = (t) => {
+    const v = t?.amount_stat
+    if (v === null || v === undefined || v === '') return Number(t?.amount || 0)
+    return Number(v || 0)
+  }
+
   // Якщо вибрано ALL, групуємо по валютах
   if (currencyArg === 'ALL') {
     const included = getIncludedTxIds(txsArg, modeArg, null) // null = всі валюти
@@ -349,7 +362,7 @@ function computeChartData(txsArg, modeArg, fromArg, toArg, currencyArg) {
       }
       const curMap = currencyMaps.get(txCur)
       const key = dayKey(t.created_at)
-      const amt = Number(t.amount || 0)
+      const amt = Number(amountForStats(t) || 0)
       if (modeArg === 'spending') {
         if (amt >= 0) continue
         curMap.set(key, (curMap.get(key) || 0) + Math.abs(amt))
@@ -387,7 +400,7 @@ function computeChartData(txsArg, modeArg, fromArg, toArg, currencyArg) {
   for (const t of txsArg || []) {
     if (!included.has(t.id)) continue
     const key = dayKey(t.created_at)
-    const amt = Number(t.amount || 0)
+    const amt = Number(amountForStats(t) || 0)
     if (modeArg === 'spending') {
       if (amt >= 0) continue
       map.set(key, (map.get(key) || 0) + Math.abs(amt))
@@ -610,8 +623,8 @@ export default function EarningsChart(){
       // that `transactions.currency` exists. Cache negative detection in
       // localStorage to avoid repeated 400s.
       const fields = hasTxCurrency
-        ? 'id,amount,created_at,category,note,is_transfer,count_as_income,transfer_role,card_id,currency,card,archives'
-        : 'id,amount,created_at,category,note,is_transfer,count_as_income,transfer_role,card_id,card,archives'
+        ? 'id,amount,amount_stat,exclude_from_stats,created_at,category,note,refund_for,is_transfer,count_as_income,transfer_role,card_id,currency,card,archives'
+        : 'id,amount,amount_stat,exclude_from_stats,created_at,category,note,refund_for,is_transfer,count_as_income,transfer_role,card_id,card,archives'
 
       // Перевіряємо перед виконанням запиту
       if (abortController.signal.aborted) return
@@ -644,7 +657,7 @@ export default function EarningsChart(){
           if (abortController.signal.aborted) return
 
           // Retry without currency column
-          const retryFields = 'id,amount,created_at,category,note,is_transfer,count_as_income,transfer_role,card_id,card,archives'
+          const retryFields = 'id,amount,amount_stat,exclude_from_stats,created_at,category,note,refund_for,is_transfer,count_as_income,transfer_role,card_id,card,archives'
           data = await apiFetch(
             `/api/transactions?start_date=${fromTs}&end_date=${toTs}&fields=${retryFields}&order_by=created_at&order_asc=true`,
             { signal: abortController.signal }
@@ -769,9 +782,15 @@ export default function EarningsChart(){
   // issues when the component is mounted.
   function computeChartData(txsArg, modeArg, fromArg, toArg, currencyArg) {
     const map = new Map()
+    const amountForStats = (t) => {
+      const v = t?.amount_stat
+      if (v === null || v === undefined || v === '') return Number(t?.amount || 0)
+      return Number(v || 0)
+    }
+
     for (const t of txsArg || []) {
       // skip refunds
-      if (String(t.category || '').toUpperCase() === 'ПОВЕРНЕННЯ' || String(t.note || '').includes('[refund_for:')) continue
+      if (t.exclude_from_stats === true || t.exclude_from_stats === 'true' || t.exclude_from_stats === 1 || t.refund_for || String(t.note || '').includes('[refund_for:')) continue
       // skip transfer-internal transactions and savings (they shouldn't affect earnings chart)
       if (t.is_transfer) continue
       if (t.is_savings) continue
@@ -781,7 +800,7 @@ export default function EarningsChart(){
       const txCur = t.currency ? String(t.currency).toUpperCase() : undefined
       if (currencyArg && txCur !== currencyArg) continue
       const key = dayKey(t.created_at)
-      const amt = Number(t.amount || 0)
+      const amt = Number(amountForStats(t) || 0)
       if (modeArg === 'spending') {
         if (amt >= 0) continue
         map.set(key, (map.get(key) || 0) + Math.abs(amt))
@@ -1028,6 +1047,12 @@ export default function EarningsChart(){
                     key={tx.id}
                     tx={tx}
                     currency={(tx.currency || null)}
+                    // In stats modals, show amount_stat (net) if present
+                    amountOverride={
+                      tx?.amount_stat != null && Number(tx.amount_stat) !== Number(tx.amount)
+                        ? { primaryAmount: Number(tx.amount_stat || 0), secondaryAmount: Number(tx.amount || 0), currency: (tx.currency || null) }
+                        : null
+                    }
                     onDetails={(t, c) => { setActiveTx(t); setActiveCurrency(c); setShowDetails(true) }}
                     onAskDelete={(t) => { setPendingDelete(t); setConfirmOpen(true) }}
                     onEdit={(t) => { setEditTx(t); setEditOpen(true) }}

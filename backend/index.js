@@ -487,6 +487,30 @@ app.get('/api/transactions/categories', getUserFromToken, async (req, res) => {
   }
 })
 
+// Get distinct debt parties (names) for autocomplete
+app.get('/api/transactions/debt-parties', getUserFromToken, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('debt_party')
+      .eq('user_id', req.user_id)
+      .eq('is_debt', true)
+      .not('debt_party', 'is', null)
+
+    if (error) throw error
+
+    const parties = [...new Set((data || []).map(t => t.debt_party).filter(Boolean))]
+      .map(s => String(s).trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, 'uk'))
+
+    res.json(parties)
+  } catch (error) {
+    console.error('GET /api/transactions/debt-parties error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 // Sum transactions by card (must be before /api/transactions/:id)
 app.get('/api/transactions/sum-by-card', getUserFromToken, async (req, res) => {
   try {
@@ -575,23 +599,27 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       start_date,
       end_date,
       card_id,
+      refund_for,
+      refund_for_in,
       limit,
-      fields = 'id, created_at, amount, category, note, archives, card, card_id, merchant_name, merchant_address, merchant_lat, merchant_lng'
+      fields = 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, merchant_address, merchant_lat, merchant_lng'
     } = req.query
     
     // Filter out 'currency' field if it doesn't exist in the table
     // This prevents errors when frontend tries to select currency column
     const allowedFields = [
-      'id', 'created_at', 'amount', 'category', 'note', 'archives', 
+      'id', 'created_at', 'amount', 'amount_stat', 'exclude_from_stats', 'category', 'note', 'archives', 
       'card', 'card_id', 'is_transfer', 'count_as_income', 'transfer_role',
       'transfer_id', 'user_id', 'transaction_id_card',
+      'refund_for',
+      'is_debt', 'debt_party', 'debt_direction',
       'merchant_name', 'merchant_address', 'merchant_lat', 'merchant_lng'
     ]
     const requestedFields = fields.split(',').map(f => f.trim())
     const validFields = requestedFields.filter(f => allowedFields.includes(f))
     
     // Use valid fields, fallback to default if all were filtered out
-    const safeFields = validFields.length > 0 ? validFields.join(', ') : 'id, created_at, amount, category, note, archives, card, card_id, merchant_name, merchant_address, merchant_lat, merchant_lng'
+    const safeFields = validFields.length > 0 ? validFields.join(', ') : 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, merchant_address, merchant_lat, merchant_lng'
     
     let q = supabase
       .from('transactions')
@@ -615,6 +643,30 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       }
     }
     
+    // Refund linkage filters
+    // - refund_for=<uuid>
+    // - refund_for_in=<uuid1,uuid2,...>
+    if (refund_for) {
+      q = q.eq('refund_for', refund_for)
+    }
+    if (refund_for_in) {
+      const ids = String(refund_for_in)
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean)
+      if (ids.length > 0) {
+        q = q.in('refund_for', ids)
+      }
+    }
+
+    // Debt filter
+    const isDebt = req.query.is_debt
+    if (isDebt === 'true' || isDebt === true) {
+      q = q.eq('is_debt', true)
+    } else if (isDebt === 'false' || isDebt === false) {
+      q = q.or('is_debt.is.null,is_debt.eq.false')
+    }
+    
     // Archive filter - if archived=true in query, show only archived, otherwise show only non-archived
     const archived = req.query.archived
     if (archived === 'true' || archived === true) {
@@ -622,7 +674,7 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       q = q.eq('archives', true)
     } else {
       // Фільтруємо тільки неархівні транзакції (archives = null або false)
-      q = q.or('archives.is.null,archives.eq.false')
+    q = q.or('archives.is.null,archives.eq.false')
     }
     
     // Transaction type filter (expense/income)
@@ -830,10 +882,10 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
         }
       } else {
         // Normal pagination
-        if (rangeFrom !== undefined && rangeTo !== undefined) {
-          q = q.range(Number(rangeFrom), Number(rangeTo))
-        } else if (limit) {
-          q = q.limit(Number(limit))
+      if (rangeFrom !== undefined && rangeTo !== undefined) {
+        q = q.range(Number(rangeFrom), Number(rangeTo))
+      } else if (limit) {
+        q = q.limit(Number(limit))
         }
       }
     }
@@ -895,7 +947,7 @@ app.get('/api/transactions/:id', getUserFromToken, async (req, res) => {
     
     const { data, error } = await supabase
       .from('transactions')
-      .select('id, amount, category, note, card_id, card, created_at, merchant_name, merchant_address, merchant_lat, merchant_lng')
+      .select('id, amount, amount_stat, exclude_from_stats, category, note, card_id, card, created_at, refund_for, is_debt, debt_party, debt_direction, count_as_income, is_transfer, merchant_name, merchant_address, merchant_lat, merchant_lng')
       .eq('id', id)
       .eq('user_id', req.user_id)
       .single()
@@ -912,6 +964,28 @@ app.get('/api/transactions/:id', getUserFromToken, async (req, res) => {
 app.post('/api/transactions', getUserFromToken, async (req, res) => {
   try {
     const payload = { ...req.body, user_id: req.user_id }
+
+    // Debt rule: always excluded from stats and forced category
+    if (payload.is_debt === true || payload.is_debt === 'true' || payload.is_debt === 1) {
+      payload.is_debt = true
+      payload.category = 'Борг'
+      payload.exclude_from_stats = true
+      // normalize direction
+      if (payload.debt_direction !== 'lend' && payload.debt_direction !== 'borrow') {
+        // best-effort inference from amount sign
+        payload.debt_direction = Number(payload.amount || 0) < 0 ? 'lend' : 'borrow'
+      }
+    }
+
+    // Stats fields defaults:
+    // - balances use `amount`
+    // - stats use `amount_stat` (fallback to amount if not provided)
+    if (payload.exclude_from_stats === undefined || payload.exclude_from_stats === null) {
+      payload.exclude_from_stats = false
+    }
+    if (payload.amount_stat === undefined || payload.amount_stat === null || payload.amount_stat === '') {
+      payload.amount_stat = payload.amount
+    }
     
     // Автоматичне геокодування мерчанта, якщо він переданий
     if (payload.merchant_name && !payload.merchant_lat) {
@@ -1000,6 +1074,65 @@ app.put('/api/transactions/:id', getUserFromToken, async (req, res) => {
     const patch = { ...req.body }
     delete patch.id
     delete patch.user_id
+
+    // We'll need the current transaction for robust amount_stat recompute (refund children & parent updates).
+    const { data: existingTx, error: existingErr } = await supabase
+      .from('transactions')
+      .select('id, amount, amount_stat, refund_for, is_debt, debt_direction, archives')
+      .eq('id', id)
+      .eq('user_id', req.user_id)
+      .maybeSingle()
+    if (existingErr) throw existingErr
+    if (!existingTx) return res.status(404).json({ error: 'Transaction not found' })
+
+    const hadParentBefore = !!existingTx.refund_for
+    const parentBeforeId = existingTx.refund_for || null
+    const parentAfterId = (patch.refund_for !== undefined ? patch.refund_for : existingTx.refund_for) || null
+
+    // Debt rule: always excluded from stats and forced category
+    const isDebtAfter = patch.is_debt !== undefined ? (patch.is_debt === true || patch.is_debt === 'true' || patch.is_debt === 1) : (existingTx.is_debt === true)
+    if (isDebtAfter) {
+      patch.is_debt = true
+      patch.category = 'Борг'
+      patch.exclude_from_stats = true
+      if (patch.debt_direction !== undefined && patch.debt_direction !== null) {
+        if (patch.debt_direction !== 'lend' && patch.debt_direction !== 'borrow') {
+          patch.debt_direction = Number(patch.amount ?? existingTx.amount ?? 0) < 0 ? 'lend' : 'borrow'
+        }
+      } else {
+        // keep existing direction or infer
+        patch.debt_direction = existingTx.debt_direction || (Number(patch.amount ?? existingTx.amount ?? 0) < 0 ? 'lend' : 'borrow')
+      }
+    }
+
+    // Keep stats amount in sync with amount for regular edits unless caller explicitly provides amount_stat.
+    // If this transaction has refund-children, recompute amount_stat = amount + SUM(refunds).
+    if (patch.amount !== undefined && (patch.amount_stat === undefined || patch.amount_stat === null || patch.amount_stat === '')) {
+      const baseAmount = Number(patch.amount || 0)
+      let refundSum = 0
+      try {
+        const { data: refundRows, error: refundErr } = await supabase
+          .from('transactions')
+          .select('id, amount, archives')
+          .eq('user_id', req.user_id)
+          .eq('refund_for', id)
+          .or('archives.is.null,archives.eq.false')
+        if (refundErr) throw refundErr
+        refundSum = (refundRows || []).reduce((s, t) => {
+          const a = Number(t?.amount || 0)
+          if (a > 0) return s + a
+          return s
+        }, 0)
+      } catch (e) {
+        console.warn('Failed to recompute amount_stat for parent tx:', e.message)
+      }
+      patch.amount_stat = baseAmount + refundSum
+    }
+    if (patch.exclude_from_stats === undefined) {
+      // don't force-set on update; but normalize null to false if explicitly provided
+    } else if (patch.exclude_from_stats === null) {
+      patch.exclude_from_stats = false
+    }
     
     // Автоматичне геокодування мерчанта, якщо він переданий і ще не має координат
     if (patch.merchant_name && !patch.merchant_lat) {
@@ -1074,6 +1207,49 @@ app.put('/api/transactions/:id', getUserFromToken, async (req, res) => {
       .eq('user_id', req.user_id)
     
     if (error) throw error
+
+    // If this transaction is (or was) a refund child, recompute parent's amount_stat so it doesn't "reset" on edits.
+    // - If refund_for changed to null: recompute old parent
+    // - If refund_for is set: recompute new parent
+    const parentsToRecompute = new Set()
+    if (hadParentBefore && parentBeforeId) parentsToRecompute.add(parentBeforeId)
+    if (parentAfterId) parentsToRecompute.add(parentAfterId)
+
+    for (const parentId of parentsToRecompute) {
+      try {
+        const { data: parentRow, error: parentErr } = await supabase
+          .from('transactions')
+          .select('id, amount')
+          .eq('id', parentId)
+          .eq('user_id', req.user_id)
+          .maybeSingle()
+        if (parentErr) throw parentErr
+        if (!parentRow) continue
+
+        const { data: refundRows, error: refundErr } = await supabase
+          .from('transactions')
+          .select('id, amount, archives')
+          .eq('user_id', req.user_id)
+          .eq('refund_for', parentId)
+          .or('archives.is.null,archives.eq.false')
+        if (refundErr) throw refundErr
+
+        const refundSum = (refundRows || []).reduce((s, t) => {
+          const a = Number(t?.amount || 0)
+          if (a > 0) return s + a
+          return s
+        }, 0)
+        const newAmountStat = Number(parentRow.amount || 0) + refundSum
+        await supabase
+          .from('transactions')
+          .update({ amount_stat: newAmountStat })
+          .eq('id', parentId)
+          .eq('user_id', req.user_id)
+      } catch (e) {
+        console.warn('Failed to recompute parent amount_stat after refund edit:', e.message)
+      }
+    }
+
     res.json({ success: true })
   } catch (error) {
     console.error('PUT /api/transactions/:id error:', error)
@@ -2166,7 +2342,7 @@ app.post('/api/parse-receipt', upload.single('image'), async (req, res) => {
 Якщо на чеку є адреса - обов'язково використай формат об'єкта.
 `.trim()
 
-const body = {
+    const body = {
   model: "gpt-5.1",
   temperature: 0.0,
   response_format: { type: "json_object" },
@@ -2177,9 +2353,9 @@ const body = {
     },
     {
       role: "user",
-      content: [
+        content: [
         { type: "image_url", image_url: { url: dataUrl } }
-      ]
+        ]
     }
   ]
 };
@@ -2973,11 +3149,11 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
     const syncPromise = (async () => {
       try {
       // Get API keys from database instead of .env
-      const { data: prefs, error: prefsError } = await supabase
-        .from('user_preferences')
-        .select('apis')
-        .eq('user_id', req.user_id)
-        .single()
+    const { data: prefs, error: prefsError } = await supabase
+      .from('user_preferences')
+      .select('apis')
+      .eq('user_id', req.user_id)
+      .single()
     
     if (prefsError && prefsError.code !== 'PGRST116') {
       console.error('[syncBinance] Error fetching apis:', prefsError)
@@ -2990,10 +3166,10 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
     
     const APIs = prefs?.apis || {}
     const binanceAPIs = APIs.binance || {}
-      const apiKey = binanceAPIs.api_key || process.env.BINANCE_API_KEY // Fallback to .env
-      const apiSecret = binanceAPIs.api_secret || process.env.BINANCE_API_SECRET // Fallback to .env
+    const apiKey = binanceAPIs.api_key || process.env.BINANCE_API_KEY // Fallback to .env
+    const apiSecret = binanceAPIs.api_secret || process.env.BINANCE_API_SECRET // Fallback to .env
 
-      if (!apiKey || !apiSecret) {
+    if (!apiKey || !apiSecret) {
       // finally блок видалить userId з Map
       return sendResponse(200, { 
         success: true, 

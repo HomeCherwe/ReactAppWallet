@@ -5,17 +5,51 @@ import { apiFetch } from '../utils.jsx'
 // Forward declaration для invalidateCategoriesCache
 let invalidateCategoriesCacheFn = null
 
-export async function listTransactions({ from = 0, to = 9, search = '', transactionType = 'all', category = '', excludeUsdt = false } = {}) {
+export async function listTransactions({ from = 0, to = 9, search = '', transactionType = 'all', category = '', excludeUsdt = false, isDebt = undefined } = {}) {
   const params = new URLSearchParams({
     from: from.toString(),
     to: to.toString(),
     ...(search && { search }),
     ...(transactionType && transactionType !== 'all' && { transaction_type: transactionType }),
     ...(category && { category }),
-    ...(excludeUsdt && { exclude_usdt: 'true' })
+    ...(excludeUsdt && { exclude_usdt: 'true' }),
+    ...(typeof isDebt === 'boolean' ? { is_debt: isDebt ? 'true' : 'false' } : {})
   })
 
   return await apiFetch(`/api/transactions?${params}`)
+}
+
+// Debt parties cache
+let debtPartiesCache = null
+let debtPartiesCacheTimestamp = 0
+let debtPartiesCachePromise = null
+const DEBT_PARTIES_CACHE_TTL = 60000
+
+export async function getDebtParties() {
+  const now = Date.now()
+  if (debtPartiesCache && (now - debtPartiesCacheTimestamp) < DEBT_PARTIES_CACHE_TTL) return debtPartiesCache
+  if (debtPartiesCachePromise) return debtPartiesCachePromise
+
+  debtPartiesCachePromise = (async () => {
+    try {
+      const parties = await apiFetch('/api/transactions/debt-parties') || []
+      debtPartiesCache = parties
+      debtPartiesCacheTimestamp = now
+      debtPartiesCachePromise = null
+      return parties
+    } catch (e) {
+      console.error('Failed to fetch debt parties:', e?.message || e)
+      debtPartiesCachePromise = null
+      return []
+    }
+  })()
+
+  return debtPartiesCachePromise
+}
+
+export function invalidateDebtPartiesCache() {
+  debtPartiesCache = null
+  debtPartiesCacheTimestamp = 0
 }
 
 export async function createTransaction(payload) {
@@ -29,6 +63,7 @@ export async function createTransaction(payload) {
   if (invalidateCategoriesCacheFn) {
     invalidateCategoriesCacheFn()
   }
+  invalidateDebtPartiesCache()
   
   return data
 }
@@ -41,6 +76,7 @@ export async function updateTransaction(id, payload) {
   
   // Інвалідувати кеш sum by card після оновлення транзакції
   invalidateSumByCardCache()
+  invalidateDebtPartiesCache()
 }
 
 export async function deleteTransaction(id) {

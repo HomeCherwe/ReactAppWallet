@@ -360,7 +360,7 @@ function CardModal({ open, initial, onClose, onSubmit, banks = [] }) {
         fileToSubmit = file
       }
       
-      await onSubmit(form, fileToSubmit)
+    await onSubmit(form, fileToSubmit)
     } catch (error) {
       console.error('[CardModal] Error in submit:', error)
       toast.error(error?.message || 'Помилка збереження картки')
@@ -613,7 +613,7 @@ export default function CardsManager({ groupByBank = false, showActions = true }
     const off = txBus.subscribe(async ({ card_id, delta, type }) => {
       // Якщо є delta і card_id - оновлюємо баланс через delta (швидко для оптимістичного оновлення)
       if (card_id && delta) {
-        setCards(prev => prev.map(c => c.id === card_id ? { ...c, _balance: Number(c._balance || 0) + Number(delta || 0) } : c))
+      setCards(prev => prev.map(c => c.id === card_id ? { ...c, _balance: Number(c._balance || 0) + Number(delta || 0) } : c))
       }
       
       // Після змін транзакцій перезавантажуємо баланси з сервера для точності

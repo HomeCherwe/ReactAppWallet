@@ -219,7 +219,7 @@ export default function CategoryPieChart() {
         const params = new URLSearchParams({
           start_date: startDate,
           end_date: endDate,
-          fields: 'id,amount,category,card_id,created_at,card,is_transfer,is_savings'
+          fields: 'id,amount,amount_stat,exclude_from_stats,category,card_id,created_at,card,is_transfer,is_savings,refund_for,note'
         })
 
         // Перевіряємо перед виконанням запиту
@@ -254,7 +254,7 @@ export default function CategoryPieChart() {
           start_date: startDate,
           end_date: endDate,
           card_id: 'null',
-          fields: 'id,amount,category,card_id,created_at,card,is_transfer,is_savings'
+          fields: 'id,amount,amount_stat,exclude_from_stats,category,card_id,created_at,card,is_transfer,is_savings,refund_for,note'
         })
         
         let cashTransactions = []
@@ -280,7 +280,7 @@ export default function CategoryPieChart() {
         // Об'єднуємо транзакції з карток та готівкові
         const transactions = [...cardTransactions, ...cashTransactions]
         
-        // Фільтруємо трансфери, Binance, Savings та "ПОВЕРНЕННЯ" транзакції
+        // Фільтруємо трансфери, Binance, Savings + excluded-from-stats.
         const filteredTransactions = transactions.filter(tx => {
           // Виключаємо трансфери
           if (tx.is_transfer) return false
@@ -288,8 +288,10 @@ export default function CategoryPieChart() {
           // Виключаємо категорію "ТРАНСФЕР"
           if (tx.category === 'ТРАНСФЕР') return false
 
-          // Виключаємо повернення (linked refunds)
-          if (String(tx.category || '').toUpperCase() === 'ПОВЕРНЕННЯ') return false
+          // Exclude from any stats
+          if (tx.exclude_from_stats === true || tx.exclude_from_stats === 'true' || tx.exclude_from_stats === 1) return false
+          // Safety/backward-compat: linked refunds are not counted directly
+          if (tx.refund_for) return false
           if (String(tx.note || '').includes('[refund_for:')) return false
           
           // Виключаємо Binance транзакції (перевіряємо по card_id або по card)
@@ -340,7 +342,7 @@ export default function CategoryPieChart() {
 
         filteredTransactions.forEach(tx => {
           const category = tx.category || 'Без категорії'
-          const amount = Number(tx.amount || 0)
+          const amount = Number((tx.amount_stat ?? tx.amount) || 0)
           // Для готівкових транзакцій (card_id = null) валюта завжди UAH
           const txCurrency = tx.card_id ? (cardMap[tx.card_id]?.currency || 'UAH') : 'UAH'
           const absAmount = Math.abs(amount)
@@ -1142,6 +1144,12 @@ export default function CategoryPieChart() {
                   key={tx.id}
                   tx={tx}
                   currency={currency}
+                  // In stats modals, show amount_stat (net) if present
+                  amountOverride={
+                    tx?.amount_stat != null && Number(tx.amount_stat) !== Number(tx.amount)
+                      ? { primaryAmount: Number(tx.amount_stat || 0), secondaryAmount: Number(tx.amount || 0), currency }
+                      : null
+                  }
                   onDetails={handleDetails}
                   onAskDelete={handleAskDelete}
                   onEdit={handleEdit}

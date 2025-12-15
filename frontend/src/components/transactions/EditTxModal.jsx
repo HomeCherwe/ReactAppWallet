@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { updateTransaction, getTransaction, getTransactionCategories } from '../../api/transactions'
+import { updateTransaction, getTransaction, getTransactionCategories, getDebtParties } from '../../api/transactions'
 import { txBus } from '../../utils/txBus'
 import BaseModal from '../BaseModal'
 import { listCards } from '../../api/cards'
@@ -46,6 +46,10 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false)
   const categoryInputRef = useRef(null)
   const categoryDropdownRef = useRef(null)
+  const [debtParties, setDebtParties] = useState([])
+  const [showDebtPartyDropdown, setShowDebtPartyDropdown] = useState(false)
+  const debtPartyInputRef = useRef(null)
+  const debtPartyDropdownRef = useRef(null)
   const [form, setForm] = useState({
     kind: 'expense',
     amount: '',
@@ -53,8 +57,8 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
     cardId: '',
     note: '',
     rateToUAH: 1,
-    merchantName: null,
-    merchantAddress: null,
+    debtParty: '',
+    debtIsLend: true,
   })
 
   const [errors, setErrors] = useState({
@@ -85,17 +89,25 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
         ])
         setCards(cardRows || [])
         setCategories(categoriesData || [])
+        const parties = await getDebtParties()
+        setDebtParties(parties || [])
 
         const base = freshTx || tx
         const isExp = Number(base.amount) < 0
         const abs = Math.abs(Number(base.amount || 0))
+        const isDebt = base?.is_debt === true || String(base?.category || '') === 'Борг'
+        const debtIsLend = base?.debt_direction
+          ? base.debt_direction === 'lend'
+          : Number(base.amount || 0) < 0
         setForm({
-          kind: isExp ? 'expense' : 'income',
+          kind: isDebt ? 'debt' : (isExp ? 'expense' : 'income'),
           amount: String(abs || ''),
-          category: base.category || '',
+          category: isDebt ? 'Борг' : (base.category || ''),
           cardId: base.card_id || '',
           note: base.note || '',
           rateToUAH: 1,
+          debtParty: base.debt_party || '',
+          debtIsLend,
         })
         // keep original transaction for delta calculations
         originalRef.current = base
@@ -129,6 +141,19 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [showCategoryDropdown])
+
+  // Close debt party dropdown when clicking outside
+  useEffect(() => {
+    if (!showDebtPartyDropdown) return
+    const handleClickOutside = (e) => {
+      if (debtPartyInputRef.current && !debtPartyInputRef.current.contains(e.target) &&
+          debtPartyDropdownRef.current && !debtPartyDropdownRef.current.contains(e.target)) {
+        setShowDebtPartyDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showDebtPartyDropdown])
 
   // Функції для роботи з чеком
   async function parseReceiptViaApi(blob, cardCurrency) {
@@ -214,18 +239,6 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
       const selectedCard = cards.find(c => c.id === form.cardId)
       const txCurrency = (originalRef.current?.currency || selectedCard?.currency || 'UAH').toUpperCase()
       
-      // Обробка merchant (може бути string або object {name, address})
-      let merchantName = null
-      let merchantAddress = null
-      if (parsed.merchant) {
-        if (typeof parsed.merchant === 'object' && parsed.merchant.name) {
-          merchantName = parsed.merchant.name
-          merchantAddress = parsed.merchant.address || null
-        } else if (typeof parsed.merchant === 'string') {
-          merchantName = parsed.merchant
-        }
-      }
-      
       // Формуємо текст нового чека
       const receiptNote = buildNoteFromItems(parsed.items || [], billCur, derivedRate, parsed.merchant)
       const receiptNumber = getNextReceiptNumber(form.note)
@@ -255,8 +268,6 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
         amount: String(newAmount),
         note: newNote,
         category: f.category || ((parsed.items || []).length ? 'Продукти' : ''),
-        merchantName, // Зберігаємо для передачі в payload
-        merchantAddress // Зберігаємо для передачі в payload
       }))
 
       setShowReceiptActions(false)
@@ -379,7 +390,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
     }
 
     // Валідація категорії
-    if (!form.category || form.category.trim() === '') {
+    if (form.kind !== 'debt' && (!form.category || form.category.trim() === '')) {
       newErrors.category = 'Оберіть або введіть категорію'
     }
 
@@ -401,7 +412,11 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
     }
 
     const raw = Math.abs(parseFloat(form.amount || '0')) || 0
-    const signed = form.kind === 'expense' ? -raw : raw
+    const signed = form.kind === 'expense'
+      ? -raw
+      : form.kind === 'income'
+        ? raw
+        : (form.debtIsLend ? -raw : raw)
     const sel = cards.find(c => c.id === form.cardId)
     const cardLabel = sel ? `${sel.bank} ${sel.name}` : null
 
@@ -409,14 +424,24 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
     try {
       const payload = {
         amount: signed,
-        category: form.category || null,
+        category: form.kind === 'debt' ? 'Борг' : (form.category || null),
         note: form.note || null,
         card: cardLabel,
         card_id: form.cardId || null,
-        merchant_name: form.merchantName || null,
-        merchant_address: form.merchantAddress || null,
+        is_debt: form.kind === 'debt',
+        debt_party: form.kind === 'debt' ? (form.debtParty || null) : null,
+        debt_direction: form.kind === 'debt' ? (form.debtIsLend ? 'lend' : 'borrow') : null,
+        exclude_from_stats: form.kind === 'debt' ? true : false,
       }
       await updateTransaction(tx.id, payload)
+      // Fetch fresh transaction so UI gets computed fields (amount_stat / exclude_from_stats)
+      let fresh = null
+      try {
+        fresh = await getTransaction(tx.id)
+      } catch (e) {
+        // not fatal - we'll fallback to payload merge below
+        console.warn('Failed to fetch fresh tx after update:', e?.message || e)
+      }
       // emit delta events so other components update
       try {
         const orig = originalRef.current || tx || {}
@@ -456,7 +481,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
         console.error('emit tx update event failed', e)
       }
 
-      onSaved?.({ ...tx, ...payload })
+      onSaved?.(fresh ? fresh : { ...tx, ...payload })
       onClose()
     } catch (e) {
       console.error('Update tx error:', e)
@@ -477,7 +502,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
       maxWidth="md"
     >
       <form onSubmit={save} className="grid gap-3">
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <button type="button"
                   className={`px-3 py-2 rounded-xl font-medium transition-colors ${
                     form.kind==='expense' 
@@ -494,6 +519,14 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
                   }`}
                   onClick={()=>setForm(f=>({...f, kind:'income'}))}
                 >Дохід</button>
+                <button type="button"
+                  className={`px-3 py-2 rounded-xl font-medium transition-colors ${
+                    form.kind==='debt'
+                      ? 'bg-yellow-100 text-yellow-800 border-2 border-yellow-300'
+                      : 'bg-gray-100 text-gray-600 border-2 border-transparent'
+                  }`}
+                  onClick={()=>setForm(f=>({...f, kind:'debt', category: 'Борг' }))}
+                >Борг</button>
               </div>
 
               <div>
@@ -532,6 +565,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
                 )}
               </div>
 
+              {form.kind !== 'debt' && (
               <div className="relative" ref={categoryInputRef}>
                 <input 
                   className={`border rounded-xl px-3 py-2 w-full ${errors.category ? 'border-rose-500 focus:ring-2 focus:ring-rose-500' : 'focus:ring-2 focus:ring-indigo-500'}`}
@@ -588,6 +622,69 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
                   })()}
                 </AnimatePresence>
               </div>
+              )}
+
+              {form.kind === 'debt' && (
+                <div className="grid gap-2">
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={!!form.debtIsLend}
+                      onChange={(e) => setForm(f => ({ ...f, debtIsLend: e.target.checked }))}
+                      className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="font-medium">
+                      {form.debtIsLend ? 'Я даю в борг' : 'Я беру в борг'}
+                    </span>
+                  </label>
+
+                  <div className="relative" ref={debtPartyInputRef}>
+                    <input
+                      className="border rounded-xl px-3 py-2 w-full focus:ring-2 focus:ring-yellow-400"
+                      placeholder={form.debtIsLend ? 'Кому в борг' : 'Хто дав у борг'}
+                      value={form.debtParty}
+                      onChange={(e) => setForm(f => ({ ...f, debtParty: e.target.value }))}
+                      onFocus={() => setShowDebtPartyDropdown(true)}
+                    />
+
+                    <AnimatePresence>
+                      {showDebtPartyDropdown && debtParties.length > 0 && (() => {
+                        const q = String(form.debtParty || '').trim().toLowerCase()
+                        const filtered = q
+                          ? debtParties.filter(p => String(p).toLowerCase().includes(q))
+                          : debtParties
+                        return filtered.length > 0 && (
+                          <motion.div
+                            ref={debtPartyDropdownRef}
+                            className="absolute z-10 top-full left-0 right-0 mt-1 bg-white border rounded-xl max-h-48 overflow-y-auto"
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                          >
+                            {filtered.map((p, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                className="w-full text-left px-3 py-2 hover:bg-gray-50 first:rounded-t-xl last:rounded-b-xl"
+                                onClick={() => {
+                                  setForm(f => ({ ...f, debtParty: p }))
+                                  setShowDebtPartyDropdown(false)
+                                }}
+                              >
+                                {p}
+                              </button>
+                            ))}
+                          </motion.div>
+                        )
+                      })()}
+                    </AnimatePresence>
+                  </div>
+
+                  <div className="text-[11px] text-gray-500">
+                    Борг автоматично не враховується у статистику.
+                  </div>
+                </div>
+              )}
 
               <div>
                 <select 
@@ -622,15 +719,17 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
                 value={form.note}
                 onChange={e=>setForm({...form, note: e.target.value})} />
 
-              {/* Додавання чека */}
-              <div className="mt-1">
-                <button type="button" className="w-full rounded-xl border px-3 py-2 hover:bg-gray-50"
-                        onClick={onPickFile} disabled={parsing}>
-                  Додати чек
-                </button>
-                <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={onFileChange}/>
-                {parsing && <div className="mt-2 text-xs text-gray-500">Обробка чека…</div>}
-              </div>
+              {/* Додавання чека - тільки для витрат */}
+              {form.kind === 'expense' && (
+                <div className="mt-1">
+                  <button type="button" className="w-full rounded-xl border px-3 py-2 hover:bg-gray-50"
+                          onClick={onPickFile} disabled={parsing}>
+                    Додати чек
+                  </button>
+                  <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={onFileChange}/>
+                  {parsing && <div className="mt-2 text-xs text-gray-500">Обробка чека…</div>}
+                </div>
+              )}
 
               <div className="mt-2 flex gap-2">
                 <button 

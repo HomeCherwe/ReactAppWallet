@@ -8,6 +8,7 @@ import AnalyticsPage from './pages/AnalyticsPage'
 import SubscriptionsPage from './pages/SubscriptionsPage'
 import CardsPage from './pages/CardsPage'
 import ArchivesPage from './pages/ArchivesPage'
+import DebtsPage from './pages/DebtsPage'
 import Auth from './components/Auth'
 import { txBus } from './utils/txBus'
 import { getApiUrl, apiFetch } from './utils.jsx'
@@ -499,6 +500,11 @@ export default function App(){
                 <ArchivesPage />
               </div>
             } />
+          <Route path="/debts" element={
+            <div className="lg:col-span-2">
+              <DebtsPage />
+            </div>
+          } />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
