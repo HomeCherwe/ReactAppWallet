@@ -59,6 +59,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
     rateToUAH: 1,
     debtParty: '',
     debtIsLend: true,
+    excludeFromStats: false,
   })
 
   const [errors, setErrors] = useState({
@@ -108,6 +109,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
           rateToUAH: 1,
           debtParty: base.debt_party || '',
           debtIsLend,
+          excludeFromStats: base?.exclude_from_stats === true || base?.exclude_from_stats === 'true' || base?.exclude_from_stats === 1,
         })
         // keep original transaction for delta calculations
         originalRef.current = base
@@ -431,7 +433,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
         is_debt: form.kind === 'debt',
         debt_party: form.kind === 'debt' ? (form.debtParty || null) : null,
         debt_direction: form.kind === 'debt' ? (form.debtIsLend ? 'lend' : 'borrow') : null,
-        exclude_from_stats: form.kind === 'debt' ? true : false,
+        exclude_from_stats: form.kind === 'debt' ? true : (form.excludeFromStats || false),
       }
       await updateTransaction(tx.id, payload)
       // Fetch fresh transaction so UI gets computed fields (amount_stat / exclude_from_stats)
@@ -525,7 +527,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
                       ? 'bg-yellow-100 text-yellow-800 border-2 border-yellow-300'
                       : 'bg-gray-100 text-gray-600 border-2 border-transparent'
                   }`}
-                  onClick={()=>setForm(f=>({...f, kind:'debt', category: 'Борг' }))}
+                  onClick={()=>setForm(f=>({...f, kind:'debt', category: 'Борг', excludeFromStats: true }))}
                 >Борг</button>
               </div>
 
@@ -689,7 +691,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
               <div>
                 <select 
                   className={`border rounded-xl px-3 py-2 w-full ${errors.cardId ? 'border-rose-500 focus:ring-2 focus:ring-rose-500' : 'focus:ring-2 focus:ring-indigo-500'}`}
-                  value={form.cardId}
+                value={form.cardId}
                   onChange={e => {
                     setForm({...form, cardId: e.target.value})
                     if (errors.cardId) {
@@ -698,10 +700,10 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
                   }}
                 >
                   <option value="">— Оберіть карту —</option>
-                  {cards.map(c=>(
-                    <option key={c.id} value={c.id}>{c.bank} — {c.name}</option>
-                  ))}
-                </select>
+                {cards.map(c=>(
+                  <option key={c.id} value={c.id}>{c.bank} — {c.name}</option>
+                ))}
+              </select>
                 {errors.cardId && (
                   <motion.div
                     initial={{ opacity: 0, y: -5 }}
@@ -718,6 +720,28 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
                 placeholder="Нотатки"
                 value={form.note}
                 onChange={e=>setForm({...form, note: e.target.value})} />
+
+              {/* Exclude from stats toggle */}
+              <div className="flex items-center justify-between py-2">
+                <label className="text-sm text-gray-700 font-medium">
+                  Враховувати в статистиці
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, excludeFromStats: !f.excludeFromStats }))}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
+                    !form.excludeFromStats ? 'bg-indigo-600' : 'bg-gray-300'
+                  }`}
+                  role="switch"
+                  aria-checked={!form.excludeFromStats}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      !form.excludeFromStats ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
 
               {/* Додавання чека - тільки для витрат */}
               {form.kind === 'expense' && (

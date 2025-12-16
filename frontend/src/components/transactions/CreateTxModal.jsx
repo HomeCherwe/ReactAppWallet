@@ -59,6 +59,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
     note: '',
     debtParty: '',
     debtIsLend: true,
+    excludeFromStats: false,
   })
 
   const [errors, setErrors] = useState({
@@ -125,7 +126,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
 
   useEffect(() => {
     if (!open) {
-      setForm({ kind: 'expense', amount: '', category: '', cardId: '', note: '', debtParty: '', debtIsLend: true })
+      setForm({ kind: 'expense', amount: '', category: '', cardId: '', note: '', debtParty: '', debtIsLend: true, excludeFromStats: false })
       setShowReceiptActions(false)
       setParsing(false)
       stopCamera()
@@ -301,13 +302,13 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
           note,
         }))
       } else {
-        setForm(f => ({
-          ...f,
-          kind: 'expense',
-          amount: String(total || ''),
-          category: f.category || ((parsed.items || []).length ? 'Продукти' : ''),
+      setForm(f => ({
+        ...f,
+        kind: 'expense',
+        amount: String(total || ''),
+        category: f.category || ((parsed.items || []).length ? 'Продукти' : ''),
           note,
-        }))
+      }))
       }
 
       setShowReceiptActions(false)
@@ -384,7 +385,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
         is_debt: form.kind === 'debt',
         debt_party: form.kind === 'debt' ? (form.debtParty || null) : null,
         debt_direction: form.kind === 'debt' ? (form.debtIsLend ? 'lend' : 'borrow') : null,
-        exclude_from_stats: form.kind === 'debt' ? true : undefined,
+        exclude_from_stats: form.kind === 'debt' ? true : (form.excludeFromStats || false),
       }
       const data = await createTransaction(payload)
       onSaved?.(data)
@@ -436,7 +437,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
                       ? 'bg-yellow-100 text-yellow-800 border-2 border-yellow-300'
                       : 'bg-gray-100 text-gray-600 border-2 border-transparent'
                   }`}
-                  onClick={()=>setForm(f=>({...f, kind:'debt', category: 'Борг' }))}
+                  onClick={()=>setForm(f=>({...f, kind:'debt', category: 'Борг', excludeFromStats: true }))}
                 >Борг</button>
               </div>
 
@@ -599,7 +600,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
               <div>
                 <select 
                   className={`border rounded-xl px-3 py-2 w-full ${errors.cardId ? 'border-rose-500 focus:ring-2 focus:ring-rose-500' : 'focus:ring-2 focus:ring-indigo-500'}`}
-                  value={form.cardId}
+                value={form.cardId}
                   onChange={e => {
                     setForm({...form, cardId: e.target.value})
                     if (errors.cardId) {
@@ -608,10 +609,10 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
                   }}
                 >
                   <option value="">— Оберіть карту —</option>
-                  {cards.map(c=>(
-                    <option key={c.id} value={c.id}>{c.bank} — {c.name}</option>
-                  ))}
-                </select>
+                {cards.map(c=>(
+                  <option key={c.id} value={c.id}>{c.bank} — {c.name}</option>
+                ))}
+              </select>
                 {errors.cardId && (
                   <motion.div
                     initial={{ opacity: 0, y: -5 }}
@@ -631,16 +632,38 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
 
               {/* rate input removed - using Monobank rates via useMonoRates */}
 
+              {/* Exclude from stats toggle */}
+              <div className="flex items-center justify-between py-2">
+                <label className="text-sm text-gray-700 font-medium">
+                  Враховувати в статистиці
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, excludeFromStats: !f.excludeFromStats }))}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
+                    !form.excludeFromStats ? 'bg-indigo-600' : 'bg-gray-300'
+                  }`}
+                  role="switch"
+                  aria-checked={!form.excludeFromStats}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      !form.excludeFromStats ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
               {form.kind === 'expense' && (
-                <div className="mt-1">
+              <div className="mt-1">
                   <button type="button" className="w-full rounded-xl border px-3 py-2 hover:bg-gray-50"
                           onClick={onPickFile} disabled={parsing}>
                     Додати чек
-                  </button>
-                  <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={onFileChange}/>
+                    </button>
+                    <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={onFileChange}/>
                   {parsing && <div className="mt-2 text-xs text-gray-500">Обробка чека…</div>}
-                </div>
-              )}
+                  </div>
+                )}
 
               <div className="mt-2 flex gap-2">
                 <button 
