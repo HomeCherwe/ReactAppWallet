@@ -57,14 +57,14 @@ export async function createTransaction(payload) {
     method: 'POST',
     body: JSON.stringify(payload)
   })
-  
+
   // Інвалідувати кеші після створення транзакції
   invalidateSumByCardCache()
   if (invalidateCategoriesCacheFn) {
     invalidateCategoriesCacheFn()
   }
   invalidateDebtPartiesCache()
-  
+
   return data
 }
 
@@ -73,7 +73,7 @@ export async function updateTransaction(id, payload) {
     method: 'PUT',
     body: JSON.stringify(payload)
   })
-  
+
   // Інвалідувати кеш sum by card після оновлення транзакції
   invalidateSumByCardCache()
   invalidateDebtPartiesCache()
@@ -83,7 +83,7 @@ export async function deleteTransaction(id) {
   await apiFetch(`/api/transactions/${id}`, {
     method: 'DELETE'
   })
-  
+
   // Інвалідувати кеш sum by card після видалення транзакції
   invalidateSumByCardCache()
 }
@@ -92,7 +92,7 @@ export async function archiveTransaction(id) {
   await apiFetch(`/api/transactions/${id}/archive`, {
     method: 'PATCH'
   })
-  
+
   // Інвалідувати кеш sum by card після архівації транзакції
   invalidateSumByCardCache()
 }
@@ -101,7 +101,7 @@ export async function unarchiveTransaction(id) {
   await apiFetch(`/api/transactions/${id}/unarchive`, {
     method: 'PATCH'
   })
-  
+
   // Інвалідувати кеш sum by card після розархівування транзакції
   invalidateSumByCardCache()
 }
@@ -124,15 +124,15 @@ export async function deleteTransactions(ids) {
   if (!ids || !Array.isArray(ids) || ids.length === 0) {
     throw new Error('ids array is required')
   }
-  
+
   const data = await apiFetch('/api/transactions/bulk-delete', {
     method: 'POST',
     body: JSON.stringify({ ids })
   })
-  
+
   // Інвалідувати кеш sum by card після видалення транзакцій
   invalidateSumByCardCache()
-  
+
   return data
 }
 
@@ -171,17 +171,17 @@ const CATEGORIES_CACHE_TTL = 60000 // 60 секунд
  */
 export async function getTransactionCategories() {
   const now = Date.now()
-  
+
   // Якщо кеш актуальний, повертаємо його
   if (categoriesCache && (now - categoriesCacheTimestamp) < CATEGORIES_CACHE_TTL) {
     return categoriesCache
   }
-  
+
   // Якщо вже є запит в процесі, чекаємо на нього
   if (categoriesCachePromise) {
     return categoriesCachePromise
   }
-  
+
   // Робимо новий запит
   categoriesCachePromise = (async () => {
     try {
@@ -196,7 +196,7 @@ export async function getTransactionCategories() {
       return []
     }
   })()
-  
+
   return categoriesCachePromise
 }
 
@@ -210,3 +210,22 @@ export function invalidateCategoriesCache() {
 
 // Зберігаємо посилання для використання в createTransaction
 invalidateCategoriesCacheFn = invalidateCategoriesCache
+
+/**
+ * Отримати транзакції для конкретної підписки
+ * @param {string} subscriptionId 
+ * @returns {Promise<Array>}
+ */
+export async function getTransactionsBySubscription(subscriptionId) {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('id, amount, created_at, note, category, card, card_id')
+    .eq('subscription_id', subscriptionId)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    throw error
+  }
+
+  return data
+}

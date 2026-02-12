@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase, invalidateUserCache } from '../lib/supabase'
 import { motion } from 'framer-motion'
-import { User, Mail, Save, Upload, Key, CreditCard, Copy, Eye, EyeOff, RefreshCw, BarChart3, LogOut } from 'lucide-react'
+import { User, Mail, Save, Upload, Key, CreditCard, Copy, Eye, EyeOff, RefreshCw, BarChart3, LogOut, Landmark, CheckCircle, XCircle, HelpCircle, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { getUserAPIs, getApiKey, generateApiKey } from '../api/preferences'
-import { getApiUrl } from '../utils.jsx'
+import { getUserAPIs, getApiKey, generateApiKey, updatePreferencesSection, invalidatePreferencesCache } from '../api/preferences'
+import { getApiUrl, apiFetch } from '../utils.jsx'
 import { useSettingsStore } from '../store/useSettingsStore'
 import ConfirmModal from '../components/ConfirmModal'
 
@@ -15,27 +15,42 @@ export default function ProfilePage() {
   const [displayName, setDisplayName] = useState('')
   const [avatarFile, setAvatarFile] = useState(null)
   const [avatarPreview, setAvatarPreview] = useState(null)
-  
+
+  // Ref to prevent double execution
+  const waitingForTrueLayer = useRef(false)
+
   // API keys state
   const [binanceApiKey, setBinanceApiKey] = useState('')
   const [binanceApiSecret, setBinanceApiSecret] = useState('')
   const [monobankToken, setMonobankToken] = useState('')
   const [monobankBlackCardId, setMonobankBlackCardId] = useState('')
   const [monobankWhiteCardId, setMonobankWhiteCardId] = useState('')
+  // TrueLayer state
+  const [trueLayerClientId, setTrueLayerClientId] = useState('')
+  const [trueLayerClientSecret, setTrueLayerClientSecret] = useState('')
   const [prefsLoaded, setPrefsLoaded] = useState(false)
-  
+  const [trueLayerAccessToken, setTrueLayerAccessToken] = useState('')
+
+  // Guide visibility state
+  const [showBinanceGuide, setShowBinanceGuide] = useState(false)
+  const [showMonobankGuide, setShowMonobankGuide] = useState(false)
+
+  // Defaults - Live keys should be in Backend .env or entered manually
+  const TRUELAYER_DEFAULT_ID = '' // 'appwallet-ddbe1e'
+  const TRUELAYER_DEFAULT_SECRET = ''
+
   // API Key state
   const [apiKey, setApiKey] = useState(null)
   const [apiKeyVisible, setApiKeyVisible] = useState(false)
   const [apiKeyLoading, setApiKeyLoading] = useState(false)
   const [apiKeyGenerating, setApiKeyGenerating] = useState(false)
-  
+
   // Dashboard settings - використовуємо новий store
   const settings = useSettingsStore((state) => state.settings)
   const updateNestedSetting = useSettingsStore((state) => state.updateNestedSetting)
   const getNestedSetting = useSettingsStore((state) => state.getNestedSetting)
   const showUsdtInChart = getNestedSetting('dashboard.showUsdtInChart', true)
-  
+
   // Logout modal
   const [showLogoutModal, setShowLogoutModal] = useState(false)
 
@@ -44,8 +59,8 @@ export default function ProfilePage() {
       if (user) {
         setUser(user)
         setDisplayName(
-          user.user_metadata?.full_name || 
-          user.user_metadata?.display_name || 
+          user.user_metadata?.full_name ||
+          user.user_metadata?.display_name ||
           (user.email ? user.email.split('@')[0] : '')
         )
         setAvatarPreview(user.user_metadata?.avatar_url || null)
@@ -57,8 +72,8 @@ export default function ProfilePage() {
       if (session?.user) {
         setUser(session.user)
         setDisplayName(
-          session.user.user_metadata?.full_name || 
-          session.user.user_metadata?.display_name || 
+          session.user.user_metadata?.full_name ||
+          session.user.user_metadata?.display_name ||
           (session.user.email ? session.user.email.split('@')[0] : '')
         )
         setAvatarPreview(session.user.user_metadata?.avatar_url || null)
@@ -69,36 +84,212 @@ export default function ProfilePage() {
   }, [])
 
   // Load API keys from separate APIs column
-  useEffect(() => {
-    const loadApiKeys = async () => {
-      try {
-        const APIs = await getUserAPIs()
-        if (APIs) {
-          // Binance API
-          if (APIs.binance) {
-            setBinanceApiKey(APIs.binance.api_key || '')
-            setBinanceApiSecret(APIs.binance.api_secret || '')
-          }
-          
-          // Monobank API
-          if (APIs.monobank) {
-            setMonobankToken(APIs.monobank.token || '')
-            setMonobankBlackCardId(APIs.monobank.black_card_id || '')
-            setMonobankWhiteCardId(APIs.monobank.white_card_id || '')
-          }
+  const loadApiKeys = async () => {
+    try {
+      const APIs = await getUserAPIs()
+      if (APIs) {
+        // Binance API
+        if (APIs.binance) {
+          setBinanceApiKey(APIs.binance.api_key || '')
+          setBinanceApiSecret(APIs.binance.api_secret || '')
         }
-        setPrefsLoaded(true)
-      } catch (e) {
-        console.error('Failed to load API keys:', e)
-        setPrefsLoaded(true)
+
+        // Monobank API
+        if (APIs.monobank) {
+          setMonobankToken(APIs.monobank.token || '')
+          setMonobankBlackCardId(APIs.monobank.black_card_id || '')
+          setMonobankWhiteCardId(APIs.monobank.white_card_id || '')
+        }
+
+
+        // TrueLayer API
+        if (APIs.truelayer) {
+          setTrueLayerClientId(APIs.truelayer.client_id || '')
+          setTrueLayerClientSecret(APIs.truelayer.client_secret || '')
+
+          // Check for stored token in DB first
+          if (APIs.truelayer.access_token) {
+            setTrueLayerAccessToken(APIs.truelayer.access_token)
+            localStorage.setItem('truelayer_access_token', APIs.truelayer.access_token)
+          }
+        } else {
+          // Set defaults if not present
+          setTrueLayerClientId(TRUELAYER_DEFAULT_ID)
+          setTrueLayerClientSecret(TRUELAYER_DEFAULT_SECRET)
+        }
       }
+      setPrefsLoaded(true)
+    } catch (e) {
+      console.error('Failed to load API keys:', e)
+      setPrefsLoaded(true)
     }
+  }
+
+  // Load API keys from separate APIs column
+  useEffect(() => {
     loadApiKeys()
     loadApiKey()
+
+    // Load TrueLayer access token from local storage if available (fallback)
+    const storedTrueLayerAccessToken = localStorage.getItem('truelayer_access_token')
+    if (storedTrueLayerAccessToken && !trueLayerAccessToken) {
+      setTrueLayerAccessToken(storedTrueLayerAccessToken)
+    }
   }, [])
-  
+
+  // Handle Disconnect
+  const handleDisconnectTrueLayer = async () => {
+    if (!confirm('Ви дійсно хочете відключити Revolut? Ви більше не зможете синхронізувати транзакції.')) return
+
+    try {
+      const loadingToast = toast.loading('Відключення...')
+
+      // Get current APIs to preserve others
+      const currentAPIs = await getUserAPIs() || {}
+
+      // Remove truelayer from APIs object
+      if (currentAPIs.truelayer) {
+        delete currentAPIs.truelayer
+      }
+
+      // Save updated APIs
+      await updatePreferencesSection('apis', currentAPIs, true) // immediate save
+
+      // Clear local state
+      setTrueLayerAccessToken('')
+      setTrueLayerData(null) // Reset data if any
+      localStorage.removeItem('truelayer_access_token')
+
+      toast.dismiss(loadingToast)
+      toast.success('Revolut успішно відключено')
+    } catch (e) {
+      console.error('Failed to disconnect TrueLayer:', e)
+      toast.error('Не вдалося відключити: ' + e.message)
+    }
+  }
+
   // Dashboard settings - використовуємо новий store напряму
   // showUsdtInChart вже отримується з store через getNestedSetting
+
+  // Handle TrueLayer Callback
+  useEffect(() => {
+    // Robust way to find 'code' in URL, regardless of Router type (Hash/Browser)
+    // We check search params, hash params, and even a manual regex fallback
+
+    console.log('🔄 Checking URL for code...')
+    console.log('Current href:', window.location.href)
+    console.log('Current hash:', window.location.hash)
+    console.log('Current search:', window.location.search)
+
+    let code = null
+
+    // 1. Check standard search params (?code=...)
+    const urlParams = new URLSearchParams(window.location.search)
+    code = urlParams.get('code')
+
+    // 2. Check hash params (#/profile?code=...)
+    if (!code && window.location.hash.includes('?')) {
+      const hashParts = window.location.hash.split('?')
+      if (hashParts.length > 1) {
+        // Fix: Use the part AFTER the ?
+        const queryPart = hashParts[1]
+        console.log('Parsing hash query:', queryPart)
+        const hashParams = new URLSearchParams(queryPart)
+        code = hashParams.get('code')
+      }
+    }
+
+    // 3. Fallback: Manual regex (in case of weird duplications like /?code=...#/...)
+    if (!code) {
+      // Look for code=... anywhere in the string
+      // Match code=VALUE up to & or end of string
+      const match = window.location.href.match(/[?&]code=([^&]+)/)
+      if (match) {
+        code = match[1]
+      }
+    }
+
+    if (code) {
+      console.log('✅ Auth Code FOUND:', code)
+
+      // Prevent multiple calls if code is already being processed
+      if (waitingForTrueLayer.current) return
+
+      waitingForTrueLayer.current = true
+
+      toast.success('Код знайдено! Починаємо обмін...')
+      // Call exchange function immediately
+      handleTrueLayerExchange(code)
+
+      // Clean URL logic
+      const cleanUrl = window.location.href.replace(/[?&]code=[^&]+/, '').replace(/[?&]scope=[^&]+/, '')
+      window.history.replaceState({}, document.title, cleanUrl)
+    } else {
+      console.log('❌ No code found in URL')
+    }
+  }, [prefsLoaded])
+
+  const handleTrueLayerExchange = async (code) => {
+    const loadingToast = toast.loading('Підключення до Revolut (TrueLayer)...')
+    try {
+      // For HashRouter, the redirect URI MUST MATCH what is registered in Console and what was used in the AUTH URL
+      // We are using origin + '/#/profile'
+      const redirectUri = window.location.origin + '/#/profile'
+
+      console.log('Exchanging code:', code)
+      console.log('Using Redirect URI:', redirectUri)
+
+      // We do NOT send client_id/secret here anymore. The backend uses defaults from .env
+      const response = await apiFetch('/api/truelayer/exchange', {
+        method: 'POST',
+        body: JSON.stringify({
+          code,
+          redirect_uri: redirectUri
+        })
+      })
+
+      if (response.access_token) {
+        toast.success('Revolut успішно підключено!')
+        console.log('TrueLayer Token Data:', response)
+
+        // Save token for testing
+        setTrueLayerAccessToken(response.access_token)
+        localStorage.setItem('truelayer_access_token', response.access_token)
+
+        // Verify storage immediately
+        const stored = localStorage.getItem('truelayer_access_token')
+        console.log('📦 Token saved to localStorage:', stored ? 'YES' : 'NO', stored)
+
+        // Show token info for debug
+        setTrueLayerData({ endpoint: 'Token Info', data: { expires_in: response.expires_in, scope: response.scope } })
+
+        toast.success('Токен отримано! Тепер ви можете протестувати отримання даних.')
+      } else {
+        console.error('Exchange failed:', response)
+        // If the error is 'invalid_grant', it might mean the code is expired or redirect URI mismatch
+        toast.error('Помилка підключення: ' + (response.error || 'Unknown error'))
+      }
+    } catch (e) {
+      console.error('TrueLayer logic error:', e)
+      toast.error('Помилка підключення')
+    } finally {
+      toast.dismiss(loadingToast)
+      waitingForTrueLayer.current = false
+    }
+  }
+
+  // DEBUG: Check localStorage periodically to sync state if lost
+  useEffect(() => {
+    const checkToken = () => {
+      const stored = localStorage.getItem('truelayer_access_token')
+      if (stored && stored !== trueLayerAccessToken) {
+        console.log('🔄 Syncing token from localStorage to State')
+        setTrueLayerAccessToken(stored)
+      }
+    }
+    const interval = setInterval(checkToken, 2000)
+    return () => clearInterval(interval)
+  }, [trueLayerAccessToken])
 
   // Load API Key
   const loadApiKey = async () => {
@@ -123,7 +314,7 @@ export default function ProfilePage() {
     if (!confirm('Створити новий API ключ? Старий ключ буде замінений і перестане працювати.')) {
       return
     }
-    
+
     setApiKeyGenerating(true)
     try {
       const result = await generateApiKey()
@@ -232,11 +423,11 @@ export default function ProfilePage() {
       if (avatarFile) {
         // Compress image before upload
         const compressedFile = await compressImage(avatarFile)
-        
+
         // Get file extension from original file or determine from MIME type
         const originalExt = avatarFile.name.split('.').pop()?.toLowerCase()
-        const mimeExt = avatarFile.type.includes('png') ? 'png' : 
-                       avatarFile.type.includes('gif') ? 'gif' : 'jpg'
+        const mimeExt = avatarFile.type.includes('png') ? 'png' :
+          avatarFile.type.includes('gif') ? 'gif' : 'jpg'
         const fileExt = originalExt || mimeExt
         const fileName = `${user.id}-${Date.now()}.${fileExt}`
 
@@ -274,7 +465,7 @@ export default function ProfilePage() {
             errorMessage: uploadError.message,
             errorStatus: uploadError.statusCode
           })
-          
+
           // Check if bucket doesn't exist
           if (uploadError.message?.includes('Bucket not found') || uploadError.message?.includes('not found')) {
             throw new Error(
@@ -283,7 +474,7 @@ export default function ProfilePage() {
               'Storage → Create Bucket → назва "avatars" → Public bucket = true'
             )
           }
-          
+
           // Check if RLS policy violation
           if (uploadError.message?.includes('row-level security') || uploadError.message?.includes('RLS')) {
             throw new Error(
@@ -292,7 +483,7 @@ export default function ProfilePage() {
               'в SQL Editor Supabase Dashboard для налаштування політик доступу до Storage.'
             )
           }
-          
+
           // Other errors
           throw new Error(`Не вдалося завантажити аватар: ${uploadError.message || 'Невідома помилка'}`)
         }
@@ -327,24 +518,59 @@ export default function ProfilePage() {
           black_card_id: monobankBlackCardId.trim(),
           white_card_id: monobankWhiteCardId.trim()
         }
+        // TrueLayer keys are handled via .env and backend now
       }
-      
+
       await updatePreferencesSection('apis', apis)
 
       toast.success('Профіль оновлено!')
-      
+
       // Refresh user data
       const { data: { user: updatedUser } } = await supabase.auth.getUser()
       if (updatedUser) {
         setUser(updatedUser)
         setAvatarPreview(updatedUser.user_metadata?.avatar_url || null)
       }
+
+      // Reload API keys to get masked versions from backend
+      invalidatePreferencesCache()
+      await loadApiKeys()
+
     } catch (error) {
       console.error('Error updating profile:', error)
       toast.error(error.message || 'Не вдалося оновити профіль')
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleConnectTrueLayer = () => {
+    // This Client ID is public and safe to use in frontend purely for redirection URL construction
+    const clientId = 'appwallet-ddbe1e'
+
+    // ВАЖЛИВО: Для HashRouter ми МАЄМО вказати # в redirect URI
+    // TrueLayer поверне користувача сюди
+    const redirectUri = window.location.origin + '/#/profile'
+
+    // Scopes: info accounts balance cards transactions direct_debits standing_orders offline_access
+    const scope = 'info accounts balance cards transactions direct_debits standing_orders offline_access'
+
+    // LIVE URL (Production) - Updated for France support
+    // Providers: uk-ob-all, uk-oauth-all, fr-ob-revolut
+    const authUrl = `https://auth.truelayer.com/?response_type=code&client_id=${clientId}&scope=${encodeURIComponent(scope)}&redirect_uri=${encodeURIComponent(redirectUri)}&providers=uk-ob-all%20uk-oauth-all%20fr-ob-revolut`
+
+    console.log('--- TrueLayer Connect Debug (LIVE - France) ---')
+    console.log('Client ID:', clientId)
+    console.log('Redirect URI:', redirectUri)
+    console.log('Auth URL:', authUrl)
+    console.log('-------------------------------')
+
+    if (redirectUri.includes('localhost') || redirectUri.includes('127.0.0.1')) {
+      // Інформаційне повідомлення
+      console.info(`Redirect URI: ${redirectUri}`)
+    }
+
+    window.location.href = authUrl
   }
 
   const handleSignOut = async () => {
@@ -443,17 +669,51 @@ export default function ProfilePage() {
 
         {/* Binance API Section */}
         <div className="pt-6 border-t border-gray-200">
-          <div className="flex items-center gap-2 mb-4">
-            <Key size={20} className="text-yellow-600" />
-            <h3 className="text-lg font-semibold text-gray-900">Binance API</h3>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Key size={20} className="text-yellow-600" />
+              <h3 className="text-lg font-semibold text-gray-900">Binance API</h3>
+            </div>
+            <button
+              onClick={() => setShowBinanceGuide(!showBinanceGuide)}
+              className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700 font-medium bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-full transition-colors"
+            >
+              <HelpCircle size={16} />
+              <span>Як отримати ключі?</span>
+              {showBinanceGuide ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </button>
           </div>
+
+          {/* Binance Guide */}
+          <motion.div
+            initial={false}
+            animate={{ height: showBinanceGuide ? 'auto' : 0, opacity: showBinanceGuide ? 1 : 0 }}
+            transition={{ duration: 0.3 }}
+            className="overflow-hidden"
+          >
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6 text-sm text-gray-800">
+              <h4 className="font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                <ExternalLink size={16} />
+                Інструкція отримання ключів Binance:
+              </h4>
+              <ol className="list-decimal list-inside space-y-1 ml-1">
+                <li>Перейдіть на сторінку <a href="https://www.binance.com/en/my/settings/api-management" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-medium">API Management</a>.</li>
+                <li>Натисніть <strong>Create API</strong> та виберіть <strong>System Generated</strong>.</li>
+                <li>Введіть назву (наприклад: <code>WalletApp</code>) та пройдіть верифікацію.</li>
+                <li>Скопіюйте <strong>API Key</strong> та <strong>Secret Key</strong>. <span className="text-red-600 font-medium">Важливо: Secret Key показується тільки один раз!</span></li>
+                <li>У налаштуваннях API поставте галочку <strong>Enable Reading</strong> (зазвичай увімкнено за замовчуванням).</li>
+                <li>Вставте ключі у поля нижче та натисніть <strong>Зберегти зміни</strong>.</li>
+              </ol>
+            </div>
+          </motion.div>
+
           <div className="space-y-4 bg-gray-50 rounded-lg p-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 API Key
               </label>
               <input
-                type="password"
+                type="text"
                 value={binanceApiKey}
                 onChange={(e) => setBinanceApiKey(e.target.value)}
                 placeholder="Введіть Binance API Key"
@@ -465,7 +725,7 @@ export default function ProfilePage() {
                 API Secret
               </label>
               <input
-                type="password"
+                type="text"
                 value={binanceApiSecret}
                 onChange={(e) => setBinanceApiSecret(e.target.value)}
                 placeholder="Введіть Binance API Secret"
@@ -480,17 +740,50 @@ export default function ProfilePage() {
 
         {/* Monobank API Section */}
         <div className="pt-6 border-t border-gray-200">
-          <div className="flex items-center gap-2 mb-4">
-            <CreditCard size={20} className="text-indigo-600" />
-            <h3 className="text-lg font-semibold text-gray-900">Monobank API</h3>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <CreditCard size={20} className="text-indigo-600" />
+              <h3 className="text-lg font-semibold text-gray-900">Monobank API</h3>
+            </div>
+            <button
+              onClick={() => setShowMonobankGuide(!showMonobankGuide)}
+              className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700 font-medium bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-full transition-colors"
+            >
+              <HelpCircle size={16} />
+              <span>Як отримати токен?</span>
+              {showMonobankGuide ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </button>
           </div>
+
+          {/* Monobank Guide */}
+          <motion.div
+            initial={false}
+            animate={{ height: showMonobankGuide ? 'auto' : 0, opacity: showMonobankGuide ? 1 : 0 }}
+            transition={{ duration: 0.3 }}
+            className="overflow-hidden"
+          >
+            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-6 text-sm text-gray-800">
+              <h4 className="font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                <ExternalLink size={16} />
+                Інструкція отримання токена Monobank:
+              </h4>
+              <ol className="list-decimal list-inside space-y-1 ml-1">
+                <li>Перейдіть на офіційний сайт <a href="https://api.monobank.ua/" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-medium">api.monobank.ua</a>.</li>
+                <li>Відскануйте QR-код через мобільний додаток Monobank.</li>
+                <li>Підтвердіть вхід у додатку.</li>
+                <li>Після входу скопіюйте довгий рядок під назвою <strong>Токен для особистого використання</strong>.</li>
+                <li>Вставте цей токен у поле нижче. ID карток можна буде отримати автоматично після збереження.</li>
+              </ol>
+            </div>
+          </motion.div>
+
           <div className="space-y-4 bg-gray-50 rounded-lg p-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Monobank Token
               </label>
               <input
-                type="password"
+                type="text"
                 value={monobankToken}
                 onChange={(e) => setMonobankToken(e.target.value)}
                 placeholder="Введіть Monobank Token"
@@ -525,6 +818,57 @@ export default function ProfilePage() {
               Token та ID карток зберігаються безпечно в вашому обліковому записі
             </p>
           </div>
+        </div>
+
+        {/* TrueLayer API Section */}
+        <div className="pt-6 border-t border-gray-200">
+          <div className="flex items-center gap-2 mb-4">
+            <Landmark size={20} className="text-blue-500" />
+            <h3 className="text-lg font-semibold text-gray-900">TrueLayer API (Revolut)</h3>
+          </div>
+          <div className="space-y-4 bg-gray-50 rounded-lg p-4">
+            <div className="pt-2">
+              <p className="text-sm text-gray-700 mb-4">
+                Підключіть ваш обліковий запис Revolut через TrueLayer для синхронізації балансу та транзакцій.
+              </p>
+
+              {trueLayerAccessToken ? (
+                <div className="flex items-center justify-between bg-white border border-green-200 rounded-lg p-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-green-600">
+                      <CheckCircle size={20} />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-900">Revolut підключено</h4>
+                      <p className="text-xs text-gray-500">Автоматична синхронізація активна</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleDisconnectTrueLayer}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium rounded-md transition-colors border border-red-200"
+                  >
+                    <XCircle size={14} />
+                    Відключити
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleConnectTrueLayer}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm"
+                >
+                  <Landmark size={16} />
+                  Підключити Revolut
+                </button>
+              )}
+            </div>
+
+            <p className="text-xs text-gray-400 mt-2">
+              Використовується TrueLayer Live. Redirect URI: {window.location.origin}/#/profile
+            </p>
+          </div>
+
         </div>
 
         {/* Dashboard Settings Section */}
@@ -569,10 +913,10 @@ export default function ProfilePage() {
           </div>
           <div className="space-y-4 bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 border border-green-200">
             <p className="text-sm text-gray-700 mb-4">
-              API Key дозволяє автоматично синхронізувати транзакції з Monobank через iPhone Shortcuts або інші автоматизації. 
+              API Key дозволяє автоматично синхронізувати транзакції з Monobank через iPhone Shortcuts або інші автоматизації.
               Ключ не має терміну дії, на відміну від JWT токену.
             </p>
-            
+
             {/* API URL для зручності */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -629,7 +973,7 @@ export default function ProfilePage() {
                 <span className="text-amber-600 font-medium">На мобільних:</span> введіть IP-адресу вашого комп'ютера (наприклад: http://192.168.1.100:8787)
               </p>
             </div>
-            
+
             {apiKeyLoading ? (
               <div className="flex items-center justify-center py-4">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600"></div>

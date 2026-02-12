@@ -186,19 +186,19 @@ export default function MonthlyPayment() {
 
     // Use current rows length as offset (safe with inserts/deletes)
     const from = append ? (rowsRef.current?.length || 0) : 0
-    const to   = from + pageSize - 1
+    const to = from + pageSize - 1
 
     // Get current user
     const { data: { user } } = await supabase.auth.getUser()
-    
+
     const [txs, cards] = await Promise.all([
       listTransactions({ from, to, search, transactionType: txType, category, excludeUsdt: !showUsdt }),
       user ? listCards() : []
     ])
-  // map by card id so we can lookup currency by card_id (transactions store card_id)
-  const map = {}
-  cards.forEach(c => { map[c.id] = c.currency || 'EUR' })
-  setCardMap(map)
+    // map by card id so we can lookup currency by card_id (transactions store card_id)
+    const map = {}
+    cards.forEach(c => { map[c.id] = c.currency || 'EUR' })
+    setCardMap(map)
 
     // Always fetch linked refund children for loaded expense parents so nested refunds survive refresh
     // even when filters are not strictly "expense".
@@ -273,10 +273,10 @@ export default function MonthlyPayment() {
         shiftKeyPressedRef.current = false
       }
     }
-    
+
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('keyup', handleKeyUp)
-    
+
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
@@ -286,15 +286,15 @@ export default function MonthlyPayment() {
   // Load filters from settings store (окремо від категорій)
   useEffect(() => {
     if (!initialized || !settings) return
-    
+
     try {
       const filters = settings.transactionsFilters || {}
-          if (filters.transactionType) {
-            setTransactionType(filters.transactionType)
-          }
-          if (filters.category !== undefined) {
-            setSelectedCategory(filters.category || '')
-          }
+      if (filters.transactionType) {
+        setTransactionType(filters.transactionType)
+      }
+      if (filters.category !== undefined) {
+        setSelectedCategory(filters.category || '')
+      }
       if (typeof filters.showUsdt === 'boolean') {
         setShowUsdt(filters.showUsdt)
       }
@@ -303,18 +303,18 @@ export default function MonthlyPayment() {
         transactionType: filters.transactionType || 'all',
         category: filters.category || '',
         showUsdt: typeof filters.showUsdt === 'boolean' ? filters.showUsdt : true
-        }
-        setFiltersLoaded(true)
-      } catch (e) {
-      console.error('Failed to load filters:', e)
-        setFiltersLoaded(true)
       }
+      setFiltersLoaded(true)
+    } catch (e) {
+      console.error('Failed to load filters:', e)
+      setFiltersLoaded(true)
+    }
   }, [initialized, settings]) // Тільки для фільтрів, не для категорій
 
   useEffect(() => {
     // Wait for filters to be loaded from DB before fetching
     if (!filtersLoaded) return
-    
+
     fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })
   }, [transactionType, selectedCategory, showUsdt, filtersLoaded]) // Re-fetch when filters or USDT toggle change
 
@@ -354,7 +354,7 @@ export default function MonthlyPayment() {
       if (searchQuery && searchQuery.trim()) {
         if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current)
         refreshDebounceRef.current = setTimeout(() => {
-      fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })
+          fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })
         }, 250)
         return
       }
@@ -388,7 +388,7 @@ export default function MonthlyPayment() {
       // Fallback: debounce a refresh for unexpected events
       if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current)
       refreshDebounceRef.current = setTimeout(() => {
-      fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })
+        fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })
       }, 250)
     })
 
@@ -408,14 +408,14 @@ export default function MonthlyPayment() {
   // Save filters to DB when they change (через store з debounce) - тільки якщо значення дійсно змінилося
   useEffect(() => {
     if (!filtersLoaded || !lastSavedFiltersRef.current) return // Don't save until filters are loaded from DB
-    
+
     // Перевіряємо, чи значення дійсно змінилося від збереженого
     const currentFilters = {
       transactionType,
       category: selectedCategory || '',
       showUsdt
     }
-    
+
     const lastSaved = lastSavedFiltersRef.current
     if (
       currentFilters.transactionType === lastSaved.transactionType &&
@@ -424,10 +424,10 @@ export default function MonthlyPayment() {
     ) {
       return // Нічого не змінилося, не записуємо
     }
-    
+
     // Оновлюємо збережені значення
     lastSavedFiltersRef.current = { ...currentFilters }
-    
+
     // Оновлюємо через store (автоматично зберігається через debounce)
     updateNestedSetting('transactionsFilters', currentFilters)
   }, [transactionType, selectedCategory, showUsdt, filtersLoaded, updateNestedSetting])
@@ -494,7 +494,7 @@ export default function MonthlyPayment() {
         console.error('Failed to observe loadMoreTrigger:', e)
       }
     }, 200) // Small delay to ensure DOM is updated
-    
+
     return () => {
       clearTimeout(timeoutId)
       if (observerRef.current) {
@@ -537,7 +537,7 @@ export default function MonthlyPayment() {
   // Group transactions by day
   const groupedByDay = visibleRows.reduce((acc, tx) => {
     const dayKey = formatDateKey(tx.created_at)
-    
+
     if (!acc[dayKey]) {
       acc[dayKey] = {
         date: tx.created_at,
@@ -642,7 +642,7 @@ export default function MonthlyPayment() {
       await updateTransaction(refundTx.id, payload)
 
       const updated = { ...refundTx, ...payload }
-      
+
       // Recompute parent amount_stat after unlink
       if (parentId) {
         const parent = (rowsRef.current || []).find(t => t?.id === parentId) || null
@@ -677,7 +677,7 @@ export default function MonthlyPayment() {
           card_id: refundTx.card_id || null,
           delta: 0,
         })
-      } catch {}
+      } catch { }
 
       toast.success('Повернення скасовано')
     } catch (e) {
@@ -710,10 +710,10 @@ export default function MonthlyPayment() {
       setRows(prev => prev.filter(r => r.id !== pendingDelete.id))
       try {
         // inform other components: deleted tx reduces balance
-        txBus.emit({ 
+        txBus.emit({
           type: 'DELETE',
-          card_id: pendingDelete.card_id || null, 
-          delta: Number(pendingDelete.amount || 0) * -1 
+          card_id: pendingDelete.card_id || null,
+          delta: Number(pendingDelete.amount || 0) * -1
         })
       } catch (e) { console.error('emit delete event failed', e) }
       toast.success('Транзакцію видалено')
@@ -733,10 +733,10 @@ export default function MonthlyPayment() {
       setRows(prev => prev.filter(r => r.id !== pendingDelete.id))
       try {
         // inform other components: archived tx reduces balance
-        txBus.emit({ 
+        txBus.emit({
           type: 'DELETE',
-          card_id: pendingDelete.card_id || null, 
-          delta: Number(pendingDelete.amount || 0) * -1 
+          card_id: pendingDelete.card_id || null,
+          delta: Number(pendingDelete.amount || 0) * -1
         })
       } catch (e) { console.error('emit archive event failed', e) }
       toast.success('Транзакцію архівовано')
@@ -757,12 +757,12 @@ export default function MonthlyPayment() {
   const handleSelect = (txId, checked, index, event) => {
     // Перевіряємо shiftKey з event або з глобального стану
     const shiftKey = event?.shiftKey || shiftKeyPressedRef.current || false
-    
+
     // Якщо натиснуто Shift і є останній виділений індекс - виділяємо діапазон
     if (shiftKey && lastSelectedIndexRef.current !== null && checked) {
       const startIndex = Math.min(lastSelectedIndexRef.current, index)
       const endIndex = Math.max(lastSelectedIndexRef.current, index)
-      
+
       setSelectedIds(prev => {
         const newSet = new Set(prev)
         // Виділяємо всі транзакції в діапазоні
@@ -773,25 +773,25 @@ export default function MonthlyPayment() {
         }
         return newSet
       })
-      
+
       // Оновлюємо останній виділений індекс
       lastSelectedIndexRef.current = index
     } else {
       // Звичайне виділення/зняття виділення
-    setSelectedIds(prev => {
-      const newSet = new Set(prev)
-      if (checked) {
-        newSet.add(txId)
+      setSelectedIds(prev => {
+        const newSet = new Set(prev)
+        if (checked) {
+          newSet.add(txId)
           lastSelectedIndexRef.current = index // Зберігаємо індекс останньої виділеної
-      } else {
-        newSet.delete(txId)
+        } else {
+          newSet.delete(txId)
           // Якщо зняли виділення з останньої виділеної - скидаємо ref
           if (lastSelectedIndexRef.current === index) {
             lastSelectedIndexRef.current = null
           }
-      }
-      return newSet
-    })
+        }
+        return newSet
+      })
     }
   }
 
@@ -816,31 +816,31 @@ export default function MonthlyPayment() {
 
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return
-    
+
     const idsArray = Array.from(selectedIds)
     setBulkDeleteOpen(false)
     setBulkDeleteLoading(true)
-    
+
     try {
       const result = await deleteTransactions(idsArray)
-      
+
       // Оновити список транзакцій
       setRows(prev => prev.filter(r => !selectedIds.has(r.id)))
-      
+
       // Emit txBus events для кожної видаленої транзакції
       const deletedTxs = rows.filter(tx => selectedIds.has(tx.id))
       deletedTxs.forEach(tx => {
         try {
-          txBus.emit({ 
+          txBus.emit({
             type: 'DELETE',
-            card_id: tx.card_id || null, 
-            delta: Number(tx.amount || 0) * -1 
+            card_id: tx.card_id || null,
+            delta: Number(tx.amount || 0) * -1
           })
-        } catch (e) { 
-          console.error('emit delete event failed', e) 
+        } catch (e) {
+          console.error('emit delete event failed', e)
         }
       })
-      
+
       toast.success(`Видалено ${result.deleted || idsArray.length} транзакцій`)
       setSelectedIds(new Set())
       lastSelectedIndexRef.current = null // Reset last selected index
@@ -854,33 +854,33 @@ export default function MonthlyPayment() {
 
   const handleBulkArchive = async () => {
     if (selectedIds.size === 0) return
-    
+
     const idsArray = Array.from(selectedIds)
     setBulkDeleteOpen(false)
     setBulkDeleteLoading(true)
-    
+
     try {
       // Архівуємо кожну транзакцію окремо (немає bulk archive API)
       const archivePromises = idsArray.map(id => archiveTransaction(id))
       await Promise.all(archivePromises)
-      
+
       // Оновити список транзакцій
       setRows(prev => prev.filter(r => !selectedIds.has(r.id)))
-      
+
       // Emit txBus events для кожної заархівованої транзакції
       const archivedTxs = rows.filter(tx => selectedIds.has(tx.id))
       archivedTxs.forEach(tx => {
         try {
-          txBus.emit({ 
+          txBus.emit({
             type: 'DELETE',
-            card_id: tx.card_id || null, 
-            delta: Number(tx.amount || 0) * -1 
+            card_id: tx.card_id || null,
+            delta: Number(tx.amount || 0) * -1
           })
-        } catch (e) { 
-          console.error('emit archive event failed', e) 
+        } catch (e) {
+          console.error('emit archive event failed', e)
         }
       })
-      
+
       toast.success(`Заархівовано ${idsArray.length} транзакцій`)
       setSelectedIds(new Set())
       lastSelectedIndexRef.current = null // Reset last selected index
@@ -893,7 +893,7 @@ export default function MonthlyPayment() {
   }
 
   return (
-  <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-2xl p-5 shadow-soft min-h-[400px]">
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-2xl p-5 shadow-soft min-h-[400px]">
       <div className="mb-4">
         <div className="flex items-center justify-between mb-3">
           <div className="font-semibold">Recent transactions</div>
@@ -915,10 +915,10 @@ export default function MonthlyPayment() {
                 Видалити ({selectedIds.size})
               </button>
             )}
-            <button className="btn btn-primary text-xs inline-flex items-center gap-1" onClick={()=>setCreateOpen(true)}>
-              <Plus size={14}/> Add
+            <button className="btn btn-primary text-xs inline-flex items-center gap-1" onClick={() => setCreateOpen(true)}>
+              <Plus size={14} /> Add
             </button>
-            <button className="btn btn-soft text-xs inline-flex items-center gap-1" onClick={()=>setTransferOpen(true)}>
+            <button className="btn btn-soft text-xs inline-flex items-center gap-1" onClick={() => setTransferOpen(true)}>
               Transfer
             </button>
             <button
@@ -926,25 +926,50 @@ export default function MonthlyPayment() {
               onClick={async () => {
                 if (syncLoading) return
                 setSyncLoading(true)
-                const toastId = toast.loading('Синхронізація виконується...')
+                const toastId = toast.loading('Синхронізація банків...')
                 try {
-                  // apiFetch automatically adds auth token and handles JSON parsing
-                  const data = await apiFetch('/api/syncMonoBank', {
-                    method: 'POST',
-                    body: JSON.stringify({})
-                  }) || {}
-                  
+                  // Run both syncs in parallel
+                  const [monoRes, tlRes] = await Promise.all([
+                    apiFetch('/api/syncMonoBank', {
+                      method: 'POST',
+                      body: JSON.stringify({})
+                    }).catch(e => ({ error: e.message || 'Mono error' })),
+
+                    apiFetch('/api/syncTrueLayer', {
+                      method: 'POST',
+                      body: JSON.stringify({})
+                    }).catch(e => ({ error: e.message || 'TrueLayer error' }))
+                  ])
+
+                  const monoCount = monoRes?.count || 0
+                  const tlCount = tlRes?.count || 0
+                  const totalCount = monoCount + tlCount
+
                   toast.dismiss(toastId)
-                  toast.success(data.count ? `Синхронізовано ${data.count} транзакцій` : 'Синхронізація виконана')
-                  
-                  // Avoid txBus spam here; realtime will deliver INSERT/UPDATE/DELETE events.
-                  // Emit a single event so non-realtime clients/widgets can refresh once if needed.
-                  if ((data.transactions && data.transactions.length > 0) || data.count > 0) {
-                    try { txBus.emit({ type: 'SYNC' }) } catch {}
+
+                  // Construct message
+                  let msgParts = []
+                  if (monoRes?.error) msgParts.push(`Mono: помилка (${monoRes.error})`)
+                  else msgParts.push(`Mono: ${monoCount}`)
+
+                  if (tlRes?.error) msgParts.push(`Rev: помилка (${tlRes.error})`)
+                  else msgParts.push(`Rev: ${tlCount}`)
+
+                  const msg = `Синхронізація: ${msgParts.join(', ')}`
+
+                  if (monoRes?.error || tlRes?.error) {
+                    toast(msg, { icon: '⚠️', duration: 5000 })
+                  } else {
+                    toast.success(totalCount > 0 ? `Додано ${totalCount} транзакцій` : 'Нових транзакцій немає')
+                  }
+
+                  // Emit SYNC event if we got any data or counts
+                  if (totalCount > 0 || (monoRes?.transactions?.length > 0)) {
+                    try { txBus.emit({ type: 'SYNC' }) } catch { }
                   }
                 } catch (e) {
-                  toast.dismiss()
-                  toast.error('Помилка синхронізації')
+                  toast.dismiss(toastId)
+                  toast.error('Критична помилка синхронізації')
                   console.error('sync error', e)
                 } finally {
                   setSyncLoading(false)
@@ -963,7 +988,7 @@ export default function MonthlyPayment() {
           </div>
         </div>
 
-        <form onSubmit={(e)=>e.preventDefault()}>
+        <form onSubmit={(e) => e.preventDefault()}>
           <div className="relative">
             <input
               type="text"
@@ -995,17 +1020,17 @@ export default function MonthlyPayment() {
             <div className="mb-2 pb-2 border-b border-gray-200">
               <div className="flex items-center justify-between gap-4 flex-wrap">
                 <div className="flex items-center gap-4 flex-wrap">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
                       checked={selectedIds.size > 0 && selectedIds.size === visibleRows.length && visibleRows.length > 0}
-                    onChange={(e) => handleSelectAll(e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span className="text-sm text-gray-600">
+                      onChange={(e) => handleSelectAll(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-sm text-gray-600">
                       Вибрати всі ({selectedIds.size}/{visibleRows.length})
-                  </span>
-                </label>
+                    </span>
+                  </label>
 
                   {/* USDT Toggle */}
                   <label className="flex items-center gap-2 cursor-pointer">
@@ -1037,7 +1062,7 @@ export default function MonthlyPayment() {
                   </label>
                 </div>
 
-                  {/* Filters */}
+                {/* Filters */}
                 <div className="flex items-center gap-2 flex-wrap">
                   {/* Transaction type filter */}
                   <select
@@ -1084,7 +1109,7 @@ export default function MonthlyPayment() {
               sortedDays.map((dayKey) => {
                 const { dateHeader, transactions, total } = groupedByDay[dayKey]
                 const dayCurrency = 'EUR'
-                
+
                 return (
                   <div key={dayKey} className="space-y-2">
                     <div className="flex items-center justify-between mb-3 sticky top-0 bg-white py-2 border-b border-gray-200 z-10">
@@ -1092,9 +1117,8 @@ export default function MonthlyPayment() {
                         {dateHeader}
                       </div>
                       <div
-                        className={`text-sm font-semibold ${
-                          total < 0 ? 'text-rose-600' : total > 0 ? 'text-emerald-600' : 'text-gray-900'
-                        }`}
+                        className={`text-sm font-semibold ${total < 0 ? 'text-rose-600' : total > 0 ? 'text-emerald-600' : 'text-gray-900'
+                          }`}
                       >
                         {!ratesReady
                           ? '… EUR'
@@ -1107,7 +1131,7 @@ export default function MonthlyPayment() {
                     </div>
                     <div className="space-y-1">
                       {transactions.map((tx, idx) => {
-                // prefer transaction's own currency if present; otherwise use card currency by card_id
+                        // prefer transaction's own currency if present; otherwise use card currency by card_id
                         const currency = (tx.currency || cardMap[tx.card_id] || 'EUR')
                         const refundTxs = refundsByExpenseId?.[tx.id] || []
                         const refundTxsSorted = refundTxs
@@ -1124,22 +1148,22 @@ export default function MonthlyPayment() {
                         }
                         // Find original index in visibleRows array for selection handling
                         const originalIndex = visibleRows.findIndex(r => r.id === tx.id)
-                return (
-                  <motion.div
-                    key={tx.id}
-                    initial={{ opacity: 0, y: 10, scale: 0.995 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    transition={{ duration: 0.25 }}
-                  >
-                    <Row
-                      tx={tx}
-                      currency={currency}
-                      onDetails={openDetails}
-                      onAskDelete={askDelete}
-                      onRefund={startRefund}
-                      swipeActions
+                        return (
+                          <motion.div
+                            key={tx.id}
+                            initial={{ opacity: 0, y: 10, scale: 0.995 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            transition={{ duration: 0.25 }}
+                          >
+                            <Row
+                              tx={tx}
+                              currency={currency}
+                              onDetails={openDetails}
+                              onAskDelete={askDelete}
+                              onRefund={startRefund}
+                              swipeActions
                               amountOverride={amountOverride}
-                      selected={selectedIds.has(tx.id)}
+                              selected={selectedIds.has(tx.id)}
                               onSelect={(txId, checked, event) => handleSelect(txId, checked, originalIndex, event)}
                             />
 
@@ -1162,7 +1186,7 @@ export default function MonthlyPayment() {
                                 })}
                               </div>
                             )}
-                  </motion.div>
+                          </motion.div>
                         )
                       })}
                     </div>
@@ -1172,9 +1196,9 @@ export default function MonthlyPayment() {
             )}
 
             {/* Infinite scroll trigger - always render when hasMore, even if empty */}
-          {hasMore && (
-              <div 
-                ref={loadMoreTriggerRef} 
+            {hasMore && (
+              <div
+                ref={loadMoreTriggerRef}
                 className="py-8 text-center min-h-[200px] flex items-center justify-center"
                 style={{ minHeight: '200px' }}
               >
@@ -1184,12 +1208,12 @@ export default function MonthlyPayment() {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
                     </svg>
-            </div>
+                  </div>
                 ) : (
                   <div className="text-xs text-gray-400">Прокрутіть вниз для завантаження більше... (Завантажено: {visibleRows.length})</div>
-          )}
-            </div>
-          )}
+                )}
+              </div>
+            )}
           </div>
         </>
       )}
@@ -1211,7 +1235,7 @@ export default function MonthlyPayment() {
       <TransferModal
         open={transferOpen}
         onClose={() => setTransferOpen(false)}
-        onDone={(res) => { fetchPage({ append:false, search: searchQuery }); setTransferOpen(false) }}
+        onDone={(res) => { fetchPage({ append: false, search: searchQuery }); setTransferOpen(false) }}
       />
 
       <EditTxModal

@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, Edit2, Trash2, Calendar, CreditCard, DollarSign, Repeat, Users, Play } from 'lucide-react'
+import { Plus, Edit2, Trash2, Calendar, CreditCard, DollarSign, Repeat, Users, Play, History } from 'lucide-react'
 import { apiFetch } from '../utils.jsx'
 import { listCards } from '../api/cards'
 import { getTransactionCategories } from '../api/transactions'
 import BaseModal from '../components/BaseModal'
 import DeleteSubscriptionModal from '../components/subscriptions/DeleteSubscriptionModal'
+import SubscriptionTransactionsDrawer from '../components/subscriptions/SubscriptionTransactionsDrawer'
 import useMonoRates from '../hooks/useMonoRates'
 import toast from 'react-hot-toast'
 
@@ -19,6 +20,8 @@ export default function SubscriptionsPage() {
   const [participantsModalOpen, setParticipantsModalOpen] = useState(false)
   const [subscriptionToDelete, setSubscriptionToDelete] = useState(null)
   const [subscriptionForParticipants, setSubscriptionForParticipants] = useState(null)
+  const [transactionsDrawerOpen, setTransactionsDrawerOpen] = useState(false)
+  const [selectedSubscriptionForTransactions, setSelectedSubscriptionForTransactions] = useState(null)
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false)
   const categoryInputRef = useRef(null)
   const categoryDropdownRef = useRef(null)
@@ -47,7 +50,7 @@ export default function SubscriptionsPage() {
     if (!showCategoryDropdown) return
     const handleClickOutside = (e) => {
       if (categoryInputRef.current && !categoryInputRef.current.contains(e.target) &&
-          categoryDropdownRef.current && !categoryDropdownRef.current.contains(e.target)) {
+        categoryDropdownRef.current && !categoryDropdownRef.current.contains(e.target)) {
         setShowCategoryDropdown(false)
       }
     }
@@ -79,36 +82,36 @@ export default function SubscriptionsPage() {
       e.preventDefault()
       e.stopPropagation()
     }
-    
-    
-    
+
+
+
     if (!form.name || !form.amount) {
-      
+
       toast.error('Заповніть всі обов\'язкові поля')
       return
     }
-    
-    
+
+
 
     try {
-      
-      
+
+
       if (editing) {
         const response = await apiFetch(`/api/subscriptions/${editing.id}`, {
           method: 'PUT',
           body: JSON.stringify(form)
         })
-        
+
         toast.success('Підписку оновлено!')
       } else {
         const response = await apiFetch('/api/subscriptions', {
           method: 'POST',
           body: JSON.stringify(form)
         })
-        
+
         toast.success('Підписку створено!')
       }
-      
+
       setModalOpen(false)
       setEditing(null)
       setForm({
@@ -172,6 +175,11 @@ export default function SubscriptionsPage() {
     setParticipants(Array.isArray(sub.participants) ? [...sub.participants] : [])
     setTotalParticipants(sub.total_participants || 1)
     setParticipantsModalOpen(true)
+  }
+
+  const handleViewTransactions = (sub) => {
+    setSelectedSubscriptionForTransactions(sub)
+    setTransactionsDrawerOpen(true)
   }
 
   const handleSaveParticipants = async () => {
@@ -252,16 +260,16 @@ export default function SubscriptionsPage() {
       const today = new Date()
       today.setHours(0, 0, 0, 0)
       nextDate.setHours(0, 0, 0, 0)
-      
+
       const diffTime = nextDate - today
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-      
+
       const dateStr = nextDate.toLocaleDateString('uk-UA', {
         day: 'numeric',
         month: 'long',
         year: 'numeric'
       })
-      
+
       let daysText = ''
       if (diffDays === 0) {
         daysText = '(сьогодні)'
@@ -274,7 +282,7 @@ export default function SubscriptionsPage() {
       } else {
         daysText = `(просрочено ${Math.abs(diffDays)} днів)`
       }
-      
+
       return `${dateStr} ${daysText}`
     }
     return 'Не встановлено'
@@ -287,13 +295,13 @@ export default function SubscriptionsPage() {
     // Функція конвертації валют через UAH
     const convertCurrency = (amount, fromCurrency, toCurrency) => {
       if (!fromCurrency || fromCurrency === toCurrency) return amount
-      
+
       const codeMap = { UAH: 980, USD: 840, EUR: 978, GBP: 826, PLN: 985, CHF: 756, CZK: 203, HUF: 348, USDT: 840 }
       const fromCode = codeMap[fromCurrency] || 980
       const toCode = codeMap[toCurrency] || 980
-      
+
       if (fromCode === toCode) return amount
-      
+
       // Конвертуємо через UAH як проміжну валюту
       let inUAH = amount
       if (fromCode !== 980) {
@@ -301,7 +309,7 @@ export default function SubscriptionsPage() {
         if (!rateToUAH) return amount // Якщо курс не знайдено, повертаємо оригінальну суму
         inUAH = amount * rateToUAH
       }
-      
+
       // Потім конвертуємо з UAH в цільову валюту
       if (toCode === 980) return inUAH
       const rateFromUAH = rates?.[`${toCode}->980`]
@@ -319,7 +327,7 @@ export default function SubscriptionsPage() {
         const amount = Math.abs(sub.amount || 0)
         const frequency = sub.frequency || 'monthly'
         const participantsCount = sub.total_participants || 1
-        
+
         // Розрахунок суми на місяць
         let monthlyAmount = 0
         if (frequency === 'monthly') {
@@ -327,7 +335,7 @@ export default function SubscriptionsPage() {
         } else if (frequency === 'weekly') {
           monthlyAmount = (amount * 4.33) / participantsCount
         }
-        
+
         // Конвертуємо в UAH
         const inUAH = convertCurrency(monthlyAmount, currency, 'UAH')
         totalInUAH += inUAH
@@ -414,11 +422,10 @@ export default function SubscriptionsPage() {
           {subscriptions.map((sub) => (
             <div
               key={sub.id}
-              className={`p-3 sm:p-4 rounded-lg border-2 transition-all ${
-                sub.is_active
-                  ? 'border-gray-200 bg-white hover:border-indigo-300'
-                  : 'border-gray-100 bg-gray-50 opacity-60'
-              }`}
+              className={`p-3 sm:p-4 rounded-lg border-2 transition-all ${sub.is_active
+                ? 'border-gray-200 bg-white hover:border-indigo-300'
+                : 'border-gray-100 bg-gray-50 opacity-60'
+                }`}
             >
               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                 <div className="flex-1 min-w-0">
@@ -442,11 +449,11 @@ export default function SubscriptionsPage() {
                     <div className="flex items-center gap-1.5 text-gray-600">
                       <CreditCard size={16} />
                       <span>
-                        {sub.card_id 
+                        {sub.card_id
                           ? (() => {
-                              const card = cards.find(c => c.id === sub.card_id)
-                              return card ? `${card.bank} ${card.name}` : 'Карта'
-                            })()
+                            const card = cards.find(c => c.id === sub.card_id)
+                            return card ? `${card.bank} ${card.name}` : 'Карта'
+                          })()
                           : 'Готівка'
                         }
                       </span>
@@ -465,7 +472,7 @@ export default function SubscriptionsPage() {
                       const totalAmount = Math.abs(sub.amount || 0)
                       const participantsCount = sub.total_participants || 1
                       const frequency = sub.frequency || 'monthly'
-                      
+
                       // Розрахунок суми на місяць
                       let monthlyAmount = 0
                       if (frequency === 'monthly') {
@@ -474,11 +481,11 @@ export default function SubscriptionsPage() {
                         // Приблизно 4.33 тижні в місяці
                         monthlyAmount = (totalAmount * 4.33) / participantsCount
                       }
-                      
+
                       // Розрахунок суми на рік
                       const yearlyAmount = monthlyAmount * 12
                       const currency = sub.card_id ? (cards.find(c => c.id === sub.card_id)?.currency || '') : ''
-                      
+
                       return (
                         <div className="space-y-1">
                           <div className="flex items-center gap-1.5">
@@ -493,7 +500,7 @@ export default function SubscriptionsPage() {
                             </span>
                           </div>
                           <div className="text-xs text-gray-600 pl-5">
-                            На місяць: <span className="font-medium">{monthlyAmount.toFixed(2)} {currency}</span> | 
+                            На місяць: <span className="font-medium">{monthlyAmount.toFixed(2)} {currency}</span> |
                             На рік: <span className="font-medium">{yearlyAmount.toFixed(2)} {currency}</span>
                           </div>
                         </div>
@@ -504,11 +511,10 @@ export default function SubscriptionsPage() {
                 <div className="flex items-center gap-1.5 sm:gap-2 sm:ml-4 flex-shrink-0">
                   <button
                     onClick={() => handleToggleActive(sub)}
-                    className={`px-2 sm:px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
-                      sub.is_active
-                        ? 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                        : 'bg-green-100 hover:bg-green-200 text-green-700'
-                    }`}
+                    className={`px-2 sm:px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${sub.is_active
+                      ? 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                      : 'bg-green-100 hover:bg-green-200 text-green-700'
+                      }`}
                   >
                     <span className="hidden sm:inline">{sub.is_active ? 'Деактивувати' : 'Активувати'}</span>
                     <span className="sm:hidden">{sub.is_active ? 'Вимк' : 'Увімк'}</span>
@@ -526,6 +532,13 @@ export default function SubscriptionsPage() {
                     title="Учасники"
                   >
                     <Users size={16} className="sm:w-[18px] sm:h-[18px]" />
+                  </button>
+                  <button
+                    onClick={() => handleViewTransactions(sub)}
+                    className="p-1.5 sm:p-2 text-gray-600 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                    title="Історія транзакцій"
+                  >
+                    <History size={16} className="sm:w-[18px] sm:h-[18px]" />
                   </button>
                   <button
                     onClick={() => handleEdit(sub)}
@@ -546,10 +559,18 @@ export default function SubscriptionsPage() {
         </div>
       )}
 
+      {/* Transactions Drawer */}
+      <SubscriptionTransactionsDrawer
+        open={transactionsDrawerOpen}
+        onClose={() => setTransactionsDrawerOpen(false)}
+        subscription={selectedSubscriptionForTransactions}
+        cards={cards}
+      />
+
       <BaseModal
         open={modalOpen}
         onClose={() => {
-          
+
           setModalOpen(false)
           setEditing(null)
         }}
@@ -557,14 +578,14 @@ export default function SubscriptionsPage() {
       >
         <form
           onSubmit={(e) => {
-            
+
             e.preventDefault()
             e.stopPropagation()
             handleSave(e)
             return false
           }}
           onClick={(e) => {
-            
+
             e.stopPropagation()
           }}
           className="space-y-4"
@@ -623,22 +644,20 @@ export default function SubscriptionsPage() {
               <button
                 type="button"
                 onClick={() => setForm({ ...form, is_expense: true })}
-                className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors ${
-                  form.is_expense
-                    ? 'bg-red-100 text-red-700 border-2 border-red-300'
-                    : 'bg-gray-100 text-gray-600 border-2 border-transparent'
-                }`}
+                className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors ${form.is_expense
+                  ? 'bg-red-100 text-red-700 border-2 border-red-300'
+                  : 'bg-gray-100 text-gray-600 border-2 border-transparent'
+                  }`}
               >
                 Витрата
               </button>
               <button
                 type="button"
                 onClick={() => setForm({ ...form, is_expense: false })}
-                className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors ${
-                  !form.is_expense
-                    ? 'bg-green-100 text-green-700 border-2 border-green-300'
-                    : 'bg-gray-100 text-gray-600 border-2 border-transparent'
-                }`}
+                className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors ${!form.is_expense
+                  ? 'bg-green-100 text-green-700 border-2 border-green-300'
+                  : 'bg-gray-100 text-gray-600 border-2 border-transparent'
+                  }`}
               >
                 Дохід
               </button>
@@ -653,22 +672,20 @@ export default function SubscriptionsPage() {
               <button
                 type="button"
                 onClick={() => setForm({ ...form, frequency: 'weekly' })}
-                className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors ${
-                  form.frequency === 'weekly'
-                    ? 'bg-indigo-100 text-indigo-700 border-2 border-indigo-300'
-                    : 'bg-gray-100 text-gray-600 border-2 border-transparent'
-                }`}
+                className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors ${form.frequency === 'weekly'
+                  ? 'bg-indigo-100 text-indigo-700 border-2 border-indigo-300'
+                  : 'bg-gray-100 text-gray-600 border-2 border-transparent'
+                  }`}
               >
                 Тиждень
               </button>
               <button
                 type="button"
                 onClick={() => setForm({ ...form, frequency: 'monthly' })}
-                className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors ${
-                  form.frequency === 'monthly'
-                    ? 'bg-indigo-100 text-indigo-700 border-2 border-indigo-300'
-                    : 'bg-gray-100 text-gray-600 border-2 border-transparent'
-                }`}
+                className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors ${form.frequency === 'monthly'
+                  ? 'bg-indigo-100 text-indigo-700 border-2 border-indigo-300'
+                  : 'bg-gray-100 text-gray-600 border-2 border-transparent'
+                  }`}
               >
                 Місяць
               </button>
@@ -722,13 +739,13 @@ export default function SubscriptionsPage() {
               placeholder="Категорія (напр. Підписки)"
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
             />
-            
+
             <AnimatePresence>
               {showCategoryDropdown && categories.length > 0 && (() => {
-                const filteredCategories = form.category.trim() 
+                const filteredCategories = form.category.trim()
                   ? categories.filter(cat => cat.toLowerCase().includes(form.category.toLowerCase()))
                   : categories
-                
+
                 return filteredCategories.length > 0 && (
                   <motion.div
                     ref={categoryDropdownRef}
@@ -785,15 +802,15 @@ export default function SubscriptionsPage() {
             <button
               type="submit"
               onClick={(e) => {
-                
+
                 e.preventDefault()
                 e.stopPropagation()
-                
+
                 handleSave(e)
                 return false
               }}
               onMouseDown={(e) => {
-                
+
                 e.stopPropagation()
               }}
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors cursor-pointer relative z-10"
@@ -835,7 +852,7 @@ export default function SubscriptionsPage() {
             const totalAmount = Math.abs(subscriptionForParticipants.amount || 0)
             const participantsCount = totalParticipants || 1
             const frequency = subscriptionForParticipants.frequency || 'monthly'
-            
+
             // Розрахунок суми на місяць
             let monthlyAmount = 0
             if (frequency === 'monthly') {
@@ -844,10 +861,10 @@ export default function SubscriptionsPage() {
               // Приблизно 4.33 тижні в місяці
               monthlyAmount = (totalAmount * 4.33) / participantsCount
             }
-            
+
             // Розрахунок суми на рік
             const yearlyAmount = monthlyAmount * 12
-            
+
             return (
               <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-4">
                 <h4 className="text-sm font-semibold text-indigo-900 mb-2">Розрахунок на учасника:</h4>

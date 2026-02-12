@@ -18,23 +18,23 @@ const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (mobile apps, Postman, etc.)
     if (!origin) return callback(null, true)
-    
+
     // Allow localhost for development
     if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
       return callback(null, true)
     }
-    
+
     // Allow local network IP addresses (for mobile testing)
     // Pattern: http://192.168.x.x:port or http://10.x.x.x:port or http://172.16-31.x.x:port
     if (/^http:\/\/(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)\d+\.\d+:\d+$/.test(origin)) {
       return callback(null, true)
     }
-    
+
     // Allow production domain
     if (origin === 'https://homecherwe.github.io') {
       return callback(null, true)
     }
-    
+
     // Reject other origins
     callback(new Error('Not allowed by CORS'))
   },
@@ -90,7 +90,7 @@ async function getUserFromToken(req, res, next) {
   try {
     const authHeader = req.headers.authorization
     const token = authHeader?.replace('Bearer ', '') || req.body?.token || req.query?.token
-    
+
     if (!token || token.trim() === '') {
       // Якщо токен не передано, перевіряємо чи передано user_id напряму (для спрощення)
       if (req.body?.user_id) {
@@ -100,22 +100,22 @@ async function getUserFromToken(req, res, next) {
       console.warn(`[getUserFromToken] No token found for ${req.method} ${req.path}`)
       return res.status(401).json({ error: 'No authentication token provided' })
     }
-    
+
     // Валідуємо JWT токен через Supabase
     const { data: { user }, error } = await supabase.auth.getUser(token)
-    
+
     if (error) {
       const errorMsg = error.message || JSON.stringify(error) || 'Unknown error'
       console.error(`[getUserFromToken] Invalid token for ${req.method} ${req.path}:`, errorMsg)
       console.error(`[getUserFromToken] Token length: ${token.length}, starts with: ${token.substring(0, 20)}...`)
       return res.status(401).json({ error: 'Invalid or expired token', details: errorMsg })
     }
-    
+
     if (!user) {
       console.error(`[getUserFromToken] No user found for token in ${req.method} ${req.path}`)
       return res.status(401).json({ error: 'User not found' })
     }
-    
+
     req.user_id = user.id
     req.user = user
     next()
@@ -129,28 +129,28 @@ async function getUserFromToken(req, res, next) {
 async function getUserFromApiKey(req, res, next) {
   try {
     const apiKey = req.headers['x-api-key'] || req.body?.api_key || req.query?.api_key
-    
+
     if (!apiKey) {
       return res.status(401).json({ error: 'API key required. Use X-API-Key header or api_key in body/query' })
     }
-    
-    // Шукаємо користувача за API key в user_preferences без full-sкану
-    // API key зберігається в apis.api_key
+
+    // Шукаємо користувача за API key в user_preferences
+    // API key тепер зберігається в preferences.api_key
     const { data: userPrefs, error } = await supabase
       .from('user_preferences')
       .select('user_id')
-      .contains('apis', { api_key: apiKey })
+      .contains('preferences', { api_key: apiKey })
       .single()
-    
+
     if (error) {
       console.error('[getUserFromApiKey] Database error:', error)
       return res.status(500).json({ error: 'Database error while checking API key' })
     }
-    
+
     if (!userPrefs) {
       return res.status(401).json({ error: 'Invalid API key' })
     }
-    
+
     req.user_id = userPrefs.user_id
     req.user = { id: userPrefs.user_id }
     next()
@@ -164,7 +164,7 @@ async function getUserFromApiKey(req, res, next) {
 async function getUserFromTokenOrApiKey(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '') || req.body?.token || req.query?.token
   const apiKey = req.headers['x-api-key'] || req.body?.api_key || req.query?.api_key
-  
+
   if (apiKey) {
     // Використати API Key аутентифікацію
     return getUserFromApiKey(req, res, next)
@@ -172,8 +172,8 @@ async function getUserFromTokenOrApiKey(req, res, next) {
     // Використати JWT аутентифікацію
     return getUserFromToken(req, res, next)
   } else {
-    return res.status(401).json({ 
-      error: 'Authentication required. Provide JWT token (Authorization: Bearer <token>) or API key (X-API-Key header)' 
+    return res.status(401).json({
+      error: 'Authentication required. Provide JWT token (Authorization: Bearer <token>) or API key (X-API-Key header)'
     })
   }
 }
@@ -183,7 +183,7 @@ async function optionalAuth(req, res, next) {
   try {
     const authHeader = req.headers.authorization
     const token = authHeader?.replace('Bearer ', '') || req.body?.token || req.query?.token
-    
+
     if (token) {
       const { data: { user }, error } = await supabase.auth.getUser(token)
       if (!error && user) {
@@ -191,7 +191,7 @@ async function optionalAuth(req, res, next) {
         req.user = user
       }
     }
-    
+
     next()
   } catch (error) {
     // Продовжуємо без авторизації
@@ -211,7 +211,7 @@ app.get('/api/banks', getUserFromToken, async (req, res) => {
       .select('id, name, iban, bic, beneficiary, created_at, updated_at')
       .eq('user_id', req.user_id)
       .order('name', { ascending: true })
-    
+
     if (error) throw error
     res.json(data || [])
   } catch (error) {
@@ -223,20 +223,20 @@ app.get('/api/banks', getUserFromToken, async (req, res) => {
 app.post('/api/banks', getUserFromToken, async (req, res) => {
   try {
     const { name, iban, bic, beneficiary } = req.body
-    const payload = { 
-      name, 
-      iban: iban || null, 
-      bic: bic || null, 
+    const payload = {
+      name,
+      iban: iban || null,
+      bic: bic || null,
       beneficiary: beneficiary || null,
-      user_id: req.user_id 
+      user_id: req.user_id
     }
-    
+
     const { data, error } = await supabase
       .from('banks')
       .insert([payload])
       .select()
       .single()
-    
+
     if (error) throw error
     res.json(data)
   } catch (error) {
@@ -251,7 +251,7 @@ app.put('/api/banks/:id', getUserFromToken, async (req, res) => {
     const patch = { ...req.body }
     delete patch.id
     delete patch.user_id
-    
+
     const { data, error } = await supabase
       .from('banks')
       .update(patch)
@@ -259,7 +259,7 @@ app.put('/api/banks/:id', getUserFromToken, async (req, res) => {
       .eq('user_id', req.user_id)
       .select()
       .single()
-    
+
     if (error) throw error
     if (!data) return res.status(404).json({ error: 'Bank not found' })
     res.json(data)
@@ -272,7 +272,7 @@ app.put('/api/banks/:id', getUserFromToken, async (req, res) => {
 app.delete('/api/banks/:id', getUserFromToken, async (req, res) => {
   try {
     const { id } = req.params
-    
+
     // Перевіряємо, чи є карти, прив'язані до цього банку
     const { data: cards } = await supabase
       .from('cards')
@@ -280,17 +280,17 @@ app.delete('/api/banks/:id', getUserFromToken, async (req, res) => {
       .eq('bank_id', id)
       .eq('user_id', req.user_id)
       .limit(1)
-    
+
     if (cards && cards.length > 0) {
       return res.status(400).json({ error: 'Не можна видалити банк, до якого прив\'язані карти' })
     }
-    
+
     const { error } = await supabase
       .from('banks')
       .delete()
       .eq('id', id)
       .eq('user_id', req.user_id)
-    
+
     if (error) throw error
     res.json({ success: true })
   } catch (error) {
@@ -307,9 +307,9 @@ app.get('/api/cards', getUserFromToken, async (req, res) => {
       .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, banks(name, iban, bic, beneficiary)')
       .eq('user_id', req.user_id)
       .order('created_at', { ascending: false })
-    
+
     if (error) throw error
-    
+
     // Трансформуємо дані для сумісності зі старою структурою
     const transformed = (data || []).map(card => ({
       ...card,
@@ -318,7 +318,7 @@ app.get('/api/cards', getUserFromToken, async (req, res) => {
       bic: card.banks?.bic || null,
       beneficiary: card.banks?.beneficiary || null
     }))
-    
+
     res.json(transformed)
   } catch (error) {
     console.error('GET /api/cards error:', error)
@@ -329,7 +329,7 @@ app.get('/api/cards', getUserFromToken, async (req, res) => {
 app.post('/api/cards', getUserFromToken, async (req, res) => {
   try {
     const { bank_id, name, card_number, currency, initial_balance = 0, bg_url, expiry_date, cvv } = req.body
-    
+
     // Отримуємо назву банку, якщо bank_id вказано
     let bankName = null
     if (bank_id) {
@@ -339,35 +339,35 @@ app.post('/api/cards', getUserFromToken, async (req, res) => {
         .eq('id', bank_id)
         .eq('user_id', req.user_id)
         .single()
-      
+
       if (bankError) {
         console.warn('Failed to fetch bank name:', bankError)
       } else if (bankData) {
         bankName = bankData.name
       }
     }
-    
-    const payload = { 
+
+    const payload = {
       bank_id: bank_id || null,
       bank: bankName || 'Інші', // Заповнюємо bank (NOT NULL constraint)
-      name, 
-      card_number: card_number || null, 
-      currency, 
-      initial_balance, 
-      bg_url, 
-      expiry_date: expiry_date || null, 
+      name,
+      card_number: card_number || null,
+      currency,
+      initial_balance,
+      bg_url,
+      expiry_date: expiry_date || null,
       cvv: cvv || null,
-      user_id: req.user_id 
+      user_id: req.user_id
     }
-    
+
     const { data, error } = await supabase
       .from('cards')
       .insert([payload])
       .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, banks(name, iban, bic, beneficiary)')
       .single()
-    
+
     if (error) throw error
-    
+
     // Трансформуємо для сумісності
     const transformed = {
       ...data,
@@ -376,7 +376,7 @@ app.post('/api/cards', getUserFromToken, async (req, res) => {
       bic: data.banks?.bic || null,
       beneficiary: data.banks?.beneficiary || null
     }
-    
+
     res.json(transformed)
   } catch (error) {
     console.error('POST /api/cards error:', error)
@@ -390,7 +390,7 @@ app.put('/api/cards/:id', getUserFromToken, async (req, res) => {
     const patch = { ...req.body }
     delete patch.id // Не дозволяємо змінювати id
     delete patch.user_id // Не дозволяємо змінювати user_id
-    
+
     // Якщо змінюється bank_id, потрібно оновити bank
     if (patch.bank_id !== undefined) {
       if (patch.bank_id) {
@@ -401,7 +401,7 @@ app.put('/api/cards/:id', getUserFromToken, async (req, res) => {
           .eq('id', patch.bank_id)
           .eq('user_id', req.user_id)
           .single()
-        
+
         if (bankError) {
           console.warn('Failed to fetch bank name:', bankError)
         } else if (bankData) {
@@ -414,7 +414,7 @@ app.put('/api/cards/:id', getUserFromToken, async (req, res) => {
         patch.bank = 'Інші'
       }
     }
-    
+
     const { data, error } = await supabase
       .from('cards')
       .update(patch)
@@ -422,10 +422,10 @@ app.put('/api/cards/:id', getUserFromToken, async (req, res) => {
       .eq('user_id', req.user_id) // Тільки свої картки
       .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, banks(name, iban, bic, beneficiary)')
       .single()
-    
+
     if (error) throw error
     if (!data) return res.status(404).json({ error: 'Card not found' })
-    
+
     // Трансформуємо для сумісності
     const transformed = {
       ...data,
@@ -434,7 +434,7 @@ app.put('/api/cards/:id', getUserFromToken, async (req, res) => {
       bic: data.banks?.bic || null,
       beneficiary: data.banks?.beneficiary || null
     }
-    
+
     res.json(transformed)
   } catch (error) {
     console.error('PUT /api/cards/:id error:', error)
@@ -445,20 +445,20 @@ app.put('/api/cards/:id', getUserFromToken, async (req, res) => {
 app.delete('/api/cards/:id', getUserFromToken, async (req, res) => {
   try {
     const { id } = req.params
-    
+
     // Update transactions to remove card reference
     await supabase
       .from('transactions')
       .update({ card_id: null, card: null })
       .eq('card_id', id)
       .eq('user_id', req.user_id)
-    
+
     const { error } = await supabase
       .from('cards')
       .delete()
       .eq('id', id)
       .eq('user_id', req.user_id) // Тільки свої картки
-    
+
     if (error) throw error
     res.json({ success: true })
   } catch (error) {
@@ -476,9 +476,9 @@ app.get('/api/transactions/categories', getUserFromToken, async (req, res) => {
       .select('category')
       .eq('user_id', req.user_id)
       .not('category', 'is', null)
-    
+
     if (error) throw error
-    
+
     const categories = [...new Set((data || []).map(t => t.category).filter(Boolean))]
     res.json(categories)
   } catch (error) {
@@ -516,7 +516,7 @@ app.get('/api/transactions/sum-by-card', getUserFromToken, async (req, res) => {
   try {
     // Use RPC function from database (it was working correctly before)
     const { data, error } = await supabase.rpc('sum_tx_by_card', { user_id_param: req.user_id })
-    
+
     if (error) {
       console.error('[sum-by-card] RPC error:', error)
       // Fallback to client-side aggregation if RPC fails
@@ -525,25 +525,25 @@ app.get('/api/transactions/sum-by-card', getUserFromToken, async (req, res) => {
         .select('id, amount, card_id, archives')
         .eq('user_id', req.user_id)
         .or('archives.is.null,archives.eq.false')
-      
+
       if (fallbackError) throw fallbackError
-      
+
       const out = {}
       for (const row of fallbackData || []) {
         if (!row.card_id) continue
         out[row.card_id] = (out[row.card_id] || 0) + Number(row.amount || 0)
       }
-      
+
       return res.json(out)
     }
-    
+
     // RPC returned data - format it as { card_id: sum }
     const out = {}
     for (const row of data || []) {
       if (!row.card_id) continue
       out[row.card_id] = Number(row.total || 0)
     }
-    
+
     res.json(out)
   } catch (error) {
     console.error('GET /api/transactions/sum-by-card error:', error)
@@ -556,7 +556,7 @@ app.get('/api/totals/by-bucket', getUserFromToken, async (req, res) => {
   try {
     // Use RPC function from database (it was working correctly before)
     const { data, error } = await supabase.rpc('totals_by_bucket', { user_id_param: req.user_id })
-    
+
     if (error) {
       console.error('[totals-by-bucket] RPC error:', error)
       // Fallback to client-side calculation if RPC fails
@@ -564,11 +564,11 @@ app.get('/api/totals/by-bucket', getUserFromToken, async (req, res) => {
       // So we return empty structure
       return res.json({ cash: {}, cards: {}, savings: {} })
     }
-    
+
     // RPC should return data in format: { cash: {}, cards: {}, savings: {} }
     // If it returns array or different format, we need to transform it
     let result = data
-    
+
     // If data is an array, transform it to object format
     if (Array.isArray(data)) {
       result = { cash: {}, cards: {}, savings: {} }
@@ -581,7 +581,7 @@ app.get('/api/totals/by-bucket', getUserFromToken, async (req, res) => {
         }
       }
     }
-    
+
     res.json(result || { cash: {}, cards: {}, savings: {} })
   } catch (error) {
     console.error('GET /api/totals/by-bucket error:', error)
@@ -592,9 +592,9 @@ app.get('/api/totals/by-bucket', getUserFromToken, async (req, res) => {
 // Get list of transactions with flexible filtering
 app.get('/api/transactions', getUserFromToken, async (req, res) => {
   try {
-    const { 
-      from: rangeFrom, 
-      to: rangeTo, 
+    const {
+      from: rangeFrom,
+      to: rangeTo,
       search = '',
       start_date,
       end_date,
@@ -604,11 +604,11 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       limit,
       fields = 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, merchant_address, merchant_lat, merchant_lng'
     } = req.query
-    
+
     // Filter out 'currency' field if it doesn't exist in the table
     // This prevents errors when frontend tries to select currency column
     const allowedFields = [
-      'id', 'created_at', 'amount', 'amount_stat', 'exclude_from_stats', 'category', 'note', 'archives', 
+      'id', 'created_at', 'amount', 'amount_stat', 'exclude_from_stats', 'category', 'note', 'archives',
       'card', 'card_id', 'is_transfer', 'count_as_income', 'transfer_role',
       'transfer_id', 'user_id', 'transaction_id_card',
       'refund_for',
@@ -617,15 +617,15 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
     ]
     const requestedFields = fields.split(',').map(f => f.trim())
     const validFields = requestedFields.filter(f => allowedFields.includes(f))
-    
+
     // Use valid fields, fallback to default if all were filtered out
     const safeFields = validFields.length > 0 ? validFields.join(', ') : 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, merchant_address, merchant_lat, merchant_lng'
-    
+
     let q = supabase
       .from('transactions')
       .select(safeFields)
       .eq('user_id', req.user_id)
-    
+
     // Date range filter
     if (start_date) {
       q = q.gte('created_at', start_date)
@@ -633,7 +633,7 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
     if (end_date) {
       q = q.lte('created_at', end_date)
     }
-    
+
     // Card filter (including null for cash)
     if (card_id !== undefined) {
       if (card_id === 'null' || card_id === '') {
@@ -642,7 +642,7 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
         q = q.eq('card_id', card_id)
       }
     }
-    
+
     // Refund linkage filters
     // - refund_for=<uuid>
     // - refund_for_in=<uuid1,uuid2,...>
@@ -666,7 +666,7 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
     } else if (isDebt === 'false' || isDebt === false) {
       q = q.or('is_debt.is.null,is_debt.eq.false')
     }
-    
+
     // Archive filter - if archived=true in query, show only archived, otherwise show only non-archived
     const archived = req.query.archived
     if (archived === 'true' || archived === true) {
@@ -674,9 +674,9 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       q = q.eq('archives', true)
     } else {
       // Фільтруємо тільки неархівні транзакції (archives = null або false)
-    q = q.or('archives.is.null,archives.eq.false')
+      q = q.or('archives.is.null,archives.eq.false')
     }
-    
+
     // Transaction type filter (expense/income)
     const transactionType = req.query.transaction_type
     if (transactionType === 'expense') {
@@ -684,13 +684,13 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
     } else if (transactionType === 'income') {
       q = q.gt('amount', 0)
     }
-    
+
     // Category filter
     const category = req.query.category
     if (category) {
       q = q.eq('category', category)
     }
-    
+
     // Exclude USDT filter - join with cards to filter by currency
     const excludeUsdt = req.query.exclude_usdt === 'true'
     if (excludeUsdt) {
@@ -699,61 +699,61 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       // 1. First get all transactions with card_id
       // 2. Then filter out those with USDT currency
       // OR use a different approach: select with cards join
-      
+
       // For now, we'll fetch all and filter client-side, but that's not ideal
       // Better approach: use a subquery or RPC function
       // Let's use a workaround: select cards.currency in the select and filter
-      
+
       // Actually, we can use .not() with a subquery, but PostgREST doesn't support that well
       // Best approach: fetch transactions, then filter by checking card currency
       // But for performance, let's do it in the query using a join
-      
+
       // We'll need to modify the select to include cards.currency
       // But since we're using safeFields, we need to handle this differently
-      
+
       // Temporary solution: we'll filter after fetching, but that's not ideal for pagination
       // For proper pagination, we need to filter before pagination
-      
+
       // Let's use a different approach: modify the query to exclude transactions where card_id
       // points to a card with currency='USDT'
       // We can do this by using a NOT EXISTS subquery or by joining
-      
+
       // Since PostgREST doesn't support complex joins easily, we'll:
       // 1. Fetch transactions with card_id
       // 2. Fetch cards with currency='USDT' for this user
       // 3. Filter out transactions with those card_ids
-      
+
       // But this requires two queries or client-side filtering
       // Better: use a view or RPC function
-      
+
       // For now, let's do it client-side after fetching, but adjust pagination
       // Actually, we can use a filter: exclude transactions where card_id is in (select id from cards where currency='USDT' and user_id=...)
       // But PostgREST doesn't support subqueries in filters easily
-      
+
       // Let's use a simpler approach: fetch cards with USDT currency first, then exclude those card_ids
       // But this requires two queries
-      
+
       // Best solution for now: fetch all matching transactions, filter by USDT, then apply pagination
       // But this breaks pagination...
-      
+
       // Actually, we can use a workaround: don't apply pagination if exclude_usdt is true,
       // fetch all, filter, then apply pagination manually
       // But that's inefficient
-      
+
       // Let's use a better approach: use a database view or RPC function
       // For now, we'll mark this to filter after fetching
     }
-    
+
     // Search filter - search across multiple fields with partial matching
     if (search) {
       const searchTerm = search.trim()
       const isNumeric = !isNaN(parseFloat(searchTerm)) && isFinite(searchTerm)
-      
+
       // PostgREST .or() doesn't support cast operators (::text) in the syntax
       // So we need to use a different approach - filter by text fields first, then filter results
       // Or use a simpler approach with only supported fields
       const conditions = []
-      
+
       // Escape search term for PostgREST
       // For values with spaces, wrap in quotes
       const encodeValue = (val) => {
@@ -762,15 +762,15 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
         }
         return val
       }
-      
+
       const searchValue = encodeValue(searchTerm)
-      
+
       // Search in text fields (category, card, note) with ILIKE for partial matching
       // PostgREST format for .or(): field.ilike.*value* (where * is wildcard)
       conditions.push(`category.ilike.*${searchValue}*`)
       conditions.push(`card.ilike.*${searchValue}*`)
       conditions.push(`note.ilike.*${searchValue}*`)
-      
+
       // Search in amount - use exact match for numeric values
       // Note: We can't use cast in .or(), so we'll filter amount separately if needed
       if (isNumeric) {
@@ -779,7 +779,7 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
         conditions.push(`amount.eq.${numValue}`)
         conditions.push(`amount.eq.-${numValue}`)
       }
-      
+
       // Search in date (created_at) - try to match date patterns
       // Support formats: YYYY-MM-DD, DD.MM.YYYY, DD-MM-YYYY, DD/MM/YYYY
       // Note: We can't use cast in .or(), so we'll use a different approach for dates
@@ -789,7 +789,7 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
         /^\d{2}-\d{2}-\d{4}$/, // DD-MM-YYYY
         /^\d{2}\/\d{2}\/\d{4}$/, // DD/MM/YYYY
       ]
-      
+
       const isDateLike = datePatterns.some(pattern => pattern.test(searchTerm))
       if (isDateLike) {
         // Convert date format to ISO for comparison
@@ -818,7 +818,7 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
         q = q.gte('created_at', dateStart.toISOString())
         q = q.lte('created_at', dateEnd.toISOString())
       }
-      
+
       // Combine text field conditions with OR (only if we have conditions)
       if (conditions.length > 0) {
         // If we also have date search, we need to combine with AND
@@ -833,22 +833,22 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
           q = q.or(conditions.join(','))
         }
       }
-      
+
       // For non-numeric search terms that might match amounts or dates as text,
       // we'll need to do client-side filtering after fetching
       // This is a limitation of PostgREST's .or() syntax
     }
-    
+
     // Ordering
     const orderBy = req.query.order_by || 'created_at'
     const orderAsc = req.query.order_asc === 'true'
     q = q.order(orderBy, { ascending: orderAsc })
-    
+
     // If excludeUsdt is true, we need to fetch more transactions to compensate for filtered USDT ones
     // We'll fetch a larger batch, filter, then apply pagination
     let fetchLimit = null
     let applyPaginationAfterFilter = false
-    
+
     if (excludeUsdt && !start_date && !end_date) {
       // Calculate how many to fetch: if we need 10, fetch more (e.g., 50) to account for USDT filtering
       if (rangeFrom !== undefined && rangeTo !== undefined) {
@@ -861,7 +861,7 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
         applyPaginationAfterFilter = true
       }
     }
-    
+
     // Pagination (if range provided) - only apply if NOT using date filters and NOT excluding USDT
     // When using start_date/end_date, we want all transactions in that range
     if (start_date || end_date) {
@@ -882,21 +882,21 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
         }
       } else {
         // Normal pagination
-      if (rangeFrom !== undefined && rangeTo !== undefined) {
-        q = q.range(Number(rangeFrom), Number(rangeTo))
-      } else if (limit) {
-        q = q.limit(Number(limit))
+        if (rangeFrom !== undefined && rangeTo !== undefined) {
+          q = q.range(Number(rangeFrom), Number(rangeTo))
+        } else if (limit) {
+          q = q.limit(Number(limit))
         }
       }
     }
-    
+
     let { data, error } = await q
     if (error) {
       console.error('[GET /api/transactions] Query error:', error)
       console.error('[GET /api/transactions] Query params:', { start_date, end_date, fields, card_id, limit, rangeFrom, rangeTo, excludeUsdt })
       throw error
     }
-    
+
     // Filter out USDT transactions if excludeUsdt is true
     if (excludeUsdt && data && data.length > 0) {
       // Get all cards with USDT currency for this user
@@ -905,10 +905,10 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
         .select('id')
         .eq('user_id', req.user_id)
         .eq('currency', 'USDT')
-      
+
       if (!cardsError && usdtCards) {
         const usdtCardIds = new Set(usdtCards.map(c => c.id))
-        
+
         // Filter out transactions with USDT card_id
         data = data.filter(tx => {
           // If transaction has card_id, check if it's in USDT cards
@@ -919,7 +919,7 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
           // We'll keep it for now (assuming cash is not USDT)
           return true
         })
-        
+
         // Apply pagination after filtering if needed
         if (applyPaginationAfterFilter) {
           if (rangeFrom !== undefined && rangeTo !== undefined) {
@@ -932,7 +932,7 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
         }
       }
     }
-    
+
     res.json(data || [])
   } catch (error) {
     console.error('GET /api/transactions error:', error)
@@ -944,14 +944,14 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
 app.get('/api/transactions/:id', getUserFromToken, async (req, res) => {
   try {
     const { id } = req.params
-    
+
     const { data, error } = await supabase
       .from('transactions')
       .select('id, amount, amount_stat, exclude_from_stats, category, note, card_id, card, created_at, refund_for, is_debt, debt_party, debt_direction, count_as_income, is_transfer, merchant_name, merchant_address, merchant_lat, merchant_lng')
       .eq('id', id)
       .eq('user_id', req.user_id)
       .single()
-    
+
     if (error) throw error
     if (!data) return res.status(404).json({ error: 'Transaction not found' })
     res.json(data)
@@ -986,7 +986,7 @@ app.post('/api/transactions', getUserFromToken, async (req, res) => {
     if (payload.amount_stat === undefined || payload.amount_stat === null || payload.amount_stat === '') {
       payload.amount_stat = payload.amount
     }
-    
+
     // Автоматичне геокодування мерчанта, якщо він переданий
     if (payload.merchant_name && !payload.merchant_lat) {
       try {
@@ -1012,7 +1012,7 @@ app.post('/api/transactions', getUserFromToken, async (req, res) => {
             payload.merchant_address = geocodeResult.address
             payload.merchant_lat = geocodeResult.lat
             payload.merchant_lng = geocodeResult.lng
-            
+
             // Зберегти в кеш
             await supabase.from('merchant_locations').upsert({
               user_id: req.user_id,
@@ -1033,7 +1033,7 @@ app.post('/api/transactions', getUserFromToken, async (req, res) => {
             payload.merchant_address = geocodeResult.address
             payload.merchant_lat = geocodeResult.lat
             payload.merchant_lng = geocodeResult.lng
-            
+
             // Зберегти в кеш
             await supabase.from('merchant_locations').upsert({
               user_id: req.user_id,
@@ -1053,13 +1053,13 @@ app.post('/api/transactions', getUserFromToken, async (req, res) => {
         console.warn('Geocoding failed for transaction:', geoError.message)
       }
     }
-    
+
     const { data, error } = await supabase
       .from('transactions')
       .insert([payload])
       .select()
       .single()
-    
+
     if (error) throw error
     res.json(data)
   } catch (error) {
@@ -1133,7 +1133,7 @@ app.put('/api/transactions/:id', getUserFromToken, async (req, res) => {
     } else if (patch.exclude_from_stats === null) {
       patch.exclude_from_stats = false
     }
-    
+
     // Автоматичне геокодування мерчанта, якщо він переданий і ще не має координат
     if (patch.merchant_name && !patch.merchant_lat) {
       try {
@@ -1158,7 +1158,7 @@ app.put('/api/transactions/:id', getUserFromToken, async (req, res) => {
             patch.merchant_address = geocodeResult.address
             patch.merchant_lat = geocodeResult.lat
             patch.merchant_lng = geocodeResult.lng
-            
+
             // Зберегти в кеш
             await supabase.from('merchant_locations').upsert({
               user_id: req.user_id,
@@ -1179,7 +1179,7 @@ app.put('/api/transactions/:id', getUserFromToken, async (req, res) => {
             patch.merchant_address = geocodeResult.address
             patch.merchant_lat = geocodeResult.lat
             patch.merchant_lng = geocodeResult.lng
-            
+
             // Зберегти в кеш
             await supabase.from('merchant_locations').upsert({
               user_id: req.user_id,
@@ -1199,13 +1199,13 @@ app.put('/api/transactions/:id', getUserFromToken, async (req, res) => {
         console.warn('Geocoding failed for transaction update:', geoError.message)
       }
     }
-    
+
     const { error } = await supabase
       .from('transactions')
       .update(patch)
       .eq('id', id)
       .eq('user_id', req.user_id)
-    
+
     if (error) throw error
 
     // If this transaction is (or was) a refund child, recompute parent's amount_stat so it doesn't "reset" on edits.
@@ -1260,13 +1260,13 @@ app.put('/api/transactions/:id', getUserFromToken, async (req, res) => {
 app.delete('/api/transactions/:id', getUserFromToken, async (req, res) => {
   try {
     const { id } = req.params
-    
+
     const { error } = await supabase
       .from('transactions')
       .delete()
       .eq('id', id)
       .eq('user_id', req.user_id)
-    
+
     if (error) throw error
     res.json({ success: true })
   } catch (error) {
@@ -1278,13 +1278,13 @@ app.delete('/api/transactions/:id', getUserFromToken, async (req, res) => {
 app.patch('/api/transactions/:id/archive', getUserFromToken, async (req, res) => {
   try {
     const { id } = req.params
-    
+
     const { error } = await supabase
       .from('transactions')
       .update({ archives: true })
       .eq('id', id)
       .eq('user_id', req.user_id)
-    
+
     if (error) throw error
     res.json({ success: true })
   } catch (error) {
@@ -1296,13 +1296,13 @@ app.patch('/api/transactions/:id/archive', getUserFromToken, async (req, res) =>
 app.patch('/api/transactions/:id/unarchive', getUserFromToken, async (req, res) => {
   try {
     const { id } = req.params
-    
+
     const { error } = await supabase
       .from('transactions')
       .update({ archives: false })
       .eq('id', id)
       .eq('user_id', req.user_id)
-    
+
     if (error) throw error
     res.json({ success: true })
   } catch (error) {
@@ -1315,11 +1315,11 @@ app.patch('/api/transactions/:id/unarchive', getUserFromToken, async (req, res) 
 app.post('/api/transactions/bulk-delete', getUserFromToken, async (req, res) => {
   try {
     const { ids } = req.body
-    
+
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ error: 'ids array is required' })
     }
-    
+
     // Delete all transactions with matching IDs and user_id
     const { data, error } = await supabase
       .from('transactions')
@@ -1327,11 +1327,11 @@ app.post('/api/transactions/bulk-delete', getUserFromToken, async (req, res) => 
       .in('id', ids)
       .eq('user_id', req.user_id)
       .select('id, amount, card_id')
-    
+
     if (error) throw error
-    
-    res.json({ 
-      success: true, 
+
+    res.json({
+      success: true,
       deleted: data?.length || 0,
       transactions: data || []
     })
@@ -1345,7 +1345,7 @@ app.post('/api/transactions/bulk-delete', getUserFromToken, async (req, res) => 
 app.post('/api/transfers', getUserFromToken, async (req, res) => {
   try {
     const { fromCardId, toCardId, amount, amountTo, note } = req.body
-    
+
     // Get cards info
     const ids = [...new Set([fromCardId, toCardId].filter(Boolean))]
     let cards = []
@@ -1355,28 +1355,28 @@ app.post('/api/transfers', getUserFromToken, async (req, res) => {
         .select('id, bank, name, currency')
         .eq('user_id', req.user_id)
         .in('id', ids)
-      
+
       if (error) throw error
       cards = data || []
     }
-    
+
     const findCard = (id) => cards.find(c => c.id === id)
     const fromCard = findCard(fromCardId)
     const toCard = findCard(toCardId)
-    
-    const isSavings = (c) => ((c?.bank||'').toLowerCase().includes('збер') || (c?.bank||'').toLowerCase().includes('savings'))
+
+    const isSavings = (c) => ((c?.bank || '').toLowerCase().includes('збер') || (c?.bank || '').toLowerCase().includes('savings'))
     const fromBucket = fromCard ? (isSavings(fromCard) ? 'savings' : (fromCard.bank && fromCard.bank.toLowerCase().includes('гот') ? 'cash' : 'cards')) : 'cash'
-    const toBucket   = toCard   ? (isSavings(toCard)   ? 'savings' : (toCard.bank   && toCard.bank.toLowerCase().includes('гот') ? 'cash' : 'cards')) : 'cash'
-    
+    const toBucket = toCard ? (isSavings(toCard) ? 'savings' : (toCard.bank && toCard.bank.toLowerCase().includes('гот') ? 'cash' : 'cards')) : 'cash'
+
     const countAsIncome = (fromBucket === 'savings' && toBucket !== 'savings')
-    
+
     // Generate transfer ID
     const transferId = crypto.randomUUID()
-    
+
     const now = new Date().toISOString()
     const fromAmountAbs = Math.abs(Number(amount || 0))
     const toAmountAbs = Math.abs(Number((amountTo ?? amount) || 0))
-    
+
     const src = {
       amount: -fromAmountAbs,
       card_id: fromCardId || null,
@@ -1390,7 +1390,7 @@ app.post('/api/transfers', getUserFromToken, async (req, res) => {
       note: note || null,
       user_id: req.user_id
     }
-    
+
     const tgt = {
       amount: toAmountAbs,
       card_id: toCardId || null,
@@ -1405,12 +1405,12 @@ app.post('/api/transfers', getUserFromToken, async (req, res) => {
       note: note || null,
       user_id: req.user_id
     }
-    
+
     const { data, error } = await supabase
       .from('transactions')
       .insert([src, tgt])
       .select()
-    
+
     if (error) throw error
     res.json(data || [])
   } catch (error) {
@@ -1422,38 +1422,38 @@ app.post('/api/transfers', getUserFromToken, async (req, res) => {
 app.post('/api/transfers/mark-existing', getUserFromToken, async (req, res) => {
   try {
     const { fromTxId, toTxId, note } = req.body
-    
+
     if (!fromTxId || !toTxId) {
       return res.status(400).json({ error: 'Необхідно вибрати дві транзакції' })
     }
-    
+
     const transferId = crypto.randomUUID()
-    
+
     // Load both transactions
     const { data: txs, error: loadErr } = await supabase
       .from('transactions')
       .select('id, amount, card_id, card, created_at')
       .eq('user_id', req.user_id)
       .in('id', [fromTxId, toTxId])
-    
+
     if (loadErr) throw loadErr
     if (!txs || txs.length !== 2) {
       return res.status(404).json({ error: 'Не знайдено обидві транзакції' })
     }
-    
+
     const t1 = txs.find(t => t.id === fromTxId)
     const t2 = txs.find(t => t.id === toTxId)
     if (!t1 || !t2) {
       return res.status(404).json({ error: 'Не знайдено обидві транзакції' })
     }
-    
+
     const a1 = Number(t1.amount || 0)
     const a2 = Number(t2.amount || 0)
-    
+
     // Determine roles by sign
     const src = a1 <= 0 ? t1 : t2
     const tgt = a1 <= 0 ? t2 : t1
-    
+
     const srcUpdate = {
       is_transfer: true,
       transfer_role: 'from',
@@ -1461,7 +1461,7 @@ app.post('/api/transfers/mark-existing', getUserFromToken, async (req, res) => {
       category: 'ТРАНСФЕР',
       ...(note ? { note } : {}),
     }
-    
+
     const tgtUpdate = {
       is_transfer: true,
       transfer_role: 'to',
@@ -1469,7 +1469,7 @@ app.post('/api/transfers/mark-existing', getUserFromToken, async (req, res) => {
       category: 'ТРАНСФЕР',
       ...(note ? { note } : {}),
     }
-    
+
     const { data: updatedSrc, error: errSrc } = await supabase
       .from('transactions')
       .update(srcUpdate)
@@ -1478,7 +1478,7 @@ app.post('/api/transfers/mark-existing', getUserFromToken, async (req, res) => {
       .select()
       .single()
     if (errSrc) throw errSrc
-    
+
     const { data: updatedTgt, error: errTgt } = await supabase
       .from('transactions')
       .update(tgtUpdate)
@@ -1487,7 +1487,7 @@ app.post('/api/transfers/mark-existing', getUserFromToken, async (req, res) => {
       .select()
       .single()
     if (errTgt) throw errTgt
-    
+
     res.json([updatedSrc, updatedTgt])
   } catch (error) {
     console.error('POST /api/transfers/mark-existing error:', error)
@@ -1495,23 +1495,36 @@ app.post('/api/transfers/mark-existing', getUserFromToken, async (req, res) => {
   }
 })
 
+// Utility to mask API keys
+function maskKey(key) {
+  if (!key || key.length <= 8) return '********'
+  return key.substring(0, 4) + '****' + key.substring(key.length - 4)
+}
+
+function isMasked(key) {
+  return typeof key === 'string' && key.includes('****')
+}
+
 // User Preferences API
 app.get('/api/preferences', getUserFromToken, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('user_preferences')
-      .select('preferences, apis')
+      .select('id, preferences, created_at, updated_at')
       .eq('user_id', req.user_id)
       .single()
-    
+
     if (error && error.code !== 'PGRST116') throw error // PGRST116 = no rows
-    
+
     const result = data?.preferences || {}
-    // Merge apis field into preferences if it exists as separate field
-    if (data?.apis) {
-      result.apis = data.apis
+    // Do NOT include API keys here anymore
+
+    // Add metadata
+    if (data) {
+      result._updated_at = data.updated_at
+      result._created_at = data.created_at
     }
-    
+
     res.json(result)
   } catch (error) {
     console.error('GET /api/preferences error:', error)
@@ -1523,37 +1536,44 @@ app.get('/api/preferences', getUserFromToken, async (req, res) => {
 app.post('/api/preferences', getUserFromToken, async (req, res) => {
   try {
     const { preferences } = req.body
-    
+
     // Don't save APIs in preferences - they go to separate column
     const prefsWithoutAPIs = { ...preferences }
     if (prefsWithoutAPIs.APIs) {
       delete prefsWithoutAPIs.APIs
     }
-    
+
     // Check if exists
     const { data: existing } = await supabase
       .from('user_preferences')
       .select('id')
       .eq('user_id', req.user_id)
       .single()
-    
+
     if (existing) {
       // Update
       const { error } = await supabase
         .from('user_preferences')
-        .update({ preferences: prefsWithoutAPIs })
+        .update({
+          preferences: prefsWithoutAPIs,
+          updated_at: new Date().toISOString()
+        })
         .eq('user_id', req.user_id)
-      
+
       if (error) throw error
     } else {
       // Insert
       const { error } = await supabase
         .from('user_preferences')
-        .insert([{ user_id: req.user_id, preferences: prefsWithoutAPIs }])
-      
+        .insert([{
+          user_id: req.user_id,
+          preferences: prefsWithoutAPIs,
+          updated_at: new Date().toISOString()
+        }])
+
       if (error) throw error
     }
-    
+
     res.json({ success: true })
   } catch (error) {
     console.error('POST /api/preferences error:', error)
@@ -1565,31 +1585,31 @@ app.post('/api/preferences', getUserFromToken, async (req, res) => {
 app.patch('/api/preferences', getUserFromToken, async (req, res) => {
   try {
     const { updates } = req.body
-    
+
     if (!updates || typeof updates !== 'object') {
       return res.status(400).json({ error: 'Invalid updates object' })
     }
-    
+
     // Отримуємо поточні налаштування з БД
     const { data: existing, error: fetchError } = await supabase
       .from('user_preferences')
       .select('preferences')
       .eq('user_id', req.user_id)
       .single()
-    
+
     if (fetchError && fetchError.code !== 'PGRST116') {
       throw fetchError
     }
-    
+
     // Поточні налаштування (або порожній об'єкт)
     const currentPreferences = existing?.preferences || {}
-    
+
     // Об'єднуємо: поточні + оновлення (оновлення мають пріоритет)
     const mergedPreferences = {
       ...currentPreferences,
       ...updates
     }
-    
+
     // Для вкладених об'єктів робимо глибоке злиття
     for (const key in updates) {
       if (updates[key] && typeof updates[key] === 'object' && !Array.isArray(updates[key])) {
@@ -1599,25 +1619,26 @@ app.patch('/api/preferences', getUserFromToken, async (req, res) => {
         }
       }
     }
-    
+
     // Don't save APIs in preferences - they go to separate column
     const prefsWithoutAPIs = { ...mergedPreferences }
     if (prefsWithoutAPIs.APIs) {
       delete prefsWithoutAPIs.APIs
     }
-    
+
     // Upsert (insert or update)
     const { error } = await supabase
       .from('user_preferences')
       .upsert({
         user_id: req.user_id,
-        preferences: prefsWithoutAPIs
+        preferences: prefsWithoutAPIs,
+        updated_at: new Date().toISOString()
       }, {
         onConflict: 'user_id'
       })
-    
+
     if (error) throw error
-    
+
     res.json({ success: true })
   } catch (error) {
     console.error('PATCH /api/preferences error:', error)
@@ -1630,13 +1651,46 @@ app.get('/api/preferences/apis', getUserFromToken, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('user_preferences')
-      .select('apis')
+      .select('preferences, binance_api, monobank_api, revolut_api')
       .eq('user_id', req.user_id)
       .single()
-    
+
     if (error && error.code !== 'PGRST116') throw error // PGRST116 = no rows
-    
-    res.json(data?.apis || {})
+
+    // Construct unified APIs object with MASKED keys
+    const apis = { ...(data?.preferences || {}) }
+
+    // Filter out API keys from preferences if they exist in plain text there (should be moved to columns)
+    // But we keep them masked
+
+    // Mask Binance
+    if (data?.binance_api) {
+      apis.binance = {
+        ...data.binance_api,
+        api_key: maskKey(data.binance_api.api_key),
+        api_secret: maskKey(data.binance_api.api_secret)
+      }
+    }
+
+    // Mask Monobank
+    if (data?.monobank_api) {
+      apis.monobank = {
+        ...data.monobank_api,
+        token: maskKey(data.monobank_api.token)
+      }
+    }
+
+    // Mask Revolut (TrueLayer) - Access token is usually huge, maybe just mask part
+    if (data?.revolut_api) {
+      apis.truelayer = {
+        ...data.revolut_api,
+        access_token: maskKey(data.revolut_api.access_token),
+        refresh_token: maskKey(data.revolut_api.refresh_token),
+        client_secret: maskKey(data.revolut_api.client_secret)
+      }
+    }
+
+    res.json(apis)
   } catch (error) {
     console.error('GET /api/preferences/apis error:', error)
     res.status(500).json({ error: error.message })
@@ -1646,31 +1700,89 @@ app.get('/api/preferences/apis', getUserFromToken, async (req, res) => {
 app.post('/api/preferences/apis', getUserFromToken, async (req, res) => {
   try {
     const { apis } = req.body
-    
-    // Check if exists
+
+    // Extract known provider configs
+    const binanceInput = apis.binance || null
+    const monobankInput = apis.monobank || null
+    const revolutInput = apis.truelayer || null
+
+    // Fetch existing data to compare (we need full keys to merge if only partial update, or to check masks)
     const { data: existing } = await supabase
       .from('user_preferences')
-      .select('id')
+      .select('id, preferences, binance_api, monobank_api, revolut_api')
       .eq('user_id', req.user_id)
       .single()
-    
+
+    const currentBinance = existing?.binance_api || {}
+    const currentMonobank = existing?.monobank_api || {}
+    const currentRevolut = existing?.revolut_api || {}
+
+    // Prepare updates
+    let binance_api = undefined
+    if (binanceInput) {
+      binance_api = { ...currentBinance, ...binanceInput }
+      // If input key is masked, restore original key
+      if (isMasked(binanceInput.api_key)) binance_api.api_key = currentBinance.api_key
+      if (isMasked(binanceInput.api_secret)) binance_api.api_secret = currentBinance.api_secret
+    }
+
+    let monobank_api = undefined
+    if (monobankInput) {
+      monobank_api = { ...currentMonobank, ...monobankInput }
+      if (isMasked(monobankInput.token)) monobank_api.token = currentMonobank.token
+    }
+
+    let revolut_api = undefined
+    if (revolutInput) {
+      revolut_api = { ...currentRevolut, ...revolutInput }
+      if (isMasked(revolutInput.access_token)) revolut_api.access_token = currentRevolut.access_token
+      if (isMasked(revolutInput.refresh_token)) revolut_api.refresh_token = currentRevolut.refresh_token
+      if (isMasked(revolutInput.client_secret)) revolut_api.client_secret = currentRevolut.client_secret
+    }
+
+    // Remaining keys go to preferences (e.g. api_key)
+    const genericPrefs = { ...apis }
+    delete genericPrefs.binance
+    delete genericPrefs.monobank
+    delete genericPrefs.truelayer
+
     if (existing) {
-      // Update apis column
+      const currentPrefs = existing.preferences || {}
+      const newPrefs = { ...currentPrefs, ...genericPrefs }
+
+      // Build update object dynamically to only update fields that are defined
+      const updateData = {
+        preferences: newPrefs,
+        updated_at: new Date().toISOString()
+      }
+      if (binance_api !== undefined) updateData.binance_api = binance_api
+      if (monobank_api !== undefined) updateData.monobank_api = monobank_api
+      if (revolut_api !== undefined) updateData.revolut_api = revolut_api
+
+      // Update
       const { error } = await supabase
         .from('user_preferences')
-        .update({ apis })
+        .update(updateData)
         .eq('user_id', req.user_id)
-      
+
       if (error) throw error
     } else {
-      // Insert with apis
+      // Insert
+      // For insert, undefined means null in DB usually, but we should be explicit
       const { error } = await supabase
         .from('user_preferences')
-        .insert([{ user_id: req.user_id, preferences: {}, apis }])
-      
+        .insert([{
+          user_id: req.user_id,
+          preferences: genericPrefs,
+          binance_api: binance_api || null,
+          monobank_api: monobank_api || null,
+          revolut_api: revolut_api || null,
+          updated_at: new Date().toISOString()
+        }])
+
       if (error) throw error
     }
-    
+
     res.json({ success: true })
   } catch (error) {
     console.error('POST /api/preferences/apis error:', error)
@@ -1690,7 +1802,7 @@ app.get('/api/subscriptions', getUserFromToken, async (req, res) => {
       .select('*')
       .eq('user_id', req.user_id)
       .order('created_at', { ascending: false })
-    
+
     if (error) throw error
     res.json(data || [])
   } catch (error) {
@@ -1703,14 +1815,14 @@ app.get('/api/subscriptions', getUserFromToken, async (req, res) => {
 app.post('/api/subscriptions', getUserFromToken, async (req, res) => {
   try {
     const { name, amount, card_id, frequency, day_of_week, day_of_month, is_expense, category, note } = req.body
-    
+
     if (!name || !amount || !frequency) {
       return res.status(400).json({ error: 'Missing required fields: name, amount, frequency' })
     }
-    
+
     // Calculate next_execution_at
     const nextExecution = calculateNextExecution(frequency, day_of_week, day_of_month, null)
-    
+
     const insertData = {
       user_id: req.user_id,
       name,
@@ -1722,17 +1834,17 @@ app.post('/api/subscriptions', getUserFromToken, async (req, res) => {
       is_expense: is_expense !== false,
       next_execution_at: nextExecution
     }
-    
+
     // Add category and note if they exist (columns might not exist in DB yet)
     if (category !== undefined) insertData.category = category || null
     if (note !== undefined) insertData.note = note || null
-    
+
     const { data, error } = await supabase
       .from('subscriptions')
       .insert([insertData])
       .select()
       .single()
-    
+
     if (error) {
       // If error is about missing columns, try inserting without them
       if (error.code === 'PGRST204' && (error.message.includes('category') || error.message.includes('note'))) {
@@ -1743,13 +1855,13 @@ app.post('/api/subscriptions', getUserFromToken, async (req, res) => {
           .insert([insertDataWithoutNewFields])
           .select()
           .single()
-        
+
         if (retryError) throw retryError
         return res.json(retryData)
       }
       throw error
     }
-    
+
     res.json(data)
   } catch (error) {
     console.error('POST /api/subscriptions error:', error)
@@ -1762,7 +1874,7 @@ app.put('/api/subscriptions/:id', getUserFromToken, async (req, res) => {
   try {
     const { id } = req.params
     const updates = req.body
-    
+
     // Verify ownership
     const { data: existing } = await supabase
       .from('subscriptions')
@@ -1770,24 +1882,24 @@ app.put('/api/subscriptions/:id', getUserFromToken, async (req, res) => {
       .eq('id', id)
       .eq('user_id', req.user_id)
       .single()
-    
+
     if (!existing) {
       return res.status(404).json({ error: 'Subscription not found' })
     }
-    
+
     // If frequency or day changed, recalculate next_execution_at
     if (updates.frequency || updates.day_of_week || updates.day_of_month) {
       const frequency = updates.frequency || existing.frequency
       const day_of_week = updates.day_of_week !== undefined ? updates.day_of_week : existing.day_of_week
       const day_of_month = updates.day_of_month !== undefined ? updates.day_of_month : existing.day_of_month
-      
+
       // Get last_executed_at if exists
       const { data: subData } = await supabase
         .from('subscriptions')
         .select('last_executed_at')
         .eq('id', id)
         .single()
-      
+
       updates.next_execution_at = calculateNextExecution(
         frequency,
         day_of_week,
@@ -1795,28 +1907,28 @@ app.put('/api/subscriptions/:id', getUserFromToken, async (req, res) => {
         subData?.last_executed_at || null
       )
     }
-    
+
     // Ensure amount is positive
     if (updates.amount !== undefined) {
       updates.amount = Math.abs(Number(updates.amount))
     }
-    
+
     // Filter out fields that might not exist in the database yet
     // If category/note/participants columns don't exist, they will be ignored
     const safeUpdates = { ...updates }
-    
+
     // Ensure participants is an array if provided
     if (safeUpdates.participants !== undefined) {
       if (!Array.isArray(safeUpdates.participants)) {
         safeUpdates.participants = []
       }
     }
-    
+
     // Ensure total_participants is a positive integer
     if (safeUpdates.total_participants !== undefined) {
       safeUpdates.total_participants = Math.max(1, parseInt(safeUpdates.total_participants) || 1)
     }
-    
+
     // Try to update, but handle case where columns might not exist
     const { data, error } = await supabase
       .from('subscriptions')
@@ -1825,12 +1937,12 @@ app.put('/api/subscriptions/:id', getUserFromToken, async (req, res) => {
       .eq('user_id', req.user_id)
       .select()
       .single()
-    
+
     if (error) {
       // If error is about missing columns, try updating without them
       if (error.code === 'PGRST204' && (
-        error.message.includes('category') || 
-        error.message.includes('note') || 
+        error.message.includes('category') ||
+        error.message.includes('note') ||
         error.message.includes('participants') ||
         error.message.includes('total_participants')
       )) {
@@ -1843,13 +1955,13 @@ app.put('/api/subscriptions/:id', getUserFromToken, async (req, res) => {
           .eq('user_id', req.user_id)
           .select()
           .single()
-        
+
         if (retryError) throw retryError
         return res.json(retryData)
       }
       throw error
     }
-    
+
     res.json(data)
   } catch (error) {
     console.error('PUT /api/subscriptions/:id error:', error)
@@ -1861,13 +1973,13 @@ app.put('/api/subscriptions/:id', getUserFromToken, async (req, res) => {
 app.delete('/api/subscriptions/:id', getUserFromToken, async (req, res) => {
   try {
     const { id } = req.params
-    
+
     const { error } = await supabase
       .from('subscriptions')
       .delete()
       .eq('id', id)
       .eq('user_id', req.user_id)
-    
+
     if (error) throw error
     res.json({ success: true })
   } catch (error) {
@@ -1880,7 +1992,7 @@ app.delete('/api/subscriptions/:id', getUserFromToken, async (req, res) => {
 function calculateNextExecution(frequency, day_of_week, day_of_month, last_executed_at) {
   const now = new Date()
   let nextDate = new Date()
-  
+
   if (frequency === 'weekly') {
     // Find next occurrence of day_of_week
     if (last_executed_at) {
@@ -1889,23 +2001,23 @@ function calculateNextExecution(frequency, day_of_week, day_of_month, last_execu
     } else {
       nextDate = new Date(now)
     }
-    
+
     // Adjust to the correct day of week
     // day_of_week: 1=Monday, 7=Sunday
     // JavaScript getDay(): 0=Sunday, 1=Monday, ..., 6=Saturday
     const targetDay = day_of_week === 7 ? 0 : day_of_week
     const currentDay = nextDate.getDay()
     let daysToAdd = targetDay - currentDay
-    
+
     if (daysToAdd <= 0) {
       daysToAdd += 7
     }
-    
+
     nextDate.setDate(nextDate.getDate() + daysToAdd)
-    
+
     // Set time to start of day
     nextDate.setHours(0, 0, 0, 0)
-    
+
   } else if (frequency === 'monthly') {
     // Find next occurrence of day_of_month
     if (last_executed_at) {
@@ -1918,7 +2030,7 @@ function calculateNextExecution(frequency, day_of_week, day_of_month, last_execu
         nextDate.setMonth(nextDate.getMonth() + 1)
       }
     }
-    
+
     // Handle day_of_month > days in month
     const daysInMonth = new Date(nextDate.getFullYear(), nextDate.getMonth() + 1, 0).getDate()
     if (day_of_month > daysInMonth) {
@@ -1926,11 +2038,11 @@ function calculateNextExecution(frequency, day_of_week, day_of_month, last_execu
     } else {
       nextDate.setDate(day_of_month)
     }
-    
+
     // Set time to start of day
     nextDate.setHours(0, 0, 0, 0)
   }
-  
+
   return nextDate.toISOString()
 }
 
@@ -1939,7 +2051,7 @@ async function processAllUsersSubscriptions() {
   try {
     const now = new Date()
     const nowISO = now.toISOString()
-    
+
     // Знаходимо всі активні підписки, які потребують виконання
     // Використовуємо service role key, щоб обійти RLS і отримати всіх користувачів
     const { data: dueSubscriptions, error: fetchError } = await supabase
@@ -1947,20 +2059,20 @@ async function processAllUsersSubscriptions() {
       .select('*')
       .eq('is_active', true)
       .lte('next_execution_at', nowISO)
-    
+
     if (fetchError) {
       console.error('[Auto Subscriptions] Error fetching subscriptions:', fetchError)
       return
     }
-    
+
     if (!dueSubscriptions || dueSubscriptions.length === 0) {
       return // Немає підписок для обробки
     }
-    
-    
+
+
     let processed = 0
     const errors = []
-    
+
     // Обробляємо підписки для кожного користувача
     for (const sub of dueSubscriptions) {
       try {
@@ -1978,20 +2090,50 @@ async function processAllUsersSubscriptions() {
             cardDisplayName = bankName && cardName ? `${bankName} ${cardName}` : (cardName || bankName || null)
           }
         }
-        
+
+        // Idempotency Check: Prevent duplicate transaction if already created for this scheduled time
+        const { data: existingTx } = await supabase
+          .from('transactions')
+          .select('id')
+          .eq('subscription_id', sub.id)
+          .eq('created_at', sub.next_execution_at)
+          .maybeSingle()
+
+        if (existingTx) {
+          console.log(`[Auto Subscriptions] Duplicate prevented for sub ${sub.id} at ${sub.next_execution_at}`)
+
+          // Ensure subscription is updated to next date (Self-healing)
+          const nextExecution = calculateNextExecution(
+            sub.frequency,
+            sub.day_of_week,
+            sub.day_of_month,
+            sub.next_execution_at
+          )
+
+          await supabase
+            .from('subscriptions')
+            .update({
+              last_executed_at: sub.next_execution_at,
+              next_execution_at: nextExecution
+            })
+            .eq('id', sub.id)
+
+          continue // Skip creating a new transaction
+        }
+
         // Create transaction
         const amount = sub.is_expense ? -Math.abs(sub.amount) : Math.abs(sub.amount)
-        
+
         // Формуємо опис транзакції
         let transactionNote = ''
         if (sub.note && sub.note.trim()) {
           transactionNote = `${sub.note} | `
         }
         transactionNote += `${sub.name} (автоматично створено через підписки)`
-        
+
         // Використовуємо category з підписки, або 'Підписки' за замовчуванням
         const transactionCategory = sub.category || 'Підписки'
-        
+
         const { data: transaction, error: txError } = await supabase
           .from('transactions')
           .insert([{
@@ -2005,13 +2147,13 @@ async function processAllUsersSubscriptions() {
           }])
           .select()
           .single()
-        
+
         if (txError) {
           errors.push({ subscription: sub.id, user: sub.user_id, error: txError.message })
           console.error(`[Auto Subscriptions] Error creating transaction for subscription ${sub.id}:`, txError)
           continue
         }
-        
+
         // Calculate next execution
         const nextExecution = calculateNextExecution(
           sub.frequency,
@@ -2019,7 +2161,7 @@ async function processAllUsersSubscriptions() {
           sub.day_of_month,
           sub.next_execution_at
         )
-        
+
         // Update subscription
         const { error: updateError } = await supabase
           .from('subscriptions')
@@ -2028,20 +2170,20 @@ async function processAllUsersSubscriptions() {
             next_execution_at: nextExecution
           })
           .eq('id', sub.id)
-        
+
         if (updateError) {
           errors.push({ subscription: sub.id, user: sub.user_id, error: updateError.message })
           console.error(`[Auto Subscriptions] Error updating subscription ${sub.id}:`, updateError)
           continue
         }
-        
+
         processed++
       } catch (err) {
         errors.push({ subscription: sub.id, user: sub.user_id, error: err.message })
         console.error(`[Auto Subscriptions] Error processing subscription ${sub.id}:`, err)
       }
     }
-    
+
     if (processed > 0) {
     }
     if (errors.length > 0) {
@@ -2061,7 +2203,7 @@ function getNextMidnight() {
   const midnight = new Date()
   midnight.setHours(0, 0, 0, 0)
   midnight.setDate(midnight.getDate() + 1) // Наступна північ
-  
+
   const msUntilMidnight = midnight.getTime() - now.getTime()
   return msUntilMidnight
 }
@@ -2071,16 +2213,16 @@ function scheduleNextCheck() {
   if (subscriptionsTimeout) {
     clearTimeout(subscriptionsTimeout)
   }
-  
+
   const msUntilMidnight = getNextMidnight()
-  
+
   subscriptionsTimeout = setTimeout(() => {
     processAllUsersSubscriptions()
-    
+
     // Плануємо наступну перевірку
     scheduleNextCheck()
   }, msUntilMidnight)
-  
+
   const nextCheckDate = new Date(Date.now() + msUntilMidnight)
 }
 
@@ -2089,19 +2231,19 @@ function startSubscriptionsTimer() {
   const now = new Date()
   const todayMidnight = new Date()
   todayMidnight.setHours(0, 0, 0, 0)
-  
+
   // Якщо зараз після півночі, перевіряємо одразу
   if (now >= todayMidnight) {
     const hoursSinceMidnight = now.getHours()
     const minutesSinceMidnight = now.getMinutes()
-    
+
     // Якщо минуло менше 1 хвилини після півночі, перевіряємо
     // Або якщо це перший запуск і вже пройшла північ
     if (hoursSinceMidnight === 0 && minutesSinceMidnight < 1) {
       processAllUsersSubscriptions()
     }
   }
-  
+
   // Плануємо наступну перевірку на північ
   scheduleNextCheck()
 }
@@ -2118,7 +2260,7 @@ app.post('/api/subscriptions/process', getUserFromToken, async (req, res) => {
   try {
     const now = new Date()
     const nowISO = now.toISOString()
-    
+
     // Find all active subscriptions that are due
     const { data: dueSubscriptions, error: fetchError } = await supabase
       .from('subscriptions')
@@ -2126,16 +2268,16 @@ app.post('/api/subscriptions/process', getUserFromToken, async (req, res) => {
       .eq('user_id', req.user_id)
       .eq('is_active', true)
       .lte('next_execution_at', nowISO)
-    
+
     if (fetchError) throw fetchError
-    
+
     if (!dueSubscriptions || dueSubscriptions.length === 0) {
       return res.json({ processed: 0, message: 'No subscriptions due' })
     }
-    
+
     let processed = 0
     const errors = []
-    
+
     for (const sub of dueSubscriptions) {
       try {
         // Get card name and bank name for display
@@ -2152,10 +2294,41 @@ app.post('/api/subscriptions/process', getUserFromToken, async (req, res) => {
             cardDisplayName = bankName && cardName ? `${bankName} ${cardName}` : (cardName || bankName || null)
           }
         }
-        
+
+        // Idempotency Check: Prevent duplicate transaction if already created for this scheduled time
+        const { data: existingTx } = await supabase
+          .from('transactions')
+          .select('id')
+          .eq('subscription_id', sub.id)
+          .eq('created_at', sub.next_execution_at)
+          .maybeSingle() // Use maybeSingle to not throw error if not found
+
+        if (existingTx) {
+          console.log(`[Subscription] Duplicate prevented for sub ${sub.id} at ${sub.next_execution_at}`)
+
+          // Ensure subscription is updated to next date even if we skip tx creation
+          // (Self-healing in case previous run crashed after tx creation but before sub update)
+          const nextExecution = calculateNextExecution(
+            sub.frequency,
+            sub.day_of_week,
+            sub.day_of_month,
+            sub.next_execution_at
+          )
+
+          await supabase
+            .from('subscriptions')
+            .update({
+              last_executed_at: sub.next_execution_at,
+              next_execution_at: nextExecution
+            })
+            .eq('id', sub.id)
+
+          continue // Skip creating a new transaction
+        }
+
         // Create transaction
         const amount = sub.is_expense ? -Math.abs(sub.amount) : Math.abs(sub.amount)
-        
+
         // Формуємо опис транзакції
         let transactionNote = ''
         if (sub.note && sub.note.trim()) {
@@ -2164,10 +2337,10 @@ app.post('/api/subscriptions/process', getUserFromToken, async (req, res) => {
         }
         // Завжди додаємо назву підписки та інформацію про автоматичне створення
         transactionNote += `${sub.name} (автоматично створено через підписки)`
-        
+
         // Використовуємо category з підписки, або 'Підписки' за замовчуванням
         const transactionCategory = sub.category || 'Підписки'
-        
+
         const { data: transaction, error: txError } = await supabase
           .from('transactions')
           .insert([{
@@ -2177,16 +2350,17 @@ app.post('/api/subscriptions/process', getUserFromToken, async (req, res) => {
             card: cardDisplayName,
             category: transactionCategory,
             note: transactionNote,
+            subscription_id: sub.id, // Link to subscription
             created_at: sub.next_execution_at // Use scheduled date
           }])
           .select()
           .single()
-        
+
         if (txError) {
           errors.push({ subscription: sub.id, error: txError.message })
           continue
         }
-        
+
         // Calculate next execution
         const nextExecution = calculateNextExecution(
           sub.frequency,
@@ -2194,7 +2368,7 @@ app.post('/api/subscriptions/process', getUserFromToken, async (req, res) => {
           sub.day_of_month,
           sub.next_execution_at
         )
-        
+
         // Update subscription
         const { error: updateError } = await supabase
           .from('subscriptions')
@@ -2203,18 +2377,18 @@ app.post('/api/subscriptions/process', getUserFromToken, async (req, res) => {
             next_execution_at: nextExecution
           })
           .eq('id', sub.id)
-        
+
         if (updateError) {
           errors.push({ subscription: sub.id, error: updateError.message })
           continue
         }
-        
+
         processed++
       } catch (err) {
         errors.push({ subscription: sub.id, error: err.message })
       }
     }
-    
+
     res.json({
       processed,
       total: dueSubscriptions.length,
@@ -2230,7 +2404,7 @@ app.post('/api/subscriptions/process', getUserFromToken, async (req, res) => {
 app.post('/api/subscriptions/:id/create-transaction', getUserFromToken, async (req, res) => {
   try {
     const subscriptionId = req.params.id
-    
+
     // Get subscription
     const { data: subscription, error: subError } = await supabase
       .from('subscriptions')
@@ -2238,11 +2412,11 @@ app.post('/api/subscriptions/:id/create-transaction', getUserFromToken, async (r
       .eq('id', subscriptionId)
       .eq('user_id', req.user_id)
       .single()
-    
+
     if (subError || !subscription) {
       return res.status(404).json({ error: 'Subscription not found' })
     }
-    
+
     // Get card name and bank name for display
     let cardDisplayName = null
     if (subscription.card_id) {
@@ -2257,20 +2431,20 @@ app.post('/api/subscriptions/:id/create-transaction', getUserFromToken, async (r
         cardDisplayName = bankName && cardName ? `${bankName} ${cardName}` : (cardName || bankName || null)
       }
     }
-    
+
     // Create transaction
     const amount = subscription.is_expense ? -Math.abs(subscription.amount) : Math.abs(subscription.amount)
-    
+
     // Формуємо опис транзакції
     let transactionNote = ''
     if (subscription.note && subscription.note.trim()) {
       transactionNote = `${subscription.note} | `
     }
     transactionNote += `${subscription.name} (створено вручну через підписки)`
-    
+
     // Використовуємо category з підписки, або 'Підписки' за замовчуванням
     const transactionCategory = subscription.category || 'Підписки'
-    
+
     const { data: transaction, error: txError } = await supabase
       .from('transactions')
       .insert([{
@@ -2279,16 +2453,17 @@ app.post('/api/subscriptions/:id/create-transaction', getUserFromToken, async (r
         card_id: subscription.card_id,
         card: cardDisplayName,
         category: transactionCategory,
-        note: transactionNote
+        note: transactionNote,
+        subscription_id: subscriptionId // Link to subscription
       }])
       .select()
       .single()
-    
+
     if (txError) {
       console.error('Error creating transaction from subscription:', txError)
       return res.status(500).json({ error: txError.message })
     }
-    
+
     res.json({ success: true, transaction })
   } catch (error) {
     console.error('POST /api/subscriptions/:id/create-transaction error:', error)
@@ -2343,22 +2518,22 @@ app.post('/api/parse-receipt', upload.single('image'), async (req, res) => {
 `.trim()
 
     const body = {
-  model: "gpt-5.1",
-  temperature: 0.0,
-  response_format: { type: "json_object" },
-  messages: [
-    {
-      role: "system",
-      content: prompt
-    },
-    {
-      role: "user",
-        content: [
-        { type: "image_url", image_url: { url: dataUrl } }
-        ]
-    }
-  ]
-};
+      model: "gpt-5.1",
+      temperature: 0.0,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content: prompt
+        },
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: dataUrl } }
+          ]
+        }
+      ]
+    };
 
     const r = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -2428,7 +2603,7 @@ async function geocodeWithPlaces(merchantName, city = null) {
     // Формуємо запит для Places API Text Search
     const query = city ? `${merchantName}, ${city}, Україна` : `${merchantName}, Україна`
     const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(query)}&key=${process.env.GOOGLE_MAPS_API_KEY}&language=uk&region=ua`
-    
+
     const response = await fetch(url)
     const data = await response.json()
 
@@ -2459,7 +2634,7 @@ async function geocodeWithGeocoding(merchantName, city = null) {
   try {
     const address = city ? `${merchantName}, ${city}, Україна` : `${merchantName}, Україна`
     const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${process.env.GOOGLE_MAPS_API_KEY}&language=uk&region=ua`
-    
+
     const response = await fetch(url)
     const data = await response.json()
 
@@ -2747,7 +2922,7 @@ async function postNewCheckMonoBank(amount, note, card, id, date, userId) {
   if (note && note.trim()) {
     // Беремо перший рядок
     const firstLine = note.split('\n')[0].trim()
-    
+
     // Якщо є символ "|", беремо частину до нього
     if (firstLine.includes('|')) {
       merchantName = firstLine.split('|')[0].trim()
@@ -2780,7 +2955,7 @@ async function postNewCheckMonoBank(amount, note, card, id, date, userId) {
   // Автоматичне геокодування мерчанта (асинхронно, не блокуємо створення транзакції)
   if (merchantName) {
     // Виконуємо геокодування в фоні, не чекаємо результату
-    ;(async () => {
+    ; (async () => {
       try {
         const normalizedName = normalizeMerchantName(merchantName)
         // Перевірка кешу
@@ -2865,52 +3040,47 @@ app.post('/api/generate-api-key', getUserFromToken, async function (req, res) {
   try {
     // Генеруємо випадковий API key (64 символи)
     const apiKey = crypto.randomBytes(32).toString('hex')
-    
+
     // Отримуємо поточні налаштування користувача
     const { data: prefs, error: prefsError } = await supabase
       .from('user_preferences')
-      .select('apis')
+      .select('preferences')
       .eq('user_id', req.user_id)
-      .single()
-    
-    if (prefsError && prefsError.code !== 'PGRST116') {
+      .maybeSingle()
+
+    if (prefsError) {
       console.error('[generate-api-key] Error fetching preferences:', prefsError)
-      return res.status(500).json({ 
-        success: false, 
-        error: 'Failed to fetch user preferences' 
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch user preferences'
       })
     }
-    
-    // Оновлюємо API key в налаштуваннях
-    // Обробляємо випадок, коли apis може бути JSON рядком
-    let APIs = {}
-    if (prefs?.apis) {
-      try {
-        APIs = typeof prefs.apis === 'string' ? JSON.parse(prefs.apis) : prefs.apis
-      } catch {
-        APIs = {}
-      }
+
+    // Update preferences column with new API key
+    const newPreferences = {
+      ...(prefs?.preferences || {}),
+      api_key: apiKey
     }
-    APIs.api_key = apiKey
-    
+
     const { error: updateError } = await supabase
       .from('user_preferences')
-      .upsert({
+      .upsert({ // Changed from update to upsert to handle cases where user_preferences might not exist
         user_id: req.user_id,
-        apis: APIs
+        preferences: newPreferences,
+        updated_at: new Date().toISOString()
       }, {
         onConflict: 'user_id'
       })
-    
+
     if (updateError) {
       console.error('[generate-api-key] Error updating preferences:', updateError)
-      return res.status(500).json({ 
-        success: false, 
-        error: 'Failed to save API key' 
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to save API key'
       })
     }
-    
-    
+
+
     res.status(200).json({
       success: true,
       api_key: apiKey,
@@ -2918,9 +3088,9 @@ app.post('/api/generate-api-key', getUserFromToken, async function (req, res) {
     })
   } catch (error) {
     console.error('[generate-api-key] Error:', error)
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to generate API key' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to generate API key'
     })
   }
 })
@@ -2930,29 +3100,21 @@ app.get('/api/api-key', getUserFromToken, async function (req, res) {
   try {
     const { data: prefs, error: prefsError } = await supabase
       .from('user_preferences')
-      .select('apis')
+      .select('preferences')
       .eq('user_id', req.user_id)
       .single()
-    
+
     if (prefsError && prefsError.code !== 'PGRST116') {
       console.error('[get-api-key] Error fetching preferences:', prefsError)
-      return res.status(500).json({ 
-        success: false, 
-        error: 'Failed to fetch user preferences' 
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch user preferences'
       })
     }
-    
-    // Обробляємо випадок, коли apis може бути JSON рядком
-    let APIs = {}
-    if (prefs?.apis) {
-      try {
-        APIs = typeof prefs.apis === 'string' ? JSON.parse(prefs.apis) : prefs.apis
-      } catch {
-        APIs = {}
-      }
-    }
-    const apiKey = APIs.api_key || null
-    
+
+    const preferences = prefs?.preferences || {}
+    const apiKey = preferences.api_key || null
+
     res.status(200).json({
       success: true,
       has_api_key: !!apiKey,
@@ -2960,9 +3122,9 @@ app.get('/api/api-key', getUserFromToken, async function (req, res) {
     })
   } catch (error) {
     console.error('[get-api-key] Error:', error)
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to get API key' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to get API key'
     })
   }
 })
@@ -2974,21 +3136,20 @@ app.post('/api/syncMonoBank', getUserFromTokenOrApiKey, async function (req, res
   // Get API keys from database instead of .env
   const { data: prefs, error: prefsError } = await supabase
     .from('user_preferences')
-    .select('apis')
+    .select('monobank_api')
     .eq('user_id', req.user_id)
     .single()
-  
+
   if (prefsError && prefsError.code !== 'PGRST116') {
     console.error('Error fetching apis:', prefsError)
-    return res.status(500).json({ 
-      success: false, 
-      error: 'Failed to fetch API keys from database' 
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch API keys from database'
     })
   }
-  
-  const APIs = prefs?.apis || {}
-  const monobankAPIs = APIs.monobank || {}
-  
+
+  const monobankAPIs = prefs?.monobank_api || {}
+
   // Allow token to be passed in body/header or fall back to database or server env MONO_TOKEN
   const xToken = req.body.api || req.headers['x-token'] || monobankAPIs.token || process.env.MONO_TOKEN || req.body['x-token']
   if (!xToken) return res.status(400).json({ success: false, error: 'Bad request: api token required in body.api, database, or set MONO_TOKEN in server env' })
@@ -3077,7 +3238,7 @@ app.post('/api/syncMonoBank', getUserFromTokenOrApiKey, async function (req, res
         note = `${note}${note ? ' | ' : ''}Конвертовано: ${formattedOp} → ${formattedMain}; курс: ${rateText}`
       }
 
-  // insert into DB
+      // insert into DB
       const newTx = await postNewCheckMonoBank(amount, note, card, txId, date, req.user_id)
       return newTx
     })
@@ -3085,7 +3246,7 @@ app.post('/api/syncMonoBank', getUserFromTokenOrApiKey, async function (req, res
     const responses = await Promise.all(processItems)
     const newTransactions = responses.filter(v => v !== null)
     const countTrue = newTransactions.length
-    
+
     // Send back data for client-side txBus events
     res.status(200).json({
       success: true,
@@ -3096,9 +3257,9 @@ app.post('/api/syncMonoBank', getUserFromTokenOrApiKey, async function (req, res
 
   } catch (error) {
     console.error('Error processing request:', error)
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      error: error.message
     })
   }
 })
@@ -3116,7 +3277,7 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
   const SYNC_TIMEOUT = 30000 // 30 seconds total timeout
   let timeoutId = null
   let responseSent = false
-  
+
   // Helper function to send response only once
   const sendResponse = (status, data) => {
     if (responseSent) return
@@ -3127,11 +3288,11 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
     }
     res.status(status).json(data)
   }
-  
+
   try {
     const userId = req.user_id
     const now = Date.now()
-    
+
     // Перевірка чи вже виконується синхронізація для цього користувача
     const lastSync = syncBinanceInProgress.get(userId)
     if (lastSync && (now - lastSync) < 30000) { // 30 секунд мінімальний інтервал
@@ -3141,349 +3302,348 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
         message: 'Sync already in progress, please wait'
       })
     }
-    
+
     // Позначити що синхронізація почалася
     syncBinanceInProgress.set(userId, now)
-    
+
     // Створюємо Promise з timeout
     const syncPromise = (async () => {
       try {
-      // Get API keys from database instead of .env
-    const { data: prefs, error: prefsError } = await supabase
-      .from('user_preferences')
-      .select('apis')
-      .eq('user_id', req.user_id)
-      .single()
-    
-    if (prefsError && prefsError.code !== 'PGRST116') {
-      console.error('[syncBinance] Error fetching apis:', prefsError)
-      return sendResponse(500, { 
-        success: false, 
-        synced: false, 
-        message: 'Failed to fetch API keys from database' 
-      })
-    }
-    
-    const APIs = prefs?.apis || {}
-    const binanceAPIs = APIs.binance || {}
-    const apiKey = binanceAPIs.api_key || process.env.BINANCE_API_KEY // Fallback to .env
-    const apiSecret = binanceAPIs.api_secret || process.env.BINANCE_API_SECRET // Fallback to .env
+        // Get API keys from database instead of .env
+        const { data: prefs, error: prefsError } = await supabase
+          .from('user_preferences')
+          .select('binance_api')
+          .eq('user_id', req.user_id)
+          .single()
 
-    if (!apiKey || !apiSecret) {
-      // finally блок видалить userId з Map
-      return sendResponse(200, { 
-        success: true, 
-        synced: false, 
-        message: 'Binance sync skipped: API keys not configured. Please add API keys in Profile settings.' 
-      })
-    }
+        if (prefsError && prefsError.code !== 'PGRST116') {
+          console.error('[syncBinance] Error fetching apis:', prefsError)
+          return sendResponse(500, {
+            success: false,
+            synced: false,
+            message: 'Failed to fetch API keys from database'
+          })
+        }
 
-    // Find Binance Spot card efficiently for this user
-    let binanceCard = null
-    try {
-      const { data: exactCard, error: exactErr } = await supabase
-        .from('cards')
-        .select('id, currency, bank, name, initial_balance, user_id')
-        .eq('user_id', userId)
-        .eq('bank', 'Binance')
-        .eq('name', 'Spot')
-        .single()
-      if (!exactErr && exactCard) {
-        binanceCard = exactCard
-      } else {
-        const { data: anyCard, error: anyErr } = await supabase
-          .from('cards')
-          .select('id, currency, bank, name, initial_balance, user_id')
+        const binanceAPIs = prefs?.binance_api || {}
+        const apiKey = binanceAPIs.api_key || process.env.BINANCE_API_KEY // Fallback to .env
+        const apiSecret = binanceAPIs.api_secret || process.env.BINANCE_API_SECRET // Fallback to .env
+
+        if (!apiKey || !apiSecret) {
+          // finally блок видалить userId з Map
+          return sendResponse(200, {
+            success: true,
+            synced: false,
+            message: 'Binance sync skipped: API keys not configured. Please add API keys in Profile settings.'
+          })
+        }
+
+        // Find Binance Spot card efficiently for this user
+        let binanceCard = null
+        try {
+          const { data: exactCard, error: exactErr } = await supabase
+            .from('cards')
+            .select('id, currency, bank, name, initial_balance, user_id')
+            .eq('user_id', userId)
+            .eq('bank', 'Binance')
+            .eq('name', 'Spot')
+            .single()
+          if (!exactErr && exactCard) {
+            binanceCard = exactCard
+          } else {
+            const { data: anyCard, error: anyErr } = await supabase
+              .from('cards')
+              .select('id, currency, bank, name, initial_balance, user_id')
+              .eq('user_id', userId)
+              .ilike('bank', '%binance%')
+              .limit(1)
+              .maybeSingle()
+            if (anyErr) {
+              console.error('Error fetching Binance card:', anyErr)
+            }
+            if (anyCard) {
+              binanceCard = anyCard
+            }
+          }
+          if (!binanceCard) {
+            return sendResponse(200, {
+              success: true,
+              synced: false,
+              message: 'Binance sync skipped: No Binance card found for current user. Please create "Binance Spot" card.'
+            })
+          }
+        } catch (error) {
+          console.error('Error finding Binance card:', error)
+          return sendResponse(500, {
+            success: false,
+            synced: false,
+            error: `Database error: ${error.message}`,
+            message: `Database error: ${error.message}`
+          })
+        }
+
+        // Calculate balance from initial_balance + transactions
+        let dbBalance = 0
+        try {
+          // Start with initial balance
+          const initialBalance = Number(binanceCard.initial_balance || 0)
+
+          // Get all transactions for this card
+          const { data: transactions, error: txError } = await supabase
+            .from('transactions')
+            .select('amount')
+            .eq('card_id', binanceCard.id)
+
+          if (txError) {
+            console.error('Error fetching transactions:', txError)
+            return sendResponse(500, {
+              success: false,
+              synced: false,
+              error: `Database error: ${txError.message}`,
+              message: `Database error: ${txError.message}`
+            })
+          }
+
+          // Sum all transaction amounts
+          const transactionsSum = (transactions || []).reduce((sum, tx) => sum + Number(tx.amount || 0), 0)
+
+          // Total balance = initial + transactions
+          dbBalance = initialBalance + transactionsSum
+
+
+        } catch (error) {
+          console.error('Error calculating balance:', error)
+          return sendResponse(500, {
+            success: false,
+            synced: false,
+            error: `Error calculating balance: ${error.message}`,
+            message: `Error calculating balance: ${error.message}`
+          })
+        }
+
+        // Get current balance from Binance API
+        const timestamp = Date.now()
+        const queryString = `timestamp=${timestamp}`
+        const signature = createBinanceSignature(queryString, apiSecret)
+
+        const url = `https://api.binance.com/api/v3/account?${queryString}&signature=${signature}`
+
+        let response
+        try {
+          response = await httpClient.get(url, {
+            headers: {
+              'X-MBX-APIKEY': apiKey
+            },
+          })
+        } catch (axiosError) {
+          // Handle network errors (timeout, connection issues)
+          if (axiosError.code === 'ETIMEDOUT' || axiosError.code === 'ECONNABORTED') {
+            console.error('[syncBinance] Binance API request timeout')
+            return sendResponse(200, {
+              success: false,
+              synced: false,
+              message: 'Binance sync failed: Request timeout. Please check your internet connection and try again later.'
+            })
+          }
+          if (axiosError.code === 'ENOTFOUND' || axiosError.code === 'ECONNREFUSED') {
+            console.error('[syncBinance] Binance API connection error:', axiosError.code)
+            return sendResponse(200, {
+              success: false,
+              synced: false,
+              message: 'Binance sync failed: Cannot connect to Binance API. Please check your internet connection.'
+            })
+          }
+          // Re-throw other errors to be handled by outer catch
+          throw axiosError
+        }
+
+        if (!response.data || !response.data.balances) {
+          return sendResponse(500, {
+            success: false,
+            synced: false,
+            error: 'Invalid response from Binance API',
+            message: 'Invalid response from Binance API'
+          })
+        }
+
+        // Calculate total balance in USD from all cryptocurrencies
+        const allBalances = response.data.balances.filter(b => {
+          const total = Number(b.free) + Number(b.locked)
+          return total > 0.00000001 // Only coins with balance > 0
+        })
+
+        if (allBalances.length === 0) {
+          return sendResponse(200, {
+            success: true,
+            synced: false,
+            message: 'Binance sync skipped: No balances found on Binance'
+          })
+        }
+
+        // Get prices for all coins in USDT with cache
+        let pricesResponse
+        try {
+          const now = Date.now()
+          if (!binancePricesCache.data || (now - binancePricesCache.ts) > binancePricesCache.ttlMs) {
+            pricesResponse = await httpClient.get('https://api.binance.com/api/v3/ticker/price')
+            binancePricesCache.data = pricesResponse.data
+            binancePricesCache.ts = now
+          } else {
+            pricesResponse = { data: binancePricesCache.data }
+          }
+        } catch (axiosError) {
+          // Handle network errors (timeout, connection issues)
+          if (axiosError.code === 'ETIMEDOUT' || axiosError.code === 'ECONNABORTED') {
+            console.error('[syncBinance] Binance prices API request timeout')
+            return sendResponse(200, {
+              success: false,
+              synced: false,
+              message: 'Binance sync failed: Request timeout while fetching prices. Please check your internet connection and try again later.'
+            })
+          }
+          if (axiosError.code === 'ENOTFOUND' || axiosError.code === 'ECONNREFUSED') {
+            console.error('[syncBinance] Binance prices API connection error:', axiosError.code)
+            return sendResponse(200, {
+              success: false,
+              synced: false,
+              message: 'Binance sync failed: Cannot connect to Binance API to fetch prices. Please check your internet connection.'
+            })
+          }
+          // Re-throw other errors to be handled by outer catch
+          throw axiosError
+        }
+
+        const prices = {}
+        pricesResponse.data.forEach(p => {
+          prices[p.symbol] = Number(p.price)
+        })
+
+        // Calculate total balance in USDT
+        let binanceBalanceUSD = 0
+        const balanceBreakdown = []
+
+        for (const balance of allBalances) {
+          const asset = balance.asset
+          const amount = Number(balance.free) + Number(balance.locked)
+
+          let valueUSD = 0
+
+          // Stablecoins - count as 1:1 to USD
+          if (['USDT', 'USDC', 'BUSD', 'FDUSD', 'TUSD', 'USDP'].includes(asset)) {
+            valueUSD = amount
+            balanceBreakdown.push(`${asset}: ${amount.toFixed(2)} (stablecoin)`)
+          } else {
+            // Get price in USDT
+            const symbolUSDT = `${asset}USDT`
+            const symbolUSDC = `${asset}USDC`
+            const symbolBUSD = `${asset}BUSD`
+
+            if (prices[symbolUSDT]) {
+              valueUSD = amount * prices[symbolUSDT]
+              balanceBreakdown.push(`${asset}: ${amount.toFixed(8)} × $${prices[symbolUSDT].toFixed(2)} = $${valueUSD.toFixed(2)}`)
+            } else if (prices[symbolUSDC]) {
+              valueUSD = amount * prices[symbolUSDC]
+              balanceBreakdown.push(`${asset}: ${amount.toFixed(8)} × $${prices[symbolUSDC].toFixed(2)} = $${valueUSD.toFixed(2)}`)
+            } else if (prices[symbolBUSD]) {
+              valueUSD = amount * prices[symbolBUSD]
+              balanceBreakdown.push(`${asset}: ${amount.toFixed(8)} × $${prices[symbolBUSD].toFixed(2)} = $${valueUSD.toFixed(2)}`)
+            } else {
+              continue
+            }
+          }
+
+          binanceBalanceUSD += valueUSD
+        }
+
+        const difference = binanceBalanceUSD - dbBalance
+
+        // Skip if difference is between -5 and +5 (to avoid syncing small fluctuations)
+        if (difference > -5 && difference < 5) {
+          // finally блок видалить userId з Map
+          return sendResponse(200, {
+            success: true,
+            synced: false,
+            message: `Difference too small (${difference > 0 ? '+' : ''}${difference.toFixed(2)} USD), sync skipped`
+          })
+        }
+
+        // Create transaction with difference
+        if (!binanceCard.user_id) {
+          console.error('Error: Binance card has no user_id')
+          // finally блок видалить userId з Map
+          return sendResponse(500, {
+            success: false,
+            synced: false,
+            error: 'Binance card has no user_id',
+            message: 'Binance card has no user_id. Cannot create transaction without user_id.'
+          })
+        }
+
+        // Перевірка на дублікати: шукаємо недавні транзакції Binance Sync з такою ж сумою
+        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+        const { data: recentTxs, error: checkError } = await supabase
+          .from('transactions')
+          .select('id, amount, created_at')
+          .eq('card_id', binanceCard.id)
+          .eq('category', 'Binance Sync')
           .eq('user_id', userId)
-          .ilike('bank', '%binance%')
-          .limit(1)
-          .maybeSingle()
-        if (anyErr) {
-          console.error('Error fetching Binance card:', anyErr)
+          .gte('created_at', fiveMinutesAgo)
+          .order('created_at', { ascending: false })
+          .limit(5)
+
+        if (checkError) {
+          console.error('[syncBinance] Error checking for duplicates:', checkError)
+        } else if (recentTxs && recentTxs.length > 0) {
+          // Перевірити чи є транзакція з такою ж сумою (з точністю до 0.01)
+          const hasDuplicate = recentTxs.some(tx => {
+            const txAmount = Number(tx.amount || 0)
+            return Math.abs(txAmount - difference) < 0.01
+          })
+
+          if (hasDuplicate) {
+            // finally блок видалить userId з Map
+            return sendResponse(200, {
+              success: true,
+              synced: false,
+              message: 'Duplicate transaction detected, sync skipped'
+            })
+          }
         }
-        if (anyCard) {
-          binanceCard = anyCard
+
+        const txPayload = {
+          amount: difference,
+          category: 'Binance Sync',
+          note: `Auto-sync Binance balance (all coins in USD)\n\nBalance breakdown:\n${balanceBreakdown.join('\n')}\n\nTotal Binance: $${binanceBalanceUSD.toFixed(2)}\nDB balance: $${dbBalance.toFixed(2)}\nDifference: ${difference > 0 ? '+' : ''}${difference.toFixed(2)} USD`,
+          card: `${binanceCard.bank || 'Binance'} ${binanceCard.name || 'Spot'}`,
+          card_id: binanceCard.id,
+          user_id: binanceCard.user_id, // Add user_id from card to pass RLS policy
+          created_at: new Date().toISOString()
         }
-      }
-      if (!binanceCard) {
-        return sendResponse(200, { 
-          success: true, 
-          synced: false, 
-          message: 'Binance sync skipped: No Binance card found for current user. Please create "Binance Spot" card.' 
-        })
-      }
-    } catch (error) {
-      console.error('Error finding Binance card:', error)
-      return sendResponse(500, { 
-        success: false, 
-        synced: false,
-        error: `Database error: ${error.message}`,
-        message: `Database error: ${error.message}`
-      })
-    }
 
-    // Calculate balance from initial_balance + transactions
-    let dbBalance = 0
-    try {
-      // Start with initial balance
-      const initialBalance = Number(binanceCard.initial_balance || 0)
-      
-      // Get all transactions for this card
-      const { data: transactions, error: txError } = await supabase
-        .from('transactions')
-        .select('amount')
-        .eq('card_id', binanceCard.id)
-      
-      if (txError) {
-        console.error('Error fetching transactions:', txError)
-        return sendResponse(500, { 
-          success: false, 
-          synced: false,
-          error: `Database error: ${txError.message}`,
-          message: `Database error: ${txError.message}`
-        })
-      }
-      
-      // Sum all transaction amounts
-      const transactionsSum = (transactions || []).reduce((sum, tx) => sum + Number(tx.amount || 0), 0)
-      
-      // Total balance = initial + transactions
-      dbBalance = initialBalance + transactionsSum
-      
+        const { data: newTx, error: txError } = await supabase
+          .from('transactions')
+          .insert([txPayload])
+          .select()
+          .single()
 
-    } catch (error) {
-      console.error('Error calculating balance:', error)
-      return sendResponse(500, { 
-        success: false, 
-        synced: false,
-        error: `Error calculating balance: ${error.message}`,
-        message: `Error calculating balance: ${error.message}`
-      })
-    }
-
-    // Get current balance from Binance API
-    const timestamp = Date.now()
-    const queryString = `timestamp=${timestamp}`
-    const signature = createBinanceSignature(queryString, apiSecret)
-
-    const url = `https://api.binance.com/api/v3/account?${queryString}&signature=${signature}`
-
-    let response
-    try {
-      response = await httpClient.get(url, {
-        headers: {
-          'X-MBX-APIKEY': apiKey
-        },
-      })
-    } catch (axiosError) {
-      // Handle network errors (timeout, connection issues)
-      if (axiosError.code === 'ETIMEDOUT' || axiosError.code === 'ECONNABORTED') {
-        console.error('[syncBinance] Binance API request timeout')
-        return sendResponse(200, { 
-          success: false, 
-          synced: false, 
-          message: 'Binance sync failed: Request timeout. Please check your internet connection and try again later.' 
-        })
-      }
-      if (axiosError.code === 'ENOTFOUND' || axiosError.code === 'ECONNREFUSED') {
-        console.error('[syncBinance] Binance API connection error:', axiosError.code)
-        return sendResponse(200, { 
-          success: false, 
-          synced: false, 
-          message: 'Binance sync failed: Cannot connect to Binance API. Please check your internet connection.' 
-        })
-      }
-      // Re-throw other errors to be handled by outer catch
-      throw axiosError
-    }
-
-    if (!response.data || !response.data.balances) {
-      return sendResponse(500, { 
-        success: false, 
-        synced: false,
-        error: 'Invalid response from Binance API',
-        message: 'Invalid response from Binance API'
-      })
-    }
-
-    // Calculate total balance in USD from all cryptocurrencies
-    const allBalances = response.data.balances.filter(b => {
-      const total = Number(b.free) + Number(b.locked)
-      return total > 0.00000001 // Only coins with balance > 0
-    })
-
-    if (allBalances.length === 0) {
-      return sendResponse(200, { 
-        success: true, 
-        synced: false, 
-        message: 'Binance sync skipped: No balances found on Binance' 
-      })
-    }
-
-    // Get prices for all coins in USDT with cache
-    let pricesResponse
-    try {
-      const now = Date.now()
-      if (!binancePricesCache.data || (now - binancePricesCache.ts) > binancePricesCache.ttlMs) {
-        pricesResponse = await httpClient.get('https://api.binance.com/api/v3/ticker/price')
-        binancePricesCache.data = pricesResponse.data
-        binancePricesCache.ts = now
-      } else {
-        pricesResponse = { data: binancePricesCache.data }
-      }
-    } catch (axiosError) {
-      // Handle network errors (timeout, connection issues)
-      if (axiosError.code === 'ETIMEDOUT' || axiosError.code === 'ECONNABORTED') {
-        console.error('[syncBinance] Binance prices API request timeout')
-        return sendResponse(200, { 
-          success: false, 
-          synced: false, 
-          message: 'Binance sync failed: Request timeout while fetching prices. Please check your internet connection and try again later.' 
-        })
-      }
-      if (axiosError.code === 'ENOTFOUND' || axiosError.code === 'ECONNREFUSED') {
-        console.error('[syncBinance] Binance prices API connection error:', axiosError.code)
-        return sendResponse(200, { 
-          success: false, 
-          synced: false, 
-          message: 'Binance sync failed: Cannot connect to Binance API to fetch prices. Please check your internet connection.' 
-        })
-      }
-      // Re-throw other errors to be handled by outer catch
-      throw axiosError
-    }
-    
-    const prices = {}
-    pricesResponse.data.forEach(p => {
-      prices[p.symbol] = Number(p.price)
-    })
-
-    // Calculate total balance in USDT
-    let binanceBalanceUSD = 0
-    const balanceBreakdown = []
-
-    for (const balance of allBalances) {
-      const asset = balance.asset
-      const amount = Number(balance.free) + Number(balance.locked)
-      
-      let valueUSD = 0
-      
-      // Stablecoins - count as 1:1 to USD
-      if (['USDT', 'USDC', 'BUSD', 'FDUSD', 'TUSD', 'USDP'].includes(asset)) {
-        valueUSD = amount
-        balanceBreakdown.push(`${asset}: ${amount.toFixed(2)} (stablecoin)`)
-      } else {
-        // Get price in USDT
-        const symbolUSDT = `${asset}USDT`
-        const symbolUSDC = `${asset}USDC`
-        const symbolBUSD = `${asset}BUSD`
-        
-        if (prices[symbolUSDT]) {
-          valueUSD = amount * prices[symbolUSDT]
-          balanceBreakdown.push(`${asset}: ${amount.toFixed(8)} × $${prices[symbolUSDT].toFixed(2)} = $${valueUSD.toFixed(2)}`)
-        } else if (prices[symbolUSDC]) {
-          valueUSD = amount * prices[symbolUSDC]
-          balanceBreakdown.push(`${asset}: ${amount.toFixed(8)} × $${prices[symbolUSDC].toFixed(2)} = $${valueUSD.toFixed(2)}`)
-        } else if (prices[symbolBUSD]) {
-          valueUSD = amount * prices[symbolBUSD]
-          balanceBreakdown.push(`${asset}: ${amount.toFixed(8)} × $${prices[symbolBUSD].toFixed(2)} = $${valueUSD.toFixed(2)}`)
-        } else {
-          continue
+        if (txError) {
+          console.error('Error creating transaction:', txError)
+          return sendResponse(500, {
+            success: false,
+            synced: false,
+            error: 'Failed to create sync transaction',
+            message: `Failed to create sync transaction: ${txError.message || 'Unknown error'}`
+          })
         }
-      }
-      
-      binanceBalanceUSD += valueUSD
-    }
 
-    const difference = binanceBalanceUSD - dbBalance
-
-    // Skip if difference is between -5 and +5 (to avoid syncing small fluctuations)
-    if (difference > -5 && difference < 5) {
-      // finally блок видалить userId з Map
-      return sendResponse(200, { 
-        success: true, 
-        synced: false, 
-        message: `Difference too small (${difference > 0 ? '+' : ''}${difference.toFixed(2)} USD), sync skipped` 
-      })
-    }
-
-    // Create transaction with difference
-    if (!binanceCard.user_id) {
-      console.error('Error: Binance card has no user_id')
-      // finally блок видалить userId з Map
-      return sendResponse(500, { 
-        success: false, 
-        synced: false,
-        error: 'Binance card has no user_id',
-        message: 'Binance card has no user_id. Cannot create transaction without user_id.'
-      })
-    }
-
-    // Перевірка на дублікати: шукаємо недавні транзакції Binance Sync з такою ж сумою
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
-    const { data: recentTxs, error: checkError } = await supabase
-      .from('transactions')
-      .select('id, amount, created_at')
-      .eq('card_id', binanceCard.id)
-      .eq('category', 'Binance Sync')
-      .eq('user_id', userId)
-      .gte('created_at', fiveMinutesAgo)
-      .order('created_at', { ascending: false })
-      .limit(5)
-    
-    if (checkError) {
-      console.error('[syncBinance] Error checking for duplicates:', checkError)
-    } else if (recentTxs && recentTxs.length > 0) {
-      // Перевірити чи є транзакція з такою ж сумою (з точністю до 0.01)
-      const hasDuplicate = recentTxs.some(tx => {
-        const txAmount = Number(tx.amount || 0)
-        return Math.abs(txAmount - difference) < 0.01
-      })
-      
-      if (hasDuplicate) {
-        // finally блок видалить userId з Map
         return sendResponse(200, {
           success: true,
-          synced: false,
-          message: 'Duplicate transaction detected, sync skipped'
+          synced: true,
+          message: `Synced successfully: ${difference > 0 ? '+' : ''}${difference.toFixed(2)} USD`,
+          card_id: binanceCard.id,
+          delta: difference,
+          currency: 'USD'
         })
-      }
-    }
-
-    const txPayload = {
-      amount: difference,
-      category: 'Binance Sync',
-      note: `Auto-sync Binance balance (all coins in USD)\n\nBalance breakdown:\n${balanceBreakdown.join('\n')}\n\nTotal Binance: $${binanceBalanceUSD.toFixed(2)}\nDB balance: $${dbBalance.toFixed(2)}\nDifference: ${difference > 0 ? '+' : ''}${difference.toFixed(2)} USD`,
-      card: `${binanceCard.bank || 'Binance'} ${binanceCard.name || 'Spot'}`,
-      card_id: binanceCard.id,
-      user_id: binanceCard.user_id, // Add user_id from card to pass RLS policy
-      created_at: new Date().toISOString()
-    }
-
-    const { data: newTx, error: txError } = await supabase
-      .from('transactions')
-      .insert([txPayload])
-      .select()
-      .single()
-
-    if (txError) {
-      console.error('Error creating transaction:', txError)
-      return sendResponse(500, { 
-        success: false, 
-        synced: false,
-        error: 'Failed to create sync transaction',
-        message: `Failed to create sync transaction: ${txError.message || 'Unknown error'}`
-      })
-    }
-
-    return sendResponse(200, {
-      success: true,
-      synced: true,
-      message: `Synced successfully: ${difference > 0 ? '+' : ''}${difference.toFixed(2)} USD`,
-      card_id: binanceCard.id,
-      delta: difference,
-      currency: 'USD'
-    })
       } catch (innerError) {
         console.error('[syncBinance] Inner error:', innerError)
         throw innerError // Перекинути помилку до зовнішнього catch
@@ -3492,14 +3652,14 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
         syncBinanceInProgress.delete(userId)
       }
     })()
-    
+
     // Створюємо timeout Promise
     const timeoutPromise = new Promise((_, reject) => {
       timeoutId = setTimeout(() => {
         reject(new Error('Sync timeout: Operation took too long'))
       }, SYNC_TIMEOUT)
     })
-    
+
     // Виконуємо sync з timeout
     try {
       await Promise.race([syncPromise, timeoutPromise])
@@ -3525,43 +3685,436 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
   } catch (error) {
     console.error('Binance sync error:', error)
     // syncBinanceInProgress.delete вже викликається в finally
-    
+
     // Handle Axios errors
     if (error.response) {
       console.error('Binance API error:', error.response.data)
       // Return 200 to not break the app, just log the error
-      return sendResponse(200, { 
-        success: false, 
-        synced: false, 
-        message: `Binance sync failed: ${error.response.data?.msg || error.message}` 
+      return sendResponse(200, {
+        success: false,
+        synced: false,
+        message: `Binance sync failed: ${error.response.data?.msg || error.message}`
       })
     }
-    
+
     // Handle network errors (timeout, connection issues)
     if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
       console.error('[syncBinance] Network timeout error:', error.code)
-      return sendResponse(200, { 
-        success: false, 
-        synced: false, 
-        message: 'Binance sync failed: Request timeout. Please check your internet connection and try again later.' 
+      return sendResponse(200, {
+        success: false,
+        synced: false,
+        message: 'Binance sync failed: Request timeout. Please check your internet connection and try again later.'
       })
     }
-    
+
     if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
       console.error('[syncBinance] Network connection error:', error.code)
-      return sendResponse(200, { 
-        success: false, 
-        synced: false, 
-        message: 'Binance sync failed: Cannot connect to Binance API. Please check your internet connection.' 
+      return sendResponse(200, {
+        success: false,
+        synced: false,
+        message: 'Binance sync failed: Cannot connect to Binance API. Please check your internet connection.'
       })
     }
-    
+
     // Generic error handler
-    return sendResponse(200, { 
-      success: false, 
-      synced: false, 
-      message: `Binance sync failed: ${error.message || 'Unknown error'}` 
+    return sendResponse(200, {
+      success: false,
+      synced: false,
+      message: `Binance sync failed: ${error.message || 'Unknown error'}`
     })
+  }
+})
+
+// ========================================
+// TRUELAYER API
+// POST /api/truelayer/exchange - Exchange code for token
+app.post('/api/truelayer/exchange', getUserFromToken, async (req, res) => {
+  try {
+    const { code, client_id, client_secret, redirect_uri } = req.body
+
+    // Resolve credentials: prefer env vars, fallback to request body
+    const _client_id = process.env.TRUELAYER_CLIENT_ID || client_id
+    const _client_secret = process.env.TRUELAYER_CLIENT_SECRET || client_secret
+
+    // Validate using resolved credentials
+    if (!code || !_client_id || !_client_secret || !redirect_uri) {
+      console.error('[TrueLayer] Missing parameters:', {
+        code: !!code,
+        client_id: !!_client_id,
+        client_secret: !!_client_secret,
+        redirect_uri: !!redirect_uri
+      })
+      return res.status(400).json({ error: 'Missing required parameters (code, client_id, client_secret, redirect_uri)' })
+    }
+
+    // Live URL for production
+    const authUrl = 'https://auth.truelayer.com/connect/token'
+    // Sandbox URL: 'https://auth.truelayer-sandbox.com/connect/token'
+
+    console.log('[TrueLayer] Exchanging code for token using Client ID:', _client_id)
+
+    // Use URLSearchParams for x-www-form-urlencoded
+    const params = new URLSearchParams()
+    params.append('grant_type', 'authorization_code')
+    params.append('client_id', _client_id)
+    params.append('client_secret', _client_secret)
+    params.append('redirect_uri', redirect_uri)
+    params.append('code', code)
+
+    const response = await fetch(authUrl, {
+      method: 'POST',
+      body: params
+    })
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      console.error('[TrueLayer] Token exchange failed:', data)
+      return res.status(response.status).json(data)
+    }
+
+    // Success! Save tokens to database only if req.user_id exists
+    // Success! Save tokens to database only if req.user_id exists
+    if (req.user_id) {
+      // Create Revolut data object
+      const revolutData = {
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+        token_type: data.token_type,
+        expires_in: data.expires_in,
+        updated_at: new Date().toISOString()
+      }
+
+      // Save back to DB
+      const { error: updateError } = await supabase
+        .from('user_preferences')
+        .upsert({
+          user_id: req.user_id,
+          revolut_api: revolutData,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' })
+
+      if (updateError) {
+        console.error('[TrueLayer] Error saving tokens:', updateError)
+      } else {
+        console.log('[TrueLayer] Tokens saved to database for user:', req.user_id)
+      }
+    } else {
+      console.warn('[TrueLayer] No user_id in request, skipping token save')
+    }
+
+    res.json(data)
+  } catch (error) {
+    console.error('[TrueLayer] Server error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Helper to refresh TrueLayer token
+async function refreshTrueLayerToken(user_id, refresh_token) {
+  try {
+    console.log('[TrueLayer] Attempting to refresh token...')
+    const _client_id = process.env.TRUELAYER_CLIENT_ID
+    const _client_secret = process.env.TRUELAYER_CLIENT_SECRET
+
+    if (!_client_id || !_client_secret) {
+      throw new Error('TrueLayer credentials not configured on server')
+    }
+
+    const authUrl = 'https://auth.truelayer.com/connect/token'
+
+    const params = new URLSearchParams()
+    params.append('grant_type', 'refresh_token')
+    params.append('client_id', _client_id)
+    params.append('client_secret', _client_secret)
+    params.append('refresh_token', refresh_token)
+
+    const response = await fetch(authUrl, {
+      method: 'POST',
+      body: params
+    })
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      console.error('[TrueLayer] Token refresh failed response:', data)
+      return null
+    }
+
+    console.log('[TrueLayer] Token refresh successful')
+
+    // Update tokens in DB
+    const { data: prefs } = await supabase
+      .from('user_preferences')
+      .select('revolut_api')
+      .eq('user_id', user_id)
+      .single()
+
+    const currentRevolut = prefs?.revolut_api || {}
+
+    const updatedRevolut = {
+      ...currentRevolut,
+      access_token: data.access_token,
+      refresh_token: data.refresh_token, // Usually a new refresh token is returned
+      token_type: data.token_type,
+      expires_in: data.expires_in,
+      updated_at: new Date().toISOString()
+    }
+
+    await supabase
+      .from('user_preferences')
+      .upsert({
+        user_id,
+        revolut_api: updatedRevolut,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id' })
+
+    return data.access_token
+  } catch (error) {
+    console.error('[TrueLayer] Refresh error:', error)
+    return null
+  }
+}
+
+// Helper to save TrueLayer transaction
+async function postNewCheckTrueLayer(user_id, tx, account_id, card_id) {
+  try {
+    const txId = tx.transaction_id
+    if (!txId) {
+      console.warn('[TrueLayer] Transaction missing transaction_id, skipping:', tx)
+      return null
+    }
+
+    // Check duplicates
+    const { data: existing } = await supabase
+      .from('transactions')
+      .select('id')
+      .eq('transaction_id_card', txId)
+      .eq('user_id', user_id)
+      .maybeSingle()
+
+    if (existing) {
+      // console.log(`[TrueLayer] Transaction ${txId} already exists, skipping.`)
+      return null // Already exists
+    }
+
+    // Map fields
+    const amount = Number(tx.amount)
+    const date = tx.timestamp
+    let description = tx.description
+
+    // Append user comments if available
+    if (tx.meta && tx.meta.user_comments) {
+      description += ` | ${tx.meta.user_comments}`
+    }
+
+    // Determine category (optional mapping)
+    const category = tx.transaction_classification?.[0] || 'Revolut'
+
+    // Create payload
+    const payload = {
+      amount: amount,
+      category: category,
+      note: description,
+      archives: false,
+      card: 'Revolut', // Or actual card name if available
+      card_id: card_id,
+      transaction_id_card: txId,
+      user_id: user_id,
+      created_at: date,
+      merchant_name: tx.merchant_name || null
+    }
+
+    const { data, error } = await supabase.from('transactions').insert([payload]).select().single()
+    if (error) {
+      console.error('[TrueLayer] Supabase insert error for transaction:', txId, error)
+      throw error
+    }
+    // console.log('[TrueLayer] Saved new transaction:', txId)
+    return data
+  } catch (error) {
+    console.error('[TrueLayer] Error saving tx:', error)
+    return null
+  }
+}
+
+app.post('/api/truelayer/data', async (req, res) => {
+  try {
+    const { access_token, endpoint } = req.body
+
+    if (!access_token || !endpoint) {
+      return res.status(400).json({ error: 'Missing access_token or endpoint' })
+    }
+
+    // Live URL for production
+    const url = `https://api.truelayer.com/data/v1/${endpoint}`
+
+    console.log(`[TrueLayer] Fetching data from: ${url}`)
+
+    const response = await axios.get(url, {
+      headers: {
+        'Authorization': `Bearer ${access_token}`
+      }
+    })
+
+    res.json(response.data)
+  } catch (error) {
+    console.error('[TrueLayer] Data fetch error:', error.message)
+    res.status(500).json({
+      error: 'Failed to fetch data',
+      details: error.response?.data || error.message
+    })
+  }
+})
+
+// POST /api/syncTrueLayer - Sync Revolut/TrueLayer transactions
+app.post('/api/syncTrueLayer', getUserFromToken, async (req, res) => {
+  try {
+    const userId = req.user_id
+    console.log('[TrueLayer] Starting sync for user:', userId)
+
+    // Get tokens from DB
+    const { data: prefs, error: prefsError } = await supabase
+      .from('user_preferences')
+      .select('revolut_api')
+      .eq('user_id', userId)
+      .single()
+
+    if (prefsError) {
+      console.warn('[TrueLayer] User preferences not found for user:', userId)
+      return res.status(400).json({ error: 'User preferences not found' })
+    }
+
+    const tlTokens = prefs?.revolut_api
+    if (!tlTokens || !tlTokens.access_token) {
+      console.warn('[TrueLayer] No TrueLayer tokens found for user:', userId)
+      return res.json({ success: false, message: 'TrueLayer not connected. Please connect in Profile.' })
+    }
+
+    let accessToken = tlTokens.access_token
+
+    // Determine card_id for Revolut
+    // Try to find a card with bank 'Revolut' or create one
+    let cardId = null
+    const { data: cardData } = await supabase
+      .from('cards')
+      .select('id')
+      .eq('user_id', userId)
+      .ilike('bank', '%revolut%')
+      .limit(1)
+      .maybeSingle()
+
+    if (cardData) {
+      cardId = cardData.id
+    } else {
+      console.log('[TrueLayer] Creating new Revolut card for user:', userId)
+      // Create Revolut card if not exists
+      const { data: newCard } = await supabase
+        .from('cards')
+        .insert([{
+          user_id: userId,
+          name: 'Revolut Main',
+          bank: 'Revolut',
+          currency: 'UAH', // Default, maybe change later
+          initial_balance: 0,
+          bg_url: 'https://assets.revolut.com/media/icons/flags/uk.png' // Placeholder
+        }])
+        .select()
+        .single()
+      if (newCard) cardId = newCard.id
+    }
+
+    // Helper to fetch data with automatic retry on 401
+    const fetchData = async (endpoint, token) => {
+      try {
+        const url = `https://api.truelayer.com/data/v1/${endpoint}`
+        // console.log(`[TrueLayer] Fetching: ${url}`)
+        return await axios.get(url, { headers: { Authorization: `Bearer ${token}` } })
+      } catch (error) {
+        if (error.response?.status === 401 && tlTokens.refresh_token) {
+          console.log('[TrueLayer] Access token expired (401), refreshing...')
+          const newToken = await refreshTrueLayerToken(userId, tlTokens.refresh_token)
+          if (newToken) {
+            accessToken = newToken // Update local variable
+            // Retry with new token
+            const url = `https://api.truelayer.com/data/v1/${endpoint}`
+            return await axios.get(url, { headers: { Authorization: `Bearer ${newToken}` } })
+          }
+        }
+        throw error
+      }
+    }
+
+    // 1. Get Accounts to find account_id
+    let accountsResp
+    try {
+      accountsResp = await fetchData('accounts', accessToken)
+    } catch (e) {
+      console.error('[TrueLayer] Failed to fetch accounts:', e.message)
+      return res.json({ success: false, error: 'Failed to access TrueLayer accounts. Re-authentication may be required.' })
+    }
+
+    const accounts = accountsResp.data.results
+    console.log(`[TrueLayer] Fetched ${accounts?.length || 0} accounts.`)
+    if (!accounts || accounts.length === 0) {
+      console.log('[TrueLayer] No accounts found in TrueLayer response')
+      return res.json({ success: true, count: 0, message: 'No accounts found in TrueLayer' })
+    }
+
+    const accountId = accounts[0].account_id // Use first account for now
+    console.log('[TrueLayer] Using account ID:', accountId)
+
+    // 2. Get Transactions for last 15 days
+    const now = new Date()
+    const past = new Date()
+    past.setDate(now.getDate() - 15)
+
+    const to = now.toISOString().split('.')[0] + 'Z'
+    const from = past.toISOString().split('.')[0] + 'Z'
+
+    const txEndpoint = `accounts/${accountId}/transactions?from=${from}&to=${to}`
+    console.log('[TrueLayer] Fetching transactions endpoint:', txEndpoint)
+
+    let txResp
+    try {
+      txResp = await fetchData(txEndpoint, accessToken)
+    } catch (e) {
+      console.error('[TrueLayer] Failed to fetch transactions:', e.message, e.response?.data)
+      // Check for 404 (maybe no transactions or wrong endpoint for specific provider)
+      if (e.response?.status === 404) {
+        return res.json({ success: true, count: 0, message: 'No transactions found (404)' })
+      }
+      return res.json({ success: false, error: 'Failed to fetch transactions' })
+    }
+
+    // Log raw data structure to debug
+    // console.log('[TrueLayer] Raw transaction response data:', JSON.stringify(txResp.data, null, 2))
+
+    const transactions = txResp.data.results
+    console.log('[TrueLayer] Fetched transaction count:', transactions?.length || 0)
+
+    if (!transactions || transactions.length === 0) {
+      return res.json({ success: true, count: 0, message: 'No new transactions' })
+    }
+
+    // 3. Save transactions
+    let savedCount = 0
+    for (const tx of transactions) {
+      const saved = await postNewCheckTrueLayer(userId, tx, accountId, cardId)
+      if (saved) savedCount++
+    }
+
+    console.log('[TrueLayer] Sync complete. Saved transactions:', savedCount)
+
+    res.json({
+      success: true,
+      count: savedCount,
+      message: `Sync successful. Added ${savedCount} transactions.`
+    })
+
+  } catch (error) {
+    console.error('[TrueLayer] Sync error:', error)
+    res.status(500).json({ success: false, error: error.message })
   }
 })
 
@@ -3587,7 +4140,7 @@ if (process.env.NODE_ENV !== 'production' || process.env.VERCEL !== '1') {
   app.listen(port, '0.0.0.0', () => {
     console.log(`API on http://localhost:${port}`)
     console.log(`API доступний з мережі на порту ${port}`)
-    
+
     // Запускаємо таймер для автоматичної обробки підписок
     startSubscriptionsTimer()
   })
