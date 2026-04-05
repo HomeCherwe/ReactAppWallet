@@ -60,6 +60,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
     debtParty: '',
     debtIsLend: true,
     excludeFromStats: false,
+    date: new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16),
   })
 
   const [errors, setErrors] = useState({
@@ -110,6 +111,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
           debtParty: base.debt_party || '',
           debtIsLend,
           excludeFromStats: base?.exclude_from_stats === true || base?.exclude_from_stats === 'true' || base?.exclude_from_stats === 1,
+          date: base.created_at ? new Date(new Date(base.created_at).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16),
         })
         // keep original transaction for delta calculations
         originalRef.current = base
@@ -434,6 +436,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
         debt_party: form.kind === 'debt' ? (form.debtParty || null) : null,
         debt_direction: form.kind === 'debt' ? (form.debtIsLend ? 'lend' : 'borrow') : null,
         exclude_from_stats: form.kind === 'debt' ? true : (form.excludeFromStats || false),
+        created_at: form.date ? new Date(form.date).toISOString() : new Date().toISOString(),
       }
       await updateTransaction(tx.id, payload)
       // Fetch fresh transaction so UI gets computed fields (amount_stat / exclude_from_stats)
@@ -714,6 +717,15 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
                     {errors.cardId}
                   </motion.div>
                 )}
+              </div>
+
+              <div>
+                <input
+                  type="datetime-local"
+                  className="border rounded-xl px-3 py-2 w-full focus:ring-2 focus:ring-indigo-500"
+                  value={form.date}
+                  onChange={e => setForm({ ...form, date: e.target.value })}
+                />
               </div>
 
               <textarea className="border rounded-xl px-3 py-2 min-h-[90px]"
