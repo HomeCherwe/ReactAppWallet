@@ -18,6 +18,10 @@ export default defineConfig({
         target: process.env.VITE_API_URL || 'http://localhost:8787',
         changeOrigin: true,
       },
+      '/api/scan-transactions': {
+        target: process.env.VITE_API_URL || 'http://localhost:8787',
+        changeOrigin: true,
+      },
     },
     // HashRouter doesn't need historyApiFallback
     // historyApiFallback: true,

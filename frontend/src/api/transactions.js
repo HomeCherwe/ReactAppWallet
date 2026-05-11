@@ -229,3 +229,36 @@ export async function getTransactionsBySubscription(subscriptionId) {
 
   return data
 }
+
+/**
+ * Scan receipt/bank statement images and extract transactions via AI
+ * @param {File[]} files - Array of image files
+ * @returns {Promise<Array>} - Array of extracted transactions
+ */
+export async function scanTransactions(files) {
+  const fd = new FormData()
+  files.forEach(file => fd.append('images', file))
+
+  const { getApiUrl } = await import('../utils.jsx')
+  const apiEndpoint = import.meta.env.PROD
+    ? `${getApiUrl()}/api/scan-transactions`
+    : '/api/scan-transactions'
+
+  // Get auth token
+  const { data: { session } } = await supabase.auth.getSession()
+  const token = session?.access_token
+
+  const res = await fetch(apiEndpoint, {
+    method: 'POST',
+    body: fd,
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Помилка сканування')
+  }
+
+  const data = await res.json()
+  return data.transactions || []
+}

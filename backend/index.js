@@ -2582,6 +2582,119 @@ app.post('/api/parse-receipt', upload.single('image'), async (req, res) => {
   }
 })
 
+// Scan transactions from receipt/bank statement/screenshot images
+app.post('/api/scan-transactions', getUserFromToken, upload.array('images', 10), async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'At least one image is required' })
+    if (!process.env.OPENAI_API_KEY) return res.status(500).json({ error: 'OPENAI_API_KEY missing' })
+
+    // Convert all images to base64 data URLs
+    const imageContents = req.files.map(file => {
+      const b64 = file.buffer.toString('base64')
+      const dataUrl = `data:${file.mimetype || 'image/jpeg'};base64,${b64}`
+      return { type: 'image_url', image_url: { url: dataUrl } }
+    })
+
+    const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
+
+    const prompt = `You are a financial transaction extractor for a personal wallet app.
+
+The user sends one or more photos of receipts, bank statements, or transaction history screenshots.
+
+Extract ALL visible transactions and return ONLY a raw JSON array. No markdown, no backticks, no explanation — just the JSON array starting with [ and ending with ].
+
+Each object in the array must have exactly these fields:
+- "date": string, format "DD/MM/YYYY". If not visible, use today's date: "${today}".
+- "merchant": string, cleaned merchant/payee name in title case (e.g. "Auchan", "Zara Cannes")
+- "amount": number, always positive (e.g. 28.00)
+- "currency": string, detected from image ("EUR", "USD", "UAH", "GBP", "PLN")
+- "category": string, one of: Продукти, Транспорт, Шопінг, Здоров'я, Розваги, Комунальні, Кафе, Підписки, Інше
+- "type": string, "expense" or "income". Most transactions on receipts are expenses.
+- "note": string, any extra detail visible on receipt, or empty string ""
+
+If the image shows a list of multiple transactions (e.g. a bank app transaction history), extract each one as a separate object.
+If the image is a single receipt, extract it as one object with the total amount.
+If there are multiple images, extract all transactions from all images into one flat array.
+
+Return ONLY the JSON array. Nothing else.`
+
+    const body = {
+      model: 'gpt-5.1',
+      temperature: 0.0,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: prompt },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Extract all transactions from these images.' },
+            ...imageContents
+          ]
+        }
+      ]
+    }
+
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+
+    const raw = await r.text()
+    if (!r.ok) {
+      console.error('[scan-transactions] OpenAI error:', raw)
+      return res.status(500).json({ error: 'openai_failed', details: raw })
+    }
+
+    let transactions = []
+    try {
+      const data = JSON.parse(raw)
+      const content = data?.choices?.[0]?.message?.content
+      const parsed = typeof content === 'string' ? JSON.parse(content) : content
+
+      // Handle both array and object with transactions key
+      if (Array.isArray(parsed)) {
+        transactions = parsed
+      } else if (parsed?.transactions && Array.isArray(parsed.transactions)) {
+        transactions = parsed.transactions
+      } else if (parsed?.items && Array.isArray(parsed.items)) {
+        transactions = parsed.items
+      } else {
+        // Try to find any array in the response
+        for (const key of Object.keys(parsed || {})) {
+          if (Array.isArray(parsed[key])) {
+            transactions = parsed[key]
+            break
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[scan-transactions] Parse error:', e, raw)
+      return res.status(500).json({ error: 'parse_failed' })
+    }
+
+    // Normalize each transaction
+    transactions = transactions.map(tx => ({
+      date: tx.date || today,
+      merchant: tx.merchant || 'Невідомий',
+      amount: Math.abs(Number(tx.amount || 0)),
+      currency: (tx.currency || 'EUR').toUpperCase(),
+      category: tx.category || 'Інше',
+      type: tx.type || 'expense',
+      note: tx.note || '',
+    }))
+
+    console.log(`[scan-transactions] Extracted ${transactions.length} transactions from ${req.files.length} images`)
+    return res.json({ transactions })
+  } catch (e) {
+    console.error('[scan-transactions] Error:', e)
+    return res.status(500).json({ error: e.message || 'server error' })
+  }
+})
+
 // Helper function to normalize merchant name for caching
 function normalizeMerchantName(name) {
   if (!name) return ''

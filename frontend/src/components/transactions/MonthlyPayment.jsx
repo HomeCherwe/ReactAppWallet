@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
-import { X, Plus, Trash2 } from 'lucide-react'
+import { X, Plus, Trash2, ScanLine } from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
 import ConfirmModal from '../ConfirmModal'
 import DeleteTxModal from './DeleteTxModal'
@@ -10,6 +10,7 @@ import DetailsModal from './DetailsModal'
 import CreateTxModal from './CreateTxModal'
 import EditTxModal from './EditTxModal'
 import TransferModal from './TransferModal'
+import ScanReceiptModal from './ScanReceiptModal'
 import { apiFetch, getApiUrl } from '../../utils.jsx'
 import { listTransactions, updateTransaction, deleteTransaction, archiveTransaction, deleteTransactions, getTransactionCategories } from '../../api/transactions'
 import { txBus } from '../../utils/txBus'
@@ -83,6 +84,7 @@ export default function MonthlyPayment() {
   const [createOpen, setCreateOpen] = useState(false)
   const [transferOpen, setTransferOpen] = useState(false)
   const [syncLoading, setSyncLoading] = useState(false)
+  const [scanOpen, setScanOpen] = useState(false)
   const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false)
 
   const [searchQuery, setSearchQuery] = useState('')
@@ -918,6 +920,9 @@ export default function MonthlyPayment() {
             <button className="btn btn-primary text-xs inline-flex items-center gap-1" onClick={() => setCreateOpen(true)}>
               <Plus size={14} /> Add
             </button>
+            <button className="btn btn-soft text-xs inline-flex items-center gap-1" onClick={() => setScanOpen(true)}>
+              <ScanLine size={14} /> Scan
+            </button>
             <button className="btn btn-soft text-xs inline-flex items-center gap-1" onClick={() => setTransferOpen(true)}>
               Transfer
             </button>
@@ -1261,6 +1266,12 @@ export default function MonthlyPayment() {
         onDelete={handleBulkDelete}
         onArchive={handleBulkArchive}
         onCancel={() => { setBulkDeleteOpen(false) }}
+      />
+
+      <ScanReceiptModal
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        onSaved={() => fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })}
       />
       <Toaster position="top-right" />
     </motion.div>
