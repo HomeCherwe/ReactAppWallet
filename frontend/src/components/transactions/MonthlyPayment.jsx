@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
-import { X, Plus, Trash2, ScanLine } from 'lucide-react'
+import { X, Plus, Trash2, ScanLine, AlertTriangle, Landmark } from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
 import ConfirmModal from '../ConfirmModal'
 import DeleteTxModal from './DeleteTxModal'
@@ -86,6 +86,7 @@ export default function MonthlyPayment() {
   const [syncLoading, setSyncLoading] = useState(false)
   const [scanOpen, setScanOpen] = useState(false)
   const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false)
+  const [revolutConnected, setRevolutConnected] = useState(null) // null=checking, true, false
 
   const [searchQuery, setSearchQuery] = useState('')
   const [hasMore, setHasMore] = useState(true)
@@ -249,6 +250,19 @@ export default function MonthlyPayment() {
       setInitialLoading(false)
     }
   }
+
+  // Check Revolut connection status on mount
+  useEffect(() => {
+    const checkRevolut = async () => {
+      try {
+        const result = await apiFetch('/api/truelayer/check-token')
+        setRevolutConnected(result?.connected === true && result?.valid !== false)
+      } catch (e) {
+        setRevolutConnected(false)
+      }
+    }
+    checkRevolut()
+  }, [])
 
   // Load categories once on mount (не залежить від preferences)
   useEffect(() => {
@@ -896,6 +910,24 @@ export default function MonthlyPayment() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-2xl p-5 shadow-soft min-h-[400px]">
+
+      {/* Persistent Revolut not connected banner */}
+      {revolutConnected === false && (
+        <div className="mb-4 flex items-start gap-3 bg-amber-50 border-2 border-amber-400 rounded-xl p-3 sticky top-0 z-10">
+          <AlertTriangle size={18} className="text-amber-600 mt-0.5 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <span className="text-xs font-semibold text-amber-900">⚠️ Revolut не підключено</span>
+            <span className="text-xs text-amber-800 ml-1">— синхронізація транзакцій Revolut призупинена.</span>
+            <a
+              href="#/profile"
+              className="ml-2 text-xs font-bold text-amber-700 underline hover:text-amber-900 whitespace-nowrap"
+            >
+              Підключити в профілі →
+            </a>
+          </div>
+        </div>
+      )}
+
       <div className="mb-4">
         <div className="flex items-center justify-between mb-3">
           <div className="font-semibold">Recent transactions</div>
@@ -931,7 +963,13 @@ export default function MonthlyPayment() {
               onClick={async () => {
                 if (syncLoading) return
                 setSyncLoading(true)
-                const toastId = toast.loading('Синхронізація банків...')
+
+                // Toast IDs for per-bank notifications
+                const monoToastId = toast.loading('⏳ Mono: синхронізація...')
+                const revToastId = revolutConnected !== false
+                  ? toast.loading('⏳ Revolut: синхронізація...')
+                  : null
+
                 try {
                   // Run both syncs in parallel
                   const [monoRes, tlRes] = await Promise.all([
@@ -946,34 +984,53 @@ export default function MonthlyPayment() {
                     }).catch(e => ({ error: e.message || 'TrueLayer error' }))
                   ])
 
-                  const monoCount = monoRes?.count || 0
-                  const tlCount = tlRes?.count || 0
-                  const totalCount = monoCount + tlCount
+                  // Dismiss loading toasts
+                  toast.dismiss(monoToastId)
+                  if (revToastId) toast.dismiss(revToastId)
 
-                  toast.dismiss(toastId)
-
-                  // Construct message
-                  let msgParts = []
-                  if (monoRes?.error) msgParts.push(`Mono: помилка (${monoRes.error})`)
-                  else msgParts.push(`Mono: ${monoCount}`)
-
-                  if (tlRes?.error) msgParts.push(`Rev: помилка (${tlRes.error})`)
-                  else msgParts.push(`Rev: ${tlCount}`)
-
-                  const msg = `Синхронізація: ${msgParts.join(', ')}`
-
-                  if (monoRes?.error || tlRes?.error) {
-                    toast(msg, { icon: '⚠️', duration: 5000 })
+                  // --- Monobank notification ---
+                  if (monoRes?.error) {
+                    toast.error(`🟡 Monobank: помилка — ${monoRes.error}`, { duration: 6000, id: 'mono-sync' })
                   } else {
-                    toast.success(totalCount > 0 ? `Додано ${totalCount} транзакцій` : 'Нових транзакцій немає')
+                    const monoCount = monoRes?.count || 0
+                    toast.success(
+                      monoCount > 0
+                        ? `🟡 Monobank: додано ${monoCount} транзакцій`
+                        : '🟡 Monobank: нових транзакцій немає',
+                      { duration: 4000, id: 'mono-sync' }
+                    )
                   }
 
-                  // Emit SYNC event if we got any data or counts
+                  // --- Revolut notification ---
+                  if (tlRes?.success === false && !tlRes?.error && !revolutConnected) {
+                    // Not connected — show persistent warning but don't spam
+                    setRevolutConnected(false)
+                  } else if (tlRes?.error) {
+                    toast.error(`🔵 Revolut: помилка — ${tlRes.error}`, { duration: 6000, id: 'rev-sync' })
+                    if (tlRes.error.includes('auth') || tlRes.error.includes('connect')) {
+                      setRevolutConnected(false)
+                    }
+                  } else if (tlRes?.message?.includes('not connected') || tlRes?.message?.includes('TrueLayer not connected')) {
+                    setRevolutConnected(false)
+                  } else {
+                    const tlCount = tlRes?.count || 0
+                    toast.success(
+                      tlCount > 0
+                        ? `🔵 Revolut: додано ${tlCount} транзакцій`
+                        : '🔵 Revolut: нових транзакцій немає',
+                      { duration: 4000, id: 'rev-sync' }
+                    )
+                    setRevolutConnected(true)
+                  }
+
+                  // Emit SYNC event if any transactions were added
+                  const totalCount = (monoRes?.count || 0) + (tlRes?.count || 0)
                   if (totalCount > 0 || (monoRes?.transactions?.length > 0)) {
                     try { txBus.emit({ type: 'SYNC' }) } catch { }
                   }
                 } catch (e) {
-                  toast.dismiss(toastId)
+                  toast.dismiss(monoToastId)
+                  if (revToastId) toast.dismiss(revToastId)
                   toast.error('Критична помилка синхронізації')
                   console.error('sync error', e)
                 } finally {

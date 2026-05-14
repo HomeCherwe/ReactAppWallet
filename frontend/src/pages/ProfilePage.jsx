@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase, invalidateUserCache } from '../lib/supabase'
 import { motion } from 'framer-motion'
-import { User, Mail, Save, Upload, Key, CreditCard, Copy, Eye, EyeOff, RefreshCw, BarChart3, LogOut, Landmark, CheckCircle, XCircle, HelpCircle, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react'
+import { User, Mail, Save, Upload, Key, CreditCard, Copy, Eye, EyeOff, RefreshCw, BarChart3, LogOut, Landmark, CheckCircle, XCircle, HelpCircle, ChevronDown, ChevronUp, ExternalLink, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getUserAPIs, getApiKey, generateApiKey, updatePreferencesSection, invalidatePreferencesCache } from '../api/preferences'
 import { getApiUrl, apiFetch } from '../utils.jsx'
@@ -30,6 +30,8 @@ export default function ProfilePage() {
   const [trueLayerClientSecret, setTrueLayerClientSecret] = useState('')
   const [prefsLoaded, setPrefsLoaded] = useState(false)
   const [trueLayerAccessToken, setTrueLayerAccessToken] = useState('')
+  const [truelayerTokenChecking, setTruelayerTokenChecking] = useState(false)
+  const [truelayerExpired, setTruelayerExpired] = useState(false)
 
   // Guide visibility state
   const [showBinanceGuide, setShowBinanceGuide] = useState(false)
@@ -107,10 +109,20 @@ export default function ProfilePage() {
           setTrueLayerClientId(APIs.truelayer.client_id || '')
           setTrueLayerClientSecret(APIs.truelayer.client_secret || '')
 
-          // Check for stored token in DB first
-          if (APIs.truelayer.access_token) {
-            setTrueLayerAccessToken(APIs.truelayer.access_token)
-            localStorage.setItem('truelayer_access_token', APIs.truelayer.access_token)
+          // Only set the token if it's a REAL token (not a masked placeholder like "abcd****efgh")
+          // The backend returns masked values in GET /api/preferences/apis
+          // A real connected state comes from revolut_api column being non-null
+          // We detect "connected" by whether the access_token field exists and is non-masked
+          const rawToken = APIs.truelayer.access_token
+          const isMaskedToken = typeof rawToken === 'string' && rawToken.includes('****')
+          if (rawToken && !isMaskedToken) {
+            // Real unmasked token (shouldn't normally happen from this endpoint)
+            setTrueLayerAccessToken(rawToken)
+            localStorage.setItem('truelayer_access_token', rawToken)
+          } else if (rawToken && isMaskedToken) {
+            // Token exists in DB (masked = real token is there), mark as connected
+            // Use a sentinel value so UI shows "connected" state
+            setTrueLayerAccessToken('__connected__')
           }
         } else {
           // Set defaults if not present
@@ -129,40 +141,35 @@ export default function ProfilePage() {
   useEffect(() => {
     loadApiKeys()
     loadApiKey()
-
-    // Load TrueLayer access token from local storage if available (fallback)
-    const storedTrueLayerAccessToken = localStorage.getItem('truelayer_access_token')
-    if (storedTrueLayerAccessToken && !trueLayerAccessToken) {
-      setTrueLayerAccessToken(storedTrueLayerAccessToken)
-    }
+    // Note: we do NOT load from localStorage here anymore — it caused the re-bind bug.
+    // Token state is set only from DB (via loadApiKeys) or after successful exchange.
   }, [])
 
   // Handle Disconnect
   const handleDisconnectTrueLayer = async () => {
     if (!confirm('Ви дійсно хочете відключити Revolut? Ви більше не зможете синхронізувати транзакції.')) return
 
+    const loadingToast = toast.loading('Відключення...')
     try {
-      const loadingToast = toast.loading('Відключення...')
+      // Use backend endpoint — it uses service role key, guaranteed to bypass RLS
+      const result = await apiFetch('/api/truelayer/disconnect', { method: 'DELETE' })
 
-      // Get current APIs to preserve others
-      const currentAPIs = await getUserAPIs() || {}
-
-      // Remove truelayer from APIs object
-      if (currentAPIs.truelayer) {
-        delete currentAPIs.truelayer
+      if (!result?.success) {
+        throw new Error(result?.error || 'Server returned failure')
       }
 
-      // Save updated APIs
-      await updatePreferencesSection('apis', currentAPIs, true) // immediate save
-
-      // Clear local state
-      setTrueLayerAccessToken('')
-      setTrueLayerData(null) // Reset data if any
+      // Clear local state and localStorage AFTER confirmed server-side deletion
       localStorage.removeItem('truelayer_access_token')
+      setTrueLayerAccessToken('')
+      setTruelayerExpired(false)
+
+      // Invalidate preferences cache so next loadApiKeys gets fresh data from DB
+      invalidatePreferencesCache()
 
       toast.dismiss(loadingToast)
       toast.success('Revolut успішно відключено')
     } catch (e) {
+      toast.dismiss(loadingToast)
       console.error('Failed to disconnect TrueLayer:', e)
       toast.error('Не вдалося відключити: ' + e.message)
     }
@@ -278,18 +285,39 @@ export default function ProfilePage() {
     }
   }
 
-  // DEBUG: Check localStorage periodically to sync state if lost
+  // Check TrueLayer token validity on mount (after prefs loaded)
   useEffect(() => {
-    const checkToken = () => {
-      const stored = localStorage.getItem('truelayer_access_token')
-      if (stored && stored !== trueLayerAccessToken) {
-        console.log('🔄 Syncing token from localStorage to State')
-        setTrueLayerAccessToken(stored)
+    if (!prefsLoaded || !trueLayerAccessToken) return
+
+    const checkValidity = async () => {
+      setTruelayerTokenChecking(true)
+      try {
+        const result = await apiFetch('/api/truelayer/check-token')
+        if (result?.connected === false) {
+          if (result.reason === 'consent_expired' || result.reason === 'no_token') {
+            // Token expired or cleared server-side
+            setTrueLayerAccessToken('')
+            localStorage.removeItem('truelayer_access_token')
+            setTruelayerExpired(true)
+            if (result.reason === 'consent_expired') {
+              toast('⚠️ Термін дії підключення Revolut сплив (90 днів). Підключіть знову.', {
+                duration: 8000,
+                icon: '🔄'
+              })
+            }
+          }
+        } else if (result?.connected === true) {
+          setTruelayerExpired(false)
+        }
+      } catch (e) {
+        console.warn('[TrueLayer] Token check failed:', e.message)
+      } finally {
+        setTruelayerTokenChecking(false)
       }
     }
-    const interval = setInterval(checkToken, 2000)
-    return () => clearInterval(interval)
-  }, [trueLayerAccessToken])
+
+    checkValidity()
+  }, [prefsLoaded, trueLayerAccessToken])
 
   // Load API Key
   const loadApiKey = async () => {
@@ -830,17 +858,44 @@ export default function ProfilePage() {
             <div className="pt-2">
               <p className="text-sm text-gray-700 mb-4">
                 Підключіть ваш обліковий запис Revolut через TrueLayer для синхронізації балансу та транзакцій.
+                TrueLayer надає доступ на <strong>90 днів</strong> — після чого потрібно підключити знову.
               </p>
 
-              {trueLayerAccessToken ? (
+              {/* Expiry banner — stays permanently until reconnected */}
+              {truelayerExpired && (
+                <div className="mb-4 flex items-start gap-3 bg-amber-50 border-2 border-amber-400 rounded-xl p-4">
+                  <AlertTriangle size={22} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <h4 className="text-sm font-bold text-amber-900">⚠️ Revolut відключено — термін дозволу (90 днів) сплив</h4>
+                    <p className="text-xs text-amber-800 mt-1">
+                      Синхронізація транзакцій Revolut призупинена. Натисніть кнопку нижче для повторного підключення.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleConnectTrueLayer}
+                      className="mt-3 flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm"
+                    >
+                      <Landmark size={16} />
+                      Підключити Revolut знову
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!truelayerExpired && trueLayerAccessToken ? (
                 <div className="flex items-center justify-between bg-white border border-green-200 rounded-lg p-3">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-green-600">
-                      <CheckCircle size={20} />
+                      {truelayerTokenChecking
+                        ? <RefreshCw size={18} className="animate-spin" />
+                        : <CheckCircle size={20} />
+                      }
                     </div>
                     <div>
                       <h4 className="text-sm font-semibold text-gray-900">Revolut підключено</h4>
-                      <p className="text-xs text-gray-500">Автоматична синхронізація активна</p>
+                      <p className="text-xs text-gray-500">
+                        {truelayerTokenChecking ? 'Перевірка статусу токену...' : 'Автоматична синхронізація активна'}
+                      </p>
                     </div>
                   </div>
                   <button
@@ -852,7 +907,7 @@ export default function ProfilePage() {
                     Відключити
                   </button>
                 </div>
-              ) : (
+              ) : !truelayerExpired ? (
                 <button
                   type="button"
                   onClick={handleConnectTrueLayer}
@@ -861,7 +916,7 @@ export default function ProfilePage() {
                   <Landmark size={16} />
                   Підключити Revolut
                 </button>
-              )}
+              ) : null}
             </div>
 
             <p className="text-xs text-gray-400 mt-2">

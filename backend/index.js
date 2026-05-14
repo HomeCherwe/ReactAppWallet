@@ -3923,7 +3923,31 @@ app.post('/api/truelayer/exchange', getUserFromToken, async (req, res) => {
   }
 })
 
-// Helper to refresh TrueLayer token
+// DELETE /api/truelayer/disconnect - Properly disconnect Revolut (clears revolut_api via service role)
+app.delete('/api/truelayer/disconnect', getUserFromToken, async (req, res) => {
+  try {
+    const userId = req.user_id
+
+    // Clear revolut_api using service role (bypasses RLS — guaranteed to work)
+    const { error } = await supabase
+      .from('user_preferences')
+      .update({ revolut_api: null, updated_at: new Date().toISOString() })
+      .eq('user_id', userId)
+
+    if (error) {
+      console.error('[TrueLayer] Disconnect DB error:', error)
+      return res.status(500).json({ success: false, error: 'Failed to clear Revolut token: ' + error.message })
+    }
+
+    console.log('[TrueLayer] Revolut disconnected for user:', userId)
+    res.json({ success: true, message: 'Revolut disconnected successfully' })
+  } catch (error) {
+    console.error('[TrueLayer] Disconnect error:', error)
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+
 async function refreshTrueLayerToken(user_id, refresh_token) {
   try {
     console.log('[TrueLayer] Attempting to refresh token...')
@@ -4080,8 +4104,69 @@ app.post('/api/truelayer/data', async (req, res) => {
   }
 })
 
+// GET /api/truelayer/check-token - Check if TrueLayer token is still valid
+app.get('/api/truelayer/check-token', getUserFromToken, async (req, res) => {
+  try {
+    const userId = req.user_id
+
+    const { data: prefs, error: prefsError } = await supabase
+      .from('user_preferences')
+      .select('revolut_api')
+      .eq('user_id', userId)
+      .single()
+
+    if (prefsError || !prefs?.revolut_api?.access_token) {
+      return res.json({ connected: false, reason: 'no_token' })
+    }
+
+    const tlTokens = prefs.revolut_api
+    const accessToken = tlTokens.access_token
+
+    // Try to call TrueLayer /me endpoint to check token validity
+    try {
+      const response = await axios.get('https://api.truelayer.com/data/v1/me', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: 10000
+      })
+
+      if (response.status === 200) {
+        return res.json({ connected: true, valid: true })
+      }
+    } catch (tlError) {
+      const status = tlError.response?.status
+
+      // 401 = token expired, try refresh
+      if (status === 401 && tlTokens.refresh_token) {
+        console.log('[check-token] Token expired, attempting refresh...')
+        const newToken = await refreshTrueLayerToken(userId, tlTokens.refresh_token)
+        if (newToken) {
+          return res.json({ connected: true, valid: true, refreshed: true })
+        } else {
+          // Refresh failed = token is dead (90-day consent expired)
+          console.log('[check-token] Refresh failed - consent likely expired')
+          // Clear the expired tokens from DB
+          await supabase
+            .from('user_preferences')
+            .update({ revolut_api: null })
+            .eq('user_id', userId)
+          return res.json({ connected: false, valid: false, reason: 'consent_expired', cleared: true })
+        }
+      }
+
+      // Other errors
+      console.warn('[check-token] TrueLayer check error:', status, tlError.message)
+      return res.json({ connected: true, valid: false, reason: `api_error_${status || 'unknown'}` })
+    }
+
+    return res.json({ connected: false, reason: 'unknown' })
+  } catch (error) {
+    console.error('[check-token] Error:', error)
+    res.status(500).json({ connected: false, reason: 'server_error', error: error.message })
+  }
+})
+
 // POST /api/syncTrueLayer - Sync Revolut/TrueLayer transactions
-app.post('/api/syncTrueLayer', getUserFromToken, async (req, res) => {
+app.post('/api/syncTrueLayer', getUserFromTokenOrApiKey, async (req, res) => {
   try {
     const userId = req.user_id
     console.log('[TrueLayer] Starting sync for user:', userId)
