@@ -754,22 +754,17 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       // Or use a simpler approach with only supported fields
       const conditions = []
 
-      // Escape search term for PostgREST
-      // For values with spaces, wrap in quotes
-      const encodeValue = (val) => {
-        if (/\s/.test(val) || /[()]/.test(val)) {
-          return `"${val}"`
-        }
-        return val
-      }
-
-      const searchValue = encodeValue(searchTerm)
+      // Escape search term for PostgREST .or() syntax
+      // If the term contains spaces or special characters, it must be quoted,
+      // and the wildcards '*' MUST be INSIDE the quotes.
+      const safeVal = searchTerm.replace(/"/g, '')
+      const searchValue = `"*${safeVal}*"`
 
       // Search in text fields (category, card, note) with ILIKE for partial matching
-      // PostgREST format for .or(): field.ilike.*value* (where * is wildcard)
-      conditions.push(`category.ilike.*${searchValue}*`)
-      conditions.push(`card.ilike.*${searchValue}*`)
-      conditions.push(`note.ilike.*${searchValue}*`)
+      // PostgREST format for .or(): field.ilike."*value*"
+      conditions.push(`category.ilike.${searchValue}`)
+      conditions.push(`card.ilike.${searchValue}`)
+      conditions.push(`note.ilike.${searchValue}`)
 
       // Search in amount - use exact match for numeric values
       // Note: We can't use cast in .or(), so we'll filter amount separately if needed
@@ -3051,7 +3046,7 @@ async function postNewCheckMonoBank(amount, note, card, id, date, userId) {
   const payload = {
     // let DB generate UUID `id`; store Monobank's id in `transaction_id_card`
     amount: amount,
-    category: 'MonoBank',
+    category: 'MonoBank Sync',
     note: note,
     archives: false,
     card: card,
@@ -4046,7 +4041,7 @@ async function postNewCheckTrueLayer(user_id, tx, account_id, card_id) {
     }
 
     // Determine category (optional mapping)
-    const category = tx.transaction_classification?.[0] || 'Revolut'
+    const category = 'Revolut Sync'
 
     // Create payload
     const payload = {
