@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
-import { X, Plus, Trash2, ScanLine, AlertTriangle, Landmark } from 'lucide-react'
+import { X, Plus, Trash2, ScanLine, AlertTriangle, Landmark, ChevronDown, ChevronUp } from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
 import ConfirmModal from '../ConfirmModal'
 import DeleteTxModal from './DeleteTxModal'
@@ -65,6 +65,7 @@ export default function MonthlyPayment() {
     return res
   }
   const [rows, setRows] = useState([])
+  const [pinnedRows, setPinnedRows] = useState([])
   const [initialLoading, setInitialLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [cardMap, setCardMap] = useState({})
@@ -99,6 +100,7 @@ export default function MonthlyPayment() {
   const [categories, setCategories] = useState([])
   const [filtersLoaded, setFiltersLoaded] = useState(false) // Track if filters are loaded from DB
   const [showUsdt, setShowUsdt] = useState(true) // Show USDT transactions by default
+  const [pinnedExpanded, setPinnedExpanded] = useState(false) // Toggle pinned transactions section
 
   // Refund-linking mode: click refund on expense -> then click income tx to attach as refund
   const [refundPickExpenseId, setRefundPickExpenseId] = useState(null)
@@ -161,7 +163,7 @@ export default function MonthlyPayment() {
   // Hide refund transactions from the top-level list when their parent expense is already present,
   // so they appear only as nested items (no duplicates). If parent isn't loaded yet (pagination),
   // keep refund visible so user can still see it.
-  const visibleRows = useMemo(() => {
+  const rawVisibleRows = useMemo(() => {
     const all = rows || []
     const ids = new Set(all.map(t => t?.id).filter(Boolean))
     return all.filter((t) => {
@@ -170,6 +172,52 @@ export default function MonthlyPayment() {
       return !ids.has(parentId)
     })
   }, [rows])
+
+  const pinnedCategories = Array.isArray(settings?.dashboard?.pinnedCategories) 
+    ? settings.dashboard.pinnedCategories 
+    : []
+
+  // Split rawVisibleRows into pinned and regular based on category setting or manual pinning tag in note
+  const { pinnedTxs, regularTxs } = useMemo(() => {
+    const pinned = []
+    const regular = []
+    
+    const isTxPinned = (tx) => {
+      const isAutoPinned = pinnedCategories.includes(tx.category)
+      const isManuallyPinned = String(tx.note || '').includes('[pinned]')
+      return isAutoPinned || isManuallyPinned
+    }
+
+    for (const tx of rawVisibleRows) {
+      if (isTxPinned(tx)) {
+        pinned.push(tx)
+      } else {
+        regular.push(tx)
+      }
+    }
+
+    // Add extra pinned items from pinnedRows (avoiding duplicates)
+    // Only add if the tx STILL satisfies pinning conditions
+    const allPinnedIds = new Set(pinned.map(t => t.id))
+    const mainIds = new Set((rows || []).map(t => t.id))
+
+    for (const tx of pinnedRows || []) {
+      if (!allPinnedIds.has(tx.id) && isTxPinned(tx)) {
+        // Apply refund logic: hide if parent is loaded
+        const parentId = getRefundParentId(tx)
+        if (!parentId || (!mainIds.has(parentId) && !allPinnedIds.has(parentId))) {
+          pinned.push(tx)
+          allPinnedIds.add(tx.id)
+        }
+      }
+    }
+    
+    return { pinnedTxs: pinned, regularTxs: regular }
+  }, [rawVisibleRows, pinnedRows, pinnedCategories, rows])
+
+  // Instead of a single array, we will render pinned and regular separately.
+  // We keep visibleRows as all of them combined just in case it's used elsewhere for counting.
+  const visibleRows = rawVisibleRows
 
   // ESC cancels refund-pick mode
   useEffect(() => {
@@ -225,6 +273,24 @@ export default function MonthlyPayment() {
     } catch (e) {
       console.error('Failed to load refund children for expenses:', e)
       refundChildren = []
+    }
+
+    // Fetch pinned transactions globally if not appending
+    if (!append) {
+      const pinnedRequests = []
+      const validPinnedCats = (Array.isArray(pinnedCategories) ? pinnedCategories : []).filter(c => c && c.trim() !== '')
+      if (validPinnedCats.length > 0) {
+        pinnedRequests.push(listTransactions({ from: 0, to: 9999, categoryIn: validPinnedCats, excludeUsdt: !showUsdt, search }))
+      }
+      pinnedRequests.push(listTransactions({ from: 0, to: 9999, hasPinnedTag: true, excludeUsdt: !showUsdt, search }))
+      
+      try {
+        const pinnedResults = await Promise.all(pinnedRequests)
+        setPinnedRows(dedupeById(pinnedResults.flat().filter(Boolean)))
+      } catch (e) {
+        console.error('Failed to load pinned transactions:', e)
+        setPinnedRows([])
+      }
     }
 
     const mergedTxs = dedupeById([...(txs || []), ...(refundChildren || [])])
@@ -384,6 +450,14 @@ export default function MonthlyPayment() {
       }
 
       if (type === 'UPDATE' && tx) {
+        const isStillPinned = pinnedCategories.includes(tx.category) || String(tx.note || '').includes('[pinned]')
+        // Update or remove from pinnedRows based on whether tx still meets pinning condition
+        setPinnedRows(prev => {
+          const exists = (prev || []).some(r => r?.id === tx.id)
+          if (!exists) return prev
+          if (!isStillPinned) return (prev || []).filter(r => r?.id !== tx.id)
+          return (prev || []).map(r => r?.id === tx.id ? { ...r, ...tx } : r)
+        })
         if (!txMatchesCurrentView(tx) && !shouldKeepForNesting(tx)) {
           setRows(prev => (prev || []).filter(r => r?.id !== tx.id))
           return
@@ -398,6 +472,7 @@ export default function MonthlyPayment() {
 
       if (type === 'DELETE' && tx) {
         setRows(prev => (prev || []).filter(r => r?.id !== tx.id))
+        setPinnedRows(prev => (prev || []).filter(r => r?.id !== tx.id))
         return
       }
 
@@ -551,45 +626,52 @@ export default function MonthlyPayment() {
   }
 
   // Group transactions by day
-  const groupedByDay = visibleRows.reduce((acc, tx) => {
-    const dayKey = formatDateKey(tx.created_at)
+  const groupTransactionsByDay = (txs) => {
+    const grouped = txs.reduce((acc, tx) => {
+      const dayKey = formatDateKey(tx.created_at)
 
-    if (!acc[dayKey]) {
-      acc[dayKey] = {
-        date: tx.created_at,
-        dateHeader: isToday(tx.created_at) ? 'СЬОГОДНІ' : formatDateHeader(tx.created_at),
-        transactions: [],
-        total: 0
+      if (!acc[dayKey]) {
+        acc[dayKey] = {
+          date: tx.created_at,
+          dateHeader: isToday(tx.created_at) ? 'СЬОГОДНІ' : formatDateHeader(tx.created_at),
+          transactions: [],
+          total: 0
+        }
       }
-    }
-    acc[dayKey].transactions.push(tx)
-    // Денний підсумок: завжди в EUR
-    if (isExcludedFromStats(tx)) return acc
-    const amt = amountForStats(tx)
-    const txCurRaw = (tx.currency || cardMap[tx.card_id] || 'EUR')
-    const txCur = String(txCurRaw).toUpperCase() === 'USDT' ? 'USD' : String(txCurRaw).toUpperCase()
-    const inEUR = convertCurrency(amt, txCur, 'EUR')
-    if (inEUR != null && !Number.isNaN(inEUR)) {
-      acc[dayKey].total += Number(inEUR)
-    }
-    return acc
-  }, {})
+      acc[dayKey].transactions.push(tx)
+      // Денний підсумок: завжди в EUR
+      if (isExcludedFromStats(tx)) return acc
+      const amt = amountForStats(tx)
+      const txCurRaw = (tx.currency || cardMap[tx.card_id] || 'EUR')
+      const txCur = String(txCurRaw).toUpperCase() === 'USDT' ? 'USD' : String(txCurRaw).toUpperCase()
+      const inEUR = convertCurrency(amt, txCur, 'EUR')
+      if (inEUR != null && !Number.isNaN(inEUR)) {
+        acc[dayKey].total += Number(inEUR)
+      }
+      return acc
+    }, {})
 
-  // Sort transactions within each day (newest first)
-  Object.keys(groupedByDay).forEach(dayKey => {
-    groupedByDay[dayKey].transactions.sort((a, b) => {
-      const dateA = new Date(a.created_at)
-      const dateB = new Date(b.created_at)
-      return dateB - dateA // newest first
+    // Sort transactions within each day (newest first)
+    Object.keys(grouped).forEach(dayKey => {
+      grouped[dayKey].transactions.sort((a, b) => {
+        const dateA = new Date(a.created_at)
+        const dateB = new Date(b.created_at)
+        return dateB - dateA // newest first
+      })
     })
-  })
 
-  // Sort days (newest first)
-  const sortedDays = Object.keys(groupedByDay).sort((a, b) => {
-    const dateA = new Date(groupedByDay[a].date)
-    const dateB = new Date(groupedByDay[b].date)
-    return dateB - dateA // newest first
-  })
+    // Sort days (newest first)
+    return Object.keys(grouped)
+      .sort((a, b) => {
+        const dateA = new Date(grouped[a].date)
+        const dateB = new Date(grouped[b].date)
+        return dateB - dateA // newest first
+      })
+      .map(key => ({ dayKey: key, ...grouped[key] }))
+  }
+
+  const sortedDays = groupTransactionsByDay(regularTxs)
+  const pinnedSortedDays = groupTransactionsByDay(pinnedTxs)
 
   const startRefund = (tx) => {
     if (!tx) return
@@ -724,6 +806,7 @@ export default function MonthlyPayment() {
     try {
       await deleteTransaction(pendingDelete.id)
       setRows(prev => prev.filter(r => r.id !== pendingDelete.id))
+      setPinnedRows(prev => prev.filter(r => r.id !== pendingDelete.id))
       try {
         // inform other components: deleted tx reduces balance
         txBus.emit({
@@ -747,6 +830,7 @@ export default function MonthlyPayment() {
     try {
       await archiveTransaction(pendingDelete.id)
       setRows(prev => prev.filter(r => r.id !== pendingDelete.id))
+      setPinnedRows(prev => prev.filter(r => r.id !== pendingDelete.id))
       try {
         // inform other components: archived tx reduces balance
         txBus.emit({
@@ -768,6 +852,14 @@ export default function MonthlyPayment() {
   const handleSaved = (tx) => {
     // prepend saved tx but avoid duplicates by id
     setRows(prev => dedupeById([tx, ...prev]))
+    // Update pinnedRows: remove if tx no longer satisfies pinning condition, patch if it does
+    setPinnedRows(prev => {
+      const exists = (prev || []).some(r => r?.id === tx?.id)
+      if (!exists) return prev
+      const isStillPinned = pinnedCategories.includes(tx.category) || String(tx.note || '').includes('[pinned]')
+      if (!isStillPinned) return (prev || []).filter(r => r?.id !== tx?.id)
+      return (prev || []).map(r => r?.id === tx?.id ? { ...r, ...tx } : r)
+    })
   }
 
   const handleSelect = (txId, checked, index, event) => {
@@ -1163,13 +1255,124 @@ export default function MonthlyPayment() {
             </div>
           )}
           <div ref={listRef} className="space-y-6">
-            {visibleRows.length === 0 ? (
+            {/* Pinned Section */}
+            {pinnedTxs.length > 0 && (
+              <div className="bg-amber-50/50 rounded-2xl border border-amber-200 overflow-hidden mb-6">
+                <button
+                  onClick={() => setPinnedExpanded(!pinnedExpanded)}
+                  className="w-full flex items-center justify-between p-4 bg-amber-100/50 hover:bg-amber-100 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-amber-600">📌</span>
+                    <span className="font-semibold text-amber-900">Закріплені транзакції</span>
+                    <span className="bg-amber-200 text-amber-800 text-xs font-bold px-2 py-0.5 rounded-full">
+                      {pinnedTxs.length}
+                    </span>
+                  </div>
+                  <div className="text-amber-700">
+                    {pinnedExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                  </div>
+                </button>
+                
+                {pinnedExpanded && (
+                  <div className="p-4 space-y-6">
+                    {pinnedSortedDays.map(({ dayKey, dateHeader, transactions, total }) => {
+                      const dayCurrency = 'EUR'
+
+                      return (
+                        <div key={dayKey} className="space-y-2">
+                          <div className="flex items-center justify-between mb-3 sticky top-0 bg-amber-50/90 py-2 border-b border-amber-200 z-10 backdrop-blur-sm">
+                            <div className="text-sm font-semibold text-amber-900">
+                              {dateHeader}
+                            </div>
+                            <div
+                              className={`text-sm font-semibold ${total < 0 ? 'text-rose-600' : total > 0 ? 'text-emerald-600' : 'text-amber-900'
+                                }`}
+                            >
+                              {!ratesReady
+                                ? '… EUR'
+                                : total > 0
+                                  ? `+${fmtAmount(total, dayCurrency)}`
+                                  : total < 0
+                                    ? `-${fmtAmount(Math.abs(total), dayCurrency)}`
+                                    : fmtAmount(total, dayCurrency)}
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            {transactions.map((tx, idx) => {
+                              // prefer transaction's own currency if present; otherwise use card currency by card_id
+                              const currency = (tx.currency || cardMap[tx.card_id] || 'EUR')
+                              const refundTxs = refundsByExpenseId?.[tx.id] || []
+                              const refundTxsSorted = refundTxs
+                                .slice()
+                                .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+                              let amountOverride = null
+                              const originalAmt = Number(tx.amount || 0)
+                              const statAmt = amountForStats(tx)
+                              if (statAmt !== originalAmt) {
+                                const baseCurRaw = (tx.currency || cardMap[tx.card_id] || 'EUR')
+                                const baseCur = String(baseCurRaw).toUpperCase() === 'USDT' ? 'USD' : String(baseCurRaw).toUpperCase()
+                                amountOverride = { primaryAmount: statAmt, secondaryAmount: originalAmt, currency: baseCur }
+                              }
+                              const originalIndex = visibleRows.findIndex(r => r.id === tx.id)
+                              const isSelected = selectedIds.has(tx.id)
+
+                              return (
+                                <motion.div
+                                  key={tx.id}
+                                  initial={{ opacity: 0, y: 10, scale: 0.995 }}
+                                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                                  transition={{ duration: 0.25 }}
+                                >
+                                  <Row
+                                    tx={tx}
+                                    currency={currency}
+                                    onDetails={openDetails}
+                                    onAskDelete={askDelete}
+                                    onRefund={startRefund}
+                                    swipeActions
+                                    amountOverride={amountOverride}
+                                    selected={selectedIds.has(tx.id)}
+                                    onSelect={(txId, checked, event) => handleSelect(txId, checked, originalIndex, event)}
+                                  />
+
+                                  {/* Nested refund transactions */}
+                                  {Number(tx.amount || 0) < 0 && refundTxsSorted.length > 0 && (
+                                    <div className="mt-1 ml-6 pl-3 border-l-2 border-gray-200 space-y-1">
+                                      {refundTxsSorted.map((rtx) => {
+                                        const rCurrency = (rtx.currency || cardMap[rtx.card_id] || 'EUR')
+                                        return (
+                                          <Row
+                                            key={rtx.id}
+                                            tx={rtx}
+                                            currency={rCurrency}
+                                            onDetails={openDetails}
+                                            onCancelRefund={cancelRefundLink}
+                                            compact
+                                            className="opacity-90"
+                                          />
+                                        )
+                                      })}
+                                    </div>
+                                  )}
+                                </motion.div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {regularTxs.length === 0 && pinnedTxs.length === 0 ? (
               <div className="text-sm text-gray-500 text-center py-4">
                 Транзакції не знайдено за обраними фільтрами
               </div>
             ) : (
-              sortedDays.map((dayKey) => {
-                const { dateHeader, transactions, total } = groupedByDay[dayKey]
+              sortedDays.map(({ dayKey, dateHeader, transactions, total }) => {
                 const dayCurrency = 'EUR'
 
                 return (

@@ -60,6 +60,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
     debtParty: '',
     debtIsLend: true,
     excludeFromStats: false,
+    pinned: false,
     date: new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16),
   })
 
@@ -101,16 +102,22 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
         const debtIsLend = base?.debt_direction
           ? base.debt_direction === 'lend'
           : Number(base.amount || 0) < 0
+          
+        const rawNote = base.note || ''
+        const isPinned = rawNote.includes('[pinned]')
+        const cleanNote = rawNote.replace(/\[pinned\]/g, '').trim()
+
         setForm({
           kind: isDebt ? 'debt' : (isExp ? 'expense' : 'income'),
           amount: String(abs || ''),
           category: isDebt ? 'Борг' : (base.category || ''),
           cardId: base.card_id || '',
-          note: base.note || '',
+          note: cleanNote,
           rateToUAH: 1,
           debtParty: base.debt_party || '',
           debtIsLend,
           excludeFromStats: base?.exclude_from_stats === true || base?.exclude_from_stats === 'true' || base?.exclude_from_stats === 1,
+          pinned: isPinned,
           date: base.created_at ? new Date(new Date(base.created_at).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16),
         })
         // keep original transaction for delta calculations
@@ -426,10 +433,15 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
 
     setSaving(true)
     try {
+      let finalNote = form.note ? form.note.trim() : ''
+      if (form.pinned) {
+        finalNote = finalNote ? `${finalNote}\n[pinned]` : '[pinned]'
+      }
+
       const payload = {
         amount: signed,
         category: form.kind === 'debt' ? 'Борг' : (form.category || null),
-        note: form.note || null,
+        note: finalNote || null,
         card: cardLabel,
         card_id: form.cardId || null,
         is_debt: form.kind === 'debt',
@@ -449,6 +461,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
       }
       // emit delta events so other components update
       try {
+        const freshTx = fresh ? fresh : { ...tx, ...payload }
         const orig = originalRef.current || tx || {}
         const oldAmount = Number(orig.amount || 0)
         const newAmount = Number(signed || 0)
@@ -457,18 +470,18 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
 
         if (oldCard === newCard) {
           const delta = newAmount - oldAmount
-          if (newCard && delta) {
-            txBus.emit({ 
-              type: 'UPDATE',
-              card_id: newCard, 
-              delta 
-            })
-          }
+          txBus.emit({ 
+            type: 'UPDATE',
+            transaction: freshTx,
+            card_id: newCard, 
+            delta: delta || 0
+          })
         } else {
           // remove effect from old card
           if (oldCard) {
             txBus.emit({ 
               type: 'UPDATE',
+              transaction: freshTx,
               card_id: oldCard, 
               delta: -oldAmount 
             })
@@ -477,6 +490,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
           if (newCard) {
             txBus.emit({ 
               type: 'UPDATE',
+              transaction: freshTx,
               card_id: newCard, 
               delta: newAmount 
             })
@@ -733,8 +747,35 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
                 value={form.note}
                 onChange={e=>setForm({...form, note: e.target.value})} />
 
+              {/* Pinned toggle */}
+              <div className="flex items-center justify-between py-2 border-t border-gray-100">
+                <div className="flex flex-col">
+                  <label className="text-sm text-gray-700 font-medium">
+                    Закріпити на головній
+                  </label>
+                  <span className="text-[11px] text-gray-500">
+                    Транзакція відображатиметься у верхньому блоці
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, pinned: !f.pinned }))}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 ${
+                    form.pinned ? 'bg-amber-500' : 'bg-gray-300'
+                  }`}
+                  role="switch"
+                  aria-checked={form.pinned}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      form.pinned ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
               {/* Exclude from stats toggle */}
-              <div className="flex items-center justify-between py-2">
+              <div className="flex items-center justify-between py-2 border-t border-gray-100">
                 <label className="text-sm text-gray-700 font-medium">
                   Враховувати в статистиці
                 </label>

@@ -5,13 +5,15 @@ import { apiFetch } from '../utils.jsx'
 // Forward declaration для invalidateCategoriesCache
 let invalidateCategoriesCacheFn = null
 
-export async function listTransactions({ from = 0, to = 9, search = '', transactionType = 'all', category = '', excludeUsdt = false, isDebt = undefined } = {}) {
+export async function listTransactions({ from = 0, to = 9, search = '', transactionType = 'all', category = '', categoryIn = [], hasPinnedTag = false, excludeUsdt = false, isDebt = undefined } = {}) {
   const params = new URLSearchParams({
     from: from.toString(),
     to: to.toString(),
     ...(search && { search }),
     ...(transactionType && transactionType !== 'all' && { transaction_type: transactionType }),
     ...(category && { category }),
+    ...(categoryIn && categoryIn.length > 0 && { category_in: categoryIn.join(',') }),
+    ...(hasPinnedTag && { has_pinned_tag: 'true' }),
     ...(excludeUsdt && { exclude_usdt: 'true' }),
     ...(typeof isDebt === 'boolean' ? { is_debt: isDebt ? 'true' : 'false' } : {})
   })

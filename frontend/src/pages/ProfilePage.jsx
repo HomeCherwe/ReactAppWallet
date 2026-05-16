@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import { User, Mail, Save, Upload, Key, CreditCard, Copy, Eye, EyeOff, RefreshCw, BarChart3, LogOut, Landmark, CheckCircle, XCircle, HelpCircle, ChevronDown, ChevronUp, ExternalLink, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getUserAPIs, getApiKey, generateApiKey, updatePreferencesSection, invalidatePreferencesCache } from '../api/preferences'
+import { getTransactionCategories } from '../api/transactions'
 import { getApiUrl, apiFetch } from '../utils.jsx'
 import { useSettingsStore } from '../store/useSettingsStore'
 import ConfirmModal from '../components/ConfirmModal'
@@ -52,6 +53,9 @@ export default function ProfilePage() {
   const updateNestedSetting = useSettingsStore((state) => state.updateNestedSetting)
   const getNestedSetting = useSettingsStore((state) => state.getNestedSetting)
   const showUsdtInChart = getNestedSetting('dashboard.showUsdtInChart', true)
+  const pinnedCategories = getNestedSetting('dashboard.pinnedCategories', [])
+
+  const [categories, setCategories] = useState([])
 
   // Logout modal
   const [showLogoutModal, setShowLogoutModal] = useState(false)
@@ -81,6 +85,8 @@ export default function ProfilePage() {
         setAvatarPreview(session.user.user_metadata?.avatar_url || null)
       }
     })
+
+    getTransactionCategories().then(cats => setCategories(cats)).catch(console.error)
 
     return () => subscription.unsubscribe()
   }, [])
@@ -956,6 +962,42 @@ export default function ProfilePage() {
                 />
                 <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
               </label>
+            </div>
+
+            <div className="pt-4 border-t border-gray-200">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Закріплені категорії транзакцій
+              </label>
+              <p className="text-xs text-gray-500 mb-3">
+                Виберіть категорії, які будуть завжди відображатися зверху на головній сторінці як несортовані.
+              </p>
+              
+              <div className="flex flex-wrap gap-2">
+                {categories.length > 0 ? categories.map(cat => {
+                  const isSelected = pinnedCategories.includes(cat)
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => {
+                        const newPinned = isSelected 
+                          ? pinnedCategories.filter(c => c !== cat)
+                          : [...pinnedCategories, cat]
+                        updateNestedSetting('dashboard.pinnedCategories', newPinned)
+                      }}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                        isSelected 
+                          ? 'bg-amber-100 border-amber-300 text-amber-800' 
+                          : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      {cat} {isSelected && '✓'}
+                    </button>
+                  )
+                }) : (
+                  <span className="text-xs text-gray-500 italic">Немає доступних категорій.</span>
+                )}
+              </div>
             </div>
           </div>
         </div>

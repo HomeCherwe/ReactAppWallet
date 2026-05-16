@@ -260,7 +260,9 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
             else prevMonthTotal += addAbs
           }
         } catch (e) {
-          console.error('Failed to fetch previous month transactions:', e)
+          if (e.name !== 'AbortError' && !abortController.signal.aborted) {
+            console.error('Failed to fetch previous month transactions:', e)
+          }
         }
 
         if (!mounted || abortController.signal.aborted) return

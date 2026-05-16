@@ -60,6 +60,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
     debtParty: '',
     debtIsLend: true,
     excludeFromStats: false,
+    pinned: false,
     date: new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16),
   })
 
@@ -128,7 +129,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
   useEffect(() => {
     if (!open) {
       setForm({ 
-        kind: 'expense', amount: '', category: '', cardId: '', note: '', debtParty: '', debtIsLend: true, excludeFromStats: false,
+        kind: 'expense', amount: '', category: '', cardId: '', note: '', debtParty: '', debtIsLend: true, excludeFromStats: false, pinned: false,
         date: new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
       })
       setShowReceiptActions(false)
@@ -378,10 +379,15 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
 
     setSaving(true)
     try {
+      let finalNote = form.note ? form.note.trim() : ''
+      if (form.pinned) {
+        finalNote = finalNote ? `${finalNote}\n[pinned]` : '[pinned]'
+      }
+
       const payload = {
         amount: signed,
         category: form.kind === 'debt' ? 'Борг' : (form.category || null),
-        note: form.note || null,
+        note: finalNote || null,
         card: cardLabel,
         card_id: form.cardId || null,
         created_at: form.date ? new Date(form.date).toISOString() : new Date().toISOString(),
@@ -643,10 +649,35 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
                 value={form.note}
                 onChange={e=>setForm({...form, note: e.target.value})} />
 
-              {/* rate input removed - using Monobank rates via useMonoRates */}
+              {/* Pinned toggle */}
+              <div className="flex items-center justify-between py-2 border-t border-gray-100">
+                <div className="flex flex-col">
+                  <label className="text-sm text-gray-700 font-medium">
+                    Закріпити на головній
+                  </label>
+                  <span className="text-[11px] text-gray-500">
+                    Транзакція відображатиметься у верхньому блоці
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, pinned: !f.pinned }))}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 ${
+                    form.pinned ? 'bg-amber-500' : 'bg-gray-300'
+                  }`}
+                  role="switch"
+                  aria-checked={form.pinned}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      form.pinned ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
 
               {/* Exclude from stats toggle */}
-              <div className="flex items-center justify-between py-2">
+              <div className="flex items-center justify-between py-2 border-t border-gray-100">
                 <label className="text-sm text-gray-700 font-medium">
                   Враховувати в статистиці
                 </label>

@@ -476,6 +476,8 @@ app.get('/api/transactions/categories', getUserFromToken, async (req, res) => {
       .select('category')
       .eq('user_id', req.user_id)
       .not('category', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(5000)
 
     if (error) throw error
 
@@ -601,6 +603,8 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       card_id,
       refund_for,
       refund_for_in,
+      category_in,
+      has_pinned_tag,
       limit,
       fields = 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, merchant_address, merchant_lat, merchant_lng'
     } = req.query
@@ -689,6 +693,23 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
     const category = req.query.category
     if (category) {
       q = q.eq('category', category)
+    }
+
+    // Multiple categories filter
+    if (category_in !== undefined) {
+      const cats = String(category_in).split(',').map(s => s.trim()).filter(Boolean)
+      if (cats.length > 0) {
+        q = q.in('category', cats)
+      } else {
+        // If category_in was provided but contains no valid categories (e.g. empty string),
+        // we must force the query to return empty results instead of ignoring the filter and returning everything!
+        q = q.eq('id', -1) // impossible condition
+      }
+    }
+
+    // Pinned tag filter
+    if (has_pinned_tag === 'true') {
+      q = q.ilike('note', '%[pinned]%')
     }
 
     // Exclude USDT filter - join with cards to filter by currency
