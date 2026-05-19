@@ -4,7 +4,6 @@ import { motion } from 'framer-motion'
 import { User, Mail, Save, Upload, Key, CreditCard, Copy, Eye, EyeOff, RefreshCw, BarChart3, LogOut, Landmark, CheckCircle, XCircle, HelpCircle, ChevronDown, ChevronUp, ExternalLink, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getUserAPIs, getApiKey, generateApiKey, updatePreferencesSection, invalidatePreferencesCache } from '../api/preferences'
-import { getTransactionCategories } from '../api/transactions'
 import { getApiUrl, apiFetch } from '../utils.jsx'
 import { useSettingsStore } from '../store/useSettingsStore'
 import ConfirmModal from '../components/ConfirmModal'
@@ -55,7 +54,7 @@ export default function ProfilePage() {
   const showUsdtInChart = getNestedSetting('dashboard.showUsdtInChart', true)
   const pinnedCategories = getNestedSetting('dashboard.pinnedCategories', [])
 
-  const [categories, setCategories] = useState([])
+  const [newCategoryInput, setNewCategoryInput] = useState('')
 
   // Logout modal
   const [showLogoutModal, setShowLogoutModal] = useState(false)
@@ -86,7 +85,6 @@ export default function ProfilePage() {
       }
     })
 
-    getTransactionCategories().then(cats => setCategories(cats)).catch(console.error)
 
     return () => subscription.unsubscribe()
   }, [])
@@ -969,33 +967,69 @@ export default function ProfilePage() {
                 Закріплені категорії транзакцій
               </label>
               <p className="text-xs text-gray-500 mb-3">
-                Виберіть категорії, які будуть завжди відображатися зверху на головній сторінці як несортовані.
+                Додайте категорії, які будуть завжди відображатися зверху на головній сторінці. Введіть назву вручну і натисніть «+».
               </p>
-              
+
+              {/* Input row */}
+              <div className="flex gap-2 mb-3">
+                <input
+                  type="text"
+                  value={newCategoryInput}
+                  onChange={(e) => setNewCategoryInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      const trimmed = newCategoryInput.trim()
+                      if (trimmed && !pinnedCategories.includes(trimmed)) {
+                        updateNestedSetting('dashboard.pinnedCategories', [...pinnedCategories, trimmed])
+                        toast.success(`Категорію "${trimmed}" додано`)
+                      }
+                      setNewCategoryInput('')
+                    }
+                  }}
+                  placeholder="Назва категорії..."
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const trimmed = newCategoryInput.trim()
+                    if (!trimmed) return
+                    if (!pinnedCategories.includes(trimmed)) {
+                      updateNestedSetting('dashboard.pinnedCategories', [...pinnedCategories, trimmed])
+                      toast.success(`Категорію "${trimmed}" додано`)
+                    } else {
+                      toast('Така категорія вже є в списку', { icon: 'ℹ️' })
+                    }
+                    setNewCategoryInput('')
+                  }}
+                  className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold transition-colors flex items-center gap-1"
+                >
+                  +
+                </button>
+              </div>
+
+              {/* Pinned tags */}
               <div className="flex flex-wrap gap-2">
-                {categories.length > 0 ? categories.map(cat => {
-                  const isSelected = pinnedCategories.includes(cat)
-                  return (
+                {pinnedCategories.length > 0 ? pinnedCategories.map(cat => (
+                  <span
+                    key={cat}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-100 border border-amber-300 text-amber-800 rounded-full text-xs font-medium"
+                  >
+                    {cat}
                     <button
-                      key={cat}
                       type="button"
                       onClick={() => {
-                        const newPinned = isSelected 
-                          ? pinnedCategories.filter(c => c !== cat)
-                          : [...pinnedCategories, cat]
-                        updateNestedSetting('dashboard.pinnedCategories', newPinned)
+                        updateNestedSetting('dashboard.pinnedCategories', pinnedCategories.filter(c => c !== cat))
                       }}
-                      className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                        isSelected 
-                          ? 'bg-amber-100 border-amber-300 text-amber-800' 
-                          : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
-                      }`}
+                      className="ml-0.5 hover:text-amber-900 text-amber-600 font-bold leading-none"
+                      title="Видалити"
                     >
-                      {cat} {isSelected && '✓'}
+                      ×
                     </button>
-                  )
-                }) : (
-                  <span className="text-xs text-gray-500 italic">Немає доступних категорій.</span>
+                  </span>
+                )) : (
+                  <span className="text-xs text-gray-400 italic">Немає закріплених категорій. Додайте першу вище.</span>
                 )}
               </div>
             </div>
