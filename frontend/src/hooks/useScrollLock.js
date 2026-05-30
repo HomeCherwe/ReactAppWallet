@@ -1,6 +1,11 @@
 import { useEffect } from 'react'
 
-export function useScrollLock(isLocked) {
+/**
+ * Locks body scroll while isLocked is true.
+ * @param {boolean} isLocked
+ * @param {number} exitDelay - ms to wait before unlocking (to cover exit animations)
+ */
+export function useScrollLock(isLocked, exitDelay = 0) {
   useEffect(() => {
     if (!isLocked) return
 
@@ -17,11 +22,18 @@ export function useScrollLock(isLocked) {
       document.body.style.paddingRight = `${scrollbarWidth}px`
     }
 
-    // Cleanup: restore original values
+    // Cleanup: restore after exit animation finishes
     return () => {
-      document.body.style.overflow = originalOverflow
-      document.body.style.paddingRight = originalPaddingRight
+      if (exitDelay > 0) {
+        const t = setTimeout(() => {
+          document.body.style.overflow = originalOverflow
+          document.body.style.paddingRight = originalPaddingRight
+        }, exitDelay)
+        return () => clearTimeout(t)
+      } else {
+        document.body.style.overflow = originalOverflow
+        document.body.style.paddingRight = originalPaddingRight
+      }
     }
-  }, [isLocked])
+  }, [isLocked]) // eslint-disable-line react-hooks/exhaustive-deps
 }
-

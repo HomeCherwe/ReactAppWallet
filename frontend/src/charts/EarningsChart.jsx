@@ -215,8 +215,8 @@ const CustomTooltip = ({ active, payload, label, onPointClick, isMobile, currenc
 
 function dayKey(dt) {
   const d = new Date(dt)
-  // yyyy-mm-dd
-  return d.toISOString().slice(0,10)
+  // Use LOCAL date so midnight local time stays on the correct day (avoids UTC offset issues)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 function fmtLabel(iso) {
@@ -378,7 +378,7 @@ function computeChartData(txsArg, modeArg, fromArg, toArg, currencyArg) {
     const currencies = Array.from(currencyMaps.keys()).sort()
     
     for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
-      const iso = d.toISOString().slice(0,10)
+      const iso = dayKey(d)  // local date key
       const dayData = { name: fmtLabel(iso), _iso: iso }
       
       // Додаємо значення для кожної валюти
@@ -415,7 +415,7 @@ function computeChartData(txsArg, modeArg, fromArg, toArg, currencyArg) {
   
   const out = []
   for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
-    const iso = d.toISOString().slice(0,10)
+    const iso = dayKey(d)  // local date key
     const value = Number((map.get(iso) || 0).toFixed(2))
     out.push({ 
       name: fmtLabel(iso), 
@@ -740,7 +740,7 @@ export default function EarningsChart(){
       const included = getIncludedTxIds(txs || [], mode, currency === 'ALL' ? null : currency)
       const txsForDay = (txs || []).filter(t => {
         try { 
-          if (new Date(t.created_at).toISOString().slice(0,10) !== iso) return false
+          if (dayKey(t.created_at) !== iso) return false
           if (!included.has(t.id)) return false
           // Фільтруємо USDT якщо налаштування вимкнено
           if (currency === 'ALL' && !showUsdtInChart) {
@@ -917,7 +917,7 @@ export default function EarningsChart(){
               const included = getIncludedTxIds(txs || [], mode, currency === 'ALL' ? null : currency)
               const txsForDay = (txs || []).filter(t => {
                 try { 
-                  if (new Date(t.created_at).toISOString().slice(0,10) !== clickedDay._iso) return false
+                  if (dayKey(t.created_at) !== clickedDay._iso) return false
                   if (!included.has(t.id)) return false
                   // Фільтруємо USDT якщо налаштування вимкнено
                   if (currency === 'ALL' && !showUsdtInChart) {
@@ -968,7 +968,7 @@ export default function EarningsChart(){
                   const included = getIncludedTxIds(txs || [], mode, currency === 'ALL' ? null : currency)
                   const txsForDay = (txs || []).filter(t => {
                     try { 
-                      if (new Date(t.created_at).toISOString().slice(0,10) !== iso) return false
+                      if (dayKey(t.created_at) !== iso) return false
                       if (!included.has(t.id)) return false
                       // Фільтруємо USDT якщо налаштування вимкнено
                       if (currency === 'ALL' && !showUsdtInChart) {

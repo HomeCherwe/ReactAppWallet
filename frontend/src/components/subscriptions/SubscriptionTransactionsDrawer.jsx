@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Calendar, DollarSign, FileText, ArrowRight, History } from 'lucide-react'
+import { X, History } from 'lucide-react'
 import { getTransactionsBySubscription } from '../../api/transactions'
 import Row from '../transactions/Row'
 import toast from 'react-hot-toast'
@@ -84,88 +85,92 @@ export default function SubscriptionTransactionsDrawer({ open, onClose, subscrip
         return dateB - dateA // newest first
     })
 
-    return (
+    return createPortal(
         <AnimatePresence>
+            {/* Overlay — direct AnimatePresence child */}
             {open && (
-                <>
-                    {/* Backdrop */}
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        onClick={onClose}
-                        className="fixed inset-0 bg-black/50 z-[100]"
-                    />
-
-                    {/* Drawer */}
-                    <motion.div
-                        initial={{ x: '100%' }}
-                        animate={{ x: 0 }}
-                        exit={{ x: '100%' }}
-                        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                        className="fixed inset-y-0 right-0 w-full sm:w-[450px] bg-white shadow-2xl z-[101] flex flex-col"
-                    >
-                        {/* Header */}
-                        <div className="p-4 border-b flex items-center justify-between bg-gray-50">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
-                                    <History size={20} />
-                                </div>
-                                <div>
-                                    <h2 className="font-semibold text-gray-900">Історія транзакцій</h2>
-                                    <p className="text-xs text-gray-500">{subscription?.name}</p>
-                                </div>
-                            </div>
-                            <button
-                                onClick={onClose}
-                                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                            >
-                                <X size={20} />
-                            </button>
-                        </div>
-
-                        {/* Content */}
-                        <div className="flex-1 overflow-y-auto p-4 bg-gray-50/50">
-                            {loading ? (
-                                <div className="flex items-center justify-center h-full">
-                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-                                </div>
-                            ) : transactions.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center h-full text-gray-500 text-center">
-                                    <div className="p-4 bg-gray-100 rounded-full mb-3">
-                                        <History size={32} className="opacity-40" />
-                                    </div>
-                                    <p>Транзакцій за цією підпискою не знайдено</p>
-                                </div>
-                            ) : (
-                                <div className="space-y-6">
-                                    {sortedDays.map(dayKey => {
-                                        const group = groupedByDay[dayKey]
-                                        return (
-                                            <div key={dayKey}>
-                                                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">
-                                                    {group.dateHeader}
-                                                </h3>
-                                                <div className="space-y-2">
-                                                    {group.transactions.map((tx) => (
-                                                        <Row
-                                                            key={tx.id}
-                                                            tx={tx}
-                                                            currency={tx.currency || cardMap[tx.card_id] || 'UAH'} // Get currency from card or tx
-                                                            className="bg-white"
-                                                        // onDetails={() => {}} // Optional: details on click
-                                                        />
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )
-                                    })}
-                                </div>
-                            )}
-                        </div>
-                    </motion.div>
-                </>
+                <motion.div
+                    key="sub-drawer-overlay"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    onClick={onClose}
+                    className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100]"
+                />
             )}
-        </AnimatePresence>
+
+            {/* Drawer — direct AnimatePresence child */}
+            {open && (
+                <motion.div
+                    key="sub-drawer-panel"
+                    initial={{ x: '100%', opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    exit={{ x: '100%', opacity: 0 }}
+                    transition={{ type: 'spring', stiffness: 380, damping: 34 }}
+                    className="fixed inset-y-0 right-0 w-full sm:w-[450px] bg-white shadow-2xl z-[101] flex flex-col overflow-hidden"
+                >
+                    {/* Header */}
+                    <div className="p-4 border-b flex items-center justify-between bg-gray-50">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
+                                <History size={20} />
+                            </div>
+                            <div>
+                                <h2 className="font-semibold text-gray-900">Історія транзакцій</h2>
+                                <p className="text-xs text-gray-500">{subscription?.name}</p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={onClose}
+                            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                        >
+                            <X size={20} />
+                        </button>
+                    </div>
+
+                    {/* Content */}
+                    <div className="flex-1 overflow-y-auto p-4 bg-gray-50/50">
+                        {loading ? (
+                            <div className="flex items-center justify-center h-full">
+                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+                            </div>
+                        ) : transactions.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center h-full text-gray-500 text-center">
+                                <div className="p-4 bg-gray-100 rounded-full mb-3">
+                                    <History size={32} className="opacity-40" />
+                                </div>
+                                <p>Транзакцій за цією підпискою не знайдено</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-6">
+                                {sortedDays.map(dayKey => {
+                                    const group = groupedByDay[dayKey]
+                                    return (
+                                        <div key={dayKey}>
+                                            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">
+                                                {group.dateHeader}
+                                            </h3>
+                                            <div className="space-y-2">
+                                                {group.transactions.map((tx) => (
+                                                    <Row
+                                                        key={tx.id}
+                                                        tx={tx}
+                                                        currency={tx.currency || cardMap[tx.card_id] || 'UAH'} // Get currency from card or tx
+                                                        className="bg-white"
+                                                    // onDetails={() => {}} // Optional: details on click
+                                                    />
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        )}
+                    </div>
+                </motion.div>
+            )}
+        </AnimatePresence>,
+        document.body
     )
 }

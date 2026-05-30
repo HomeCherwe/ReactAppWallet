@@ -21,6 +21,30 @@ export async function listTransactions({ from = 0, to = 9, search = '', transact
   return await apiFetch(`/api/transactions?${params}`)
 }
 
+/**
+ * Fetch transactions for a specific card with optional date range and pagination
+ */
+export async function listTransactionsByCard({
+  cardId,
+  from = 0,
+  to = 49,
+  startDate,
+  endDate,
+  transactionType = 'all',
+  search = '',
+} = {}) {
+  const params = new URLSearchParams({
+    from: from.toString(),
+    to: to.toString(),
+    ...(cardId && { card_id: cardId }),
+    ...(startDate && { start_date: startDate }),
+    ...(endDate && { end_date: endDate }),
+    ...(transactionType && transactionType !== 'all' && { transaction_type: transactionType }),
+    ...(search && { search }),
+  })
+  return await apiFetch(`/api/transactions?${params}`)
+}
+
 // Debt parties cache
 let debtPartiesCache = null
 let debtPartiesCacheTimestamp = 0

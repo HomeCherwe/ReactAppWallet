@@ -13,6 +13,7 @@ import { txBus } from '../utils/txBus'
 import toast from 'react-hot-toast'
 import BaseModal from './BaseModal'
 import { useSettingsStore } from '../store/useSettingsStore'
+import CardTransactionsDrawer from './transactions/CardTransactionsDrawer'
 
 const GRADS = [
   'from-indigo-500 via-fuchsia-500 to-amber-400',
@@ -34,7 +35,7 @@ const formatCardNumber = (num, bank, name) => {
   return `${g[0]} ${g[1]} ${g[2]} ${g[3]}`
 }
 
-function SortableCardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false, onToggleFavorite, onViewBank }) {
+function SortableCardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false, onToggleFavorite, onViewBank, onCardClick }) {
   const {
     attributes,
     listeners,
@@ -67,12 +68,13 @@ function SortableCardTile({ c, onEdit, onDelete, showActions = true, isFavorite 
         onToggleFavorite={onToggleFavorite}
         isDragging={isDragging}
         onViewBank={onViewBank}
+        onCardClick={onCardClick}
       />
     </div>
   )
 }
 
-function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false, onToggleFavorite, isDragging = false, isGrouped = false, onViewBank }) {
+function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false, onToggleFavorite, isDragging = false, isGrouped = false, onViewBank, onCardClick }) {
   const g = GRADS[Math.abs((c.id || '').charCodeAt(0) || 0) % GRADS.length]
   const cardNumber = formatCardNumber(c.card_number, c.bank, c.name)
   
@@ -94,7 +96,12 @@ function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false,
       layout
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: isDragging ? 0.5 : 1, y: 0 }}
-      className={`relative overflow-hidden rounded-2xl text-white shadow-glass ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+      onClick={(e) => {
+        // Don't open drawer if clicking on buttons
+        if (e.target.closest('button')) return
+        onCardClick?.(c)
+      }}
+      className={`relative overflow-hidden rounded-2xl text-white shadow-glass ${isDragging ? 'cursor-grabbing' : onCardClick ? 'cursor-pointer' : 'cursor-grab'}`}
       style={{
         aspectRatio: isGrouped ? '1.586 / 1.08' : '1.586 / 1',
         backgroundImage: c?.bg_url
@@ -488,6 +495,7 @@ export default function CardsManager({ groupByBank = false, showActions = true }
   const [activeId, setActiveId] = useState(null)
   const [bankViewModalOpen, setBankViewModalOpen] = useState(false)
   const [viewingBank, setViewingBank] = useState(null)
+  const [selectedCard, setSelectedCard] = useState(null) // for CardTransactionsDrawer
   
   // Зберігаємо останні збережені значення для порівняння
   const lastSavedCardsPrefsRef = useRef(null)
@@ -1171,6 +1179,7 @@ return (
                               isFavorite={favoriteCardIds.includes(c.id)}
                               onToggleFavorite={undefined}
                               isGrouped={true}
+                              onCardClick={setSelectedCard}
                             />
                           ))}
                         </div>
@@ -1229,6 +1238,7 @@ return (
                         isFavorite={favoriteCardIds.includes(c.id)}
                         onToggleFavorite={toggleFavorite}
                         onViewBank={handleViewBank}
+                        onCardClick={setSelectedCard}
                       />
                     ))
                   )}
@@ -1262,7 +1272,7 @@ return (
                   {showFavoritesOnly ? 'Немає вибраних карток' : 'Немає карток'}
                 </div>
               ) : (
-                  visibleCards.map(c => (
+                visibleCards.map(c => (
                     <CardTile
                       key={c.id}
                       c={c}
@@ -1272,6 +1282,7 @@ return (
                       isFavorite={favoriteCardIds.includes(c.id)}
                       onToggleFavorite={undefined}
                       onViewBank={handleViewBank}
+                      onCardClick={setSelectedCard}
                     />
                   ))
               )}
@@ -1395,6 +1406,17 @@ return (
         </div>
       )}
     </BaseModal>
+
+    {/* Card Transactions Drawer */}
+    <AnimatePresence>
+      {selectedCard && (
+        <CardTransactionsDrawer
+          key={selectedCard.id}
+          card={selectedCard}
+          onClose={() => setSelectedCard(null)}
+        />
+      )}
+    </AnimatePresence>
   </>
 )
 
