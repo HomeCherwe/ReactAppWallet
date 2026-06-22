@@ -41,6 +41,7 @@ function calculateExpression(value) {
 
 export default function EditTxModal({ open, tx, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
+  const [loadingData, setLoadingData] = useState(false)
   const [cards, setCards] = useState([])
   const [categories, setCategories] = useState([])
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false)
@@ -83,6 +84,39 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
 
   useEffect(() => {
     if (!open || !tx) return
+
+    // Optimistic prefill from the tx prop so form is not empty while loading
+    const prefill = (base) => {
+      const isExp = Number(base.amount) < 0
+      const abs = Math.abs(Number(base.amount || 0))
+      const isDebt = base?.is_debt === true || String(base?.category || '') === 'Борг'
+      const debtIsLend = base?.debt_direction
+        ? base.debt_direction === 'lend'
+        : Number(base.amount || 0) < 0
+      const rawNote = base.note || ''
+      const isPinned = rawNote.includes('[pinned]')
+      const cleanNote = rawNote.replace(/\[pinned\]/g, '').trim()
+      return {
+        kind: isDebt ? 'debt' : (isExp ? 'expense' : 'income'),
+        amount: String(abs || ''),
+        category: isDebt ? 'Борг' : (base.category || ''),
+        cardId: base.card_id || '',
+        note: cleanNote,
+        rateToUAH: 1,
+        debtParty: base.debt_party || '',
+        debtIsLend,
+        excludeFromStats: base?.exclude_from_stats === true || base?.exclude_from_stats === 'true' || base?.exclude_from_stats === 1,
+        pinned: isPinned,
+        date: base.created_at
+          ? new Date(new Date(base.created_at).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+          : new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16),
+      }
+    }
+
+    // Apply optimistic data immediately
+    setForm(prefill(tx))
+    setLoadingData(true)
+
     ;(async () => {
       try {
         const [cardRows, freshTx, categoriesData] = await Promise.all([
@@ -96,34 +130,12 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
         setDebtParties(parties || [])
 
         const base = freshTx || tx
-        const isExp = Number(base.amount) < 0
-        const abs = Math.abs(Number(base.amount || 0))
-        const isDebt = base?.is_debt === true || String(base?.category || '') === 'Борг'
-        const debtIsLend = base?.debt_direction
-          ? base.debt_direction === 'lend'
-          : Number(base.amount || 0) < 0
-          
-        const rawNote = base.note || ''
-        const isPinned = rawNote.includes('[pinned]')
-        const cleanNote = rawNote.replace(/\[pinned\]/g, '').trim()
-
-        setForm({
-          kind: isDebt ? 'debt' : (isExp ? 'expense' : 'income'),
-          amount: String(abs || ''),
-          category: isDebt ? 'Борг' : (base.category || ''),
-          cardId: base.card_id || '',
-          note: cleanNote,
-          rateToUAH: 1,
-          debtParty: base.debt_party || '',
-          debtIsLend,
-          excludeFromStats: base?.exclude_from_stats === true || base?.exclude_from_stats === 'true' || base?.exclude_from_stats === 1,
-          pinned: isPinned,
-          date: base.created_at ? new Date(new Date(base.created_at).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16),
-        })
-        // keep original transaction for delta calculations
+        setForm(prefill(base))
         originalRef.current = base
       } catch (error) {
         console.error('Failed to load transaction data:', error)
+      } finally {
+        setLoadingData(false)
       }
     })()
   }, [open, tx?.id])
@@ -132,10 +144,10 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
     if (!open) {
       setShowReceiptActions(false)
       setParsing(false)
+      setLoadingData(false)
       try { stream?.getTracks()?.forEach(t => t.stop()) } catch {}
       setStream(null)
       setCameraOpen(false)
-      // Очистити помилки при закритті модалки
       setErrors({ amount: '', category: '', cardId: '' })
     }
   }, [open])
@@ -510,7 +522,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
     }
   }
 
-  if (!open || !tx) return null
+  if (!tx && !open) return null
 
   return (
     <BaseModal
@@ -520,6 +532,59 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
       zIndex={110}
       maxWidth="md"
     >
+      {/* Скелетон поки дані завантажуються */}
+      {loadingData && (() => {
+        const Bone = ({ className = '' }) => (
+          <div className={`relative overflow-hidden rounded-xl bg-gray-100 ${className}`}>
+            <div style={{
+              position: 'absolute', inset: 0,
+              background: 'linear-gradient(105deg, transparent 30%, rgba(255,255,255,0.75) 50%, transparent 70%)',
+              backgroundSize: '200% 100%',
+              animation: 'shimmerSlide 1.4s ease-in-out infinite',
+            }} />
+          </div>
+        )
+        return (
+          <div className="grid gap-3">
+            <style>{`
+              @keyframes shimmerSlide {
+                0%   { transform: translateX(-100%) skewX(-10deg); }
+                100% { transform: translateX(300%)  skewX(-10deg); }
+              }
+            `}</style>
+            {/* Kind buttons */}
+            <div className="grid grid-cols-3 gap-2">
+              <Bone className="h-10" />
+              <Bone className="h-10" />
+              <Bone className="h-10" />
+            </div>
+            {/* Amount */}
+            <Bone className="h-10" />
+            {/* Category */}
+            <Bone className="h-10" />
+            {/* Card select */}
+            <Bone className="h-10" />
+            {/* Date */}
+            <Bone className="h-10" />
+            {/* Note */}
+            <Bone className="h-20" />
+            {/* Toggles */}
+            <div className="h-px bg-gray-100" />
+            <div className="flex items-center justify-between py-2">
+              <Bone className="h-4 w-32" />
+              <Bone className="h-6 w-11 !rounded-full" />
+            </div>
+            <div className="h-px bg-gray-100" />
+            <div className="flex items-center justify-between py-2">
+              <Bone className="h-4 w-40" />
+              <Bone className="h-6 w-11 !rounded-full" />
+            </div>
+          </div>
+        )
+      })()}
+
+
+      {!loadingData && (
       <form onSubmit={save} className="grid gap-3">
               <div className="grid grid-cols-3 gap-2">
                 <button type="button"
@@ -819,6 +884,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
                 <button type="button" className="btn btn-soft" onClick={onClose}>Скасувати</button>
               </div>
             </form>
+      )}
 
       <AnimatePresence>
         {cameraOpen && (

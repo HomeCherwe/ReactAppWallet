@@ -1,11 +1,77 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { supabase } from '../lib/supabase'
 import { txBus } from '../utils/txBus'
 import useMonoRates from '../hooks/useMonoRates'
 import { listCards } from '../api/cards'
 import { apiFetch } from '../utils.jsx'
 import { useSettingsStore } from '../store/useSettingsStore'
+import { ChevronDown, Check } from 'lucide-react'
+
+// Custom Dropdown component for selecting currencies with beautiful styling
+function CurrencySelect({ value, onChange, options }) {
+  const [isOpen, setIsOpen] = useState(false)
+  const containerRef = useRef(null)
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (containerRef.current && !containerRef.current.contains(event.target)) {
+        setIsOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const selectedOption = options.find(opt => opt.value === value) || options[0]
+
+  return (
+    <div className="relative z-20" ref={containerRef}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50/80 border border-gray-200/80 rounded-lg shadow-sm transition-all duration-200 focus:outline-none select-none hover:border-gray-300"
+      >
+        <span>{selectedOption?.label}</span>
+        <ChevronDown size={12} className={`text-gray-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 4, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 4, scale: 0.95 }}
+            transition={{ duration: 0.1 }}
+            className="absolute right-0 mt-1 min-w-[120px] bg-white/95 backdrop-blur-md border border-gray-200/60 rounded-xl shadow-xl overflow-hidden py-1 z-30"
+          >
+            {options.map((opt) => {
+              const isSelected = opt.value === value
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => {
+                    onChange(opt.value)
+                    setIsOpen(false)
+                  }}
+                  className={`w-full flex items-center justify-between px-3 py-1.5 text-xs text-left transition-colors duration-150 ${
+                    isSelected 
+                      ? 'bg-indigo-50 text-indigo-600 font-semibold' 
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  <span>{opt.label}</span>
+                  {isSelected && <Check size={12} className="text-indigo-600 flex-shrink-0" />}
+                </button>
+              )
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
 
 export default function EarningsStatCard({ title, mode, currency: initialCurrency }) {
   // Використовуємо новий store
@@ -180,7 +246,6 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
 
         for (const tx of allTxs) {
           if (tx.archives) continue
-          if (tx.is_transfer) continue
           if (isExcludedFromStats(tx)) continue
           
           // Check if transaction's card is savings
@@ -235,7 +300,6 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
           if (abortController.signal.aborted || !mounted) return
           for (const tx of prevTxs) {
             if (tx.archives) continue
-            if (tx.is_transfer) continue
             if (isExcludedFromStats(tx)) continue
             
             const cardInfo = cardMap.get(tx.card_id) || { isSavings: false, isBinance: false, currency: 'UAH' }
@@ -343,21 +407,15 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
     >
       <div className="flex items-center justify-between mb-2">
         <div className="text-sm text-gray-500">{title}</div>
-        <select 
-          className="text-xs border border-gray-200 rounded px-2 py-0.5 bg-white"
+        <CurrencySelect
           value={selectedCurrency || 'ALL_UAH'}
-          onChange={(e) => {
-            const val = e.target.value
-            // Зберігаємо значення як є (включаючи "ALL_UAH" та "ALL_EUR")
-            setSelectedCurrency(val || 'ALL_UAH')
-          }}
-        >
-          <option value="ALL_UAH">ALL to UAH</option>
-          <option value="ALL_EUR">ALL to EUR</option>
-          {currencies.map(c => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
+          onChange={(val) => setSelectedCurrency(val || 'ALL_UAH')}
+          options={[
+            { value: 'ALL_UAH', label: 'ALL to UAH' },
+            { value: 'ALL_EUR', label: 'ALL to EUR' },
+            ...currencies.map(c => ({ value: c, label: c }))
+          ]}
+        />
       </div>
       
       {/* Current month label */}

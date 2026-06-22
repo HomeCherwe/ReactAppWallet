@@ -1021,9 +1021,9 @@ export default function MonthlyPayment() {
       )}
 
       <div className="mb-4">
-        <div className="flex items-center justify-between mb-3">
-          <div className="font-semibold">Recent transactions</div>
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+          <div className="font-semibold text-gray-900">Recent transactions</div>
+          <div className="flex flex-wrap items-center gap-2">
             {selectedIds.size > 0 && (
               <button
                 className="btn btn-danger text-xs inline-flex items-center gap-1"

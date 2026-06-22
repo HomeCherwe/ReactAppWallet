@@ -3,11 +3,13 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   X, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, BarChart2,
-  CreditCard, Calendar, ChevronDown
+  CreditCard, Calendar, ChevronDown, Eye, EyeOff
 } from 'lucide-react'
 import { listTransactionsByCard } from '../../api/transactions'
 import { listCards } from '../../api/cards'
 import useMonoRates from '../../hooks/useMonoRates'
+import { usePreferences } from '../../context/PreferencesContext'
+import { updatePreferencesSection } from '../../api/preferences'
 import Row from './Row'
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -97,6 +99,7 @@ function buildPreset(id) {
 export default function CardTransactionsDrawer({ card, onClose, cardMap: externalCardMap }) {
   const rates = useMonoRates()
   const ratesReady = rates && Object.keys(rates).length > 0
+  const { preferences } = usePreferences()
 
   // Currency conversion (same logic as MonthlyPayment)
   const convertCurrency = useCallback((amount, fromCurrency, toCurrency) => {
@@ -117,6 +120,24 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
     if (!rateFromUAH) return null
     return inUAH / rateFromUAH
   }, [rates, ratesReady])
+
+  // ── includeAll toggle (persist to preferences) ────────────────────────────
+  const [includeAll, setIncludeAll] = useState(() => {
+    const saved = preferences?.cardStats?.includeAll
+    return saved === true
+  })
+
+  // Sync initial value from preferences when they load
+  useEffect(() => {
+    if (preferences?.cardStats !== undefined) {
+      setIncludeAll(preferences.cardStats.includeAll === true)
+    }
+  }, [preferences?.cardStats?.includeAll])
+
+  const handleToggleIncludeAll = useCallback((val) => {
+    setIncludeAll(val)
+    updatePreferencesSection('cardStats', { includeAll: val }).catch(console.error)
+  }, [])
 
   // ── period state ──────────────────────────────────────────────────────────
   const now = new Date()
@@ -228,7 +249,10 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
     const cardCurrency = card?.currency || 'EUR'
     let income = 0, expense = 0
     for (const tx of txs) {
-      if (tx.exclude_from_stats === true || tx.exclude_from_stats === 'true' || tx.exclude_from_stats === 1) continue
+      // If includeAll is OFF — skip excluded transactions (default behaviour)
+      if (!includeAll) {
+        if (tx.exclude_from_stats === true || tx.exclude_from_stats === 'true' || tx.exclude_from_stats === 1) continue
+      }
       const amt = Number(tx.amount_stat ?? tx.amount ?? 0)
       const txCur = (tx.currency || cardMap[tx.card_id] || cardCurrency).toUpperCase()
       const converted = convertCurrency(amt, txCur, cardCurrency)
@@ -237,7 +261,7 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
       else expense += converted
     }
     return { income, expense, net: income + expense }
-  }, [txs, card, cardMap, convertCurrency])
+  }, [txs, card, cardMap, convertCurrency, includeAll])
 
   // ── day groups ────────────────────────────────────────────────────────────
   const days = useMemo(() => groupByDay(txs), [txs])
@@ -511,8 +535,28 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
             </div>
           </div>
 
-          {/* Period label */}
-          <div className="mt-1.5 text-[10px] text-gray-400 text-right pr-1">{periodLabel}</div>
+          {/* Period label + includeAll toggle */}
+          <div className="mt-2 flex items-center justify-between">
+            <div className="text-[10px] text-gray-400 pl-1">{periodLabel}</div>
+
+            {/* Toggle: враховувати всі / тільки враховані */}
+            <button
+              id="card-stats-include-all-toggle"
+              onClick={() => handleToggleIncludeAll(!includeAll)}
+              className={[
+                'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all duration-200 select-none',
+                includeAll
+                  ? 'bg-violet-100 text-violet-700 ring-1 ring-violet-300'
+                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200',
+              ].join(' ')}
+              title={includeAll ? 'Зараз: всі транзакції (включно з трансферами та виключеними). Натисніть щоб показати лише враховані.' : 'Зараз: тільки враховані транзакції. Натисніть щоб показати всі.'}
+            >
+              {includeAll
+                ? <><Eye size={10} /> Всі транзакції</>
+                : <><EyeOff size={10} /> Тільки враховані</>
+              }
+            </button>
+          </div>
         </div>
 
         {/* Divider */}
@@ -544,7 +588,7 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
               {days.map(({ key, txs: dayTxs, dateStr }) => {
                 let dayTotal = 0
                 for (const tx of dayTxs) {
-                  if (tx.exclude_from_stats === true || tx.exclude_from_stats === 'true') continue
+                  if (!includeAll && (tx.exclude_from_stats === true || tx.exclude_from_stats === 'true')) continue
                   const amt = Number(tx.amount_stat ?? tx.amount ?? 0)
                   const txCur = (tx.currency || cardMap[tx.card_id] || cur).toUpperCase()
                   const conv = convertCurrency(amt, txCur, cur)

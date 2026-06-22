@@ -2,7 +2,7 @@ import { Home, CreditCard, BarChart3, Wallet, Repeat, Plus, Archive, HandCoins }
 import { motion } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { supabase, cacheUser } from '../lib/supabase'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import CreateTxModal from './transactions/CreateTxModal'
 
 const NavItem = ({ icon:Icon, label, active=false, onClick, className = '' }) => (
@@ -22,6 +22,41 @@ export default function Sidebar({ className = '' }){
   const [showCreateTxModal, setShowCreateTxModal] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
+  const [isVisible, setIsVisible] = useState(true)
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    setIsMobile(window.innerWidth < 640)
+    const handleResize = () => setIsMobile(window.innerWidth < 640)
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  useEffect(() => {
+    let lastScrollYVal = window.scrollY
+
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY
+      
+      // Avoid iOS bounce effect issues
+      const maxScroll = document.documentElement.scrollHeight - window.innerHeight
+      if (currentScrollY < 0 || currentScrollY > maxScroll) return
+
+      // Threshold check to avoid minor jitters
+      if (Math.abs(currentScrollY - lastScrollYVal) < 10) return
+
+      if (currentScrollY > lastScrollYVal && currentScrollY > 300) {
+        setIsVisible(false) // Scrolling down
+      } else {
+        setIsVisible(true) // Scrolling up
+      }
+
+      lastScrollYVal = currentScrollY
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -43,14 +78,22 @@ export default function Sidebar({ className = '' }){
 
   const isActive = (path) => location.pathname === path
 
+  const shouldShow = isVisible || showCreateTxModal
+
   return (
-    <aside className={`fixed bottom-0 left-0 w-full sm:w-60 p-0 sm:p-5 sm:pt-0 ${className} sm:sticky sm:top-6 sm:self-start sm:relative sm:left-0 z-50 sm:z-auto`}>
-      <div className="glass rounded-none sm:rounded-2xl shadow-[0_-4px_20px_rgba(0,0,0,0.15)] sm:shadow-glass border-t-2 border-gray-200/50 sm:border-0 p-3 sm:p-4 flex flex-row sm:flex-col gap-2 items-center sm:items-start justify-center sm:justify-start relative">
+    <aside
+      className={`fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-lg sm:bottom-auto sm:left-auto sm:translate-x-0 sm:w-60 p-0 sm:p-5 sm:pt-0 ${className} sm:sticky sm:top-6 sm:self-start sm:relative z-50 sm:z-auto transform-gpu transition-all duration-300 ease-in-out ${shouldShow ? 'translate-y-0 opacity-100 scale-100' : 'translate-y-2 opacity-100 scale-90 sm:translate-y-0 sm:opacity-100 sm:scale-100'}`}
+      style={isMobile ? { bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))' } : {}}
+    >
+      <div
+        className="bg-liquid-glass rounded-full sm:rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.15)] sm:shadow-glass border border-white/20 sm:border-0 flex flex-row sm:flex-col gap-2 items-center sm:items-start justify-center sm:justify-start p-1.5 sm:p-4 relative"
+      >
         <div className="hidden sm:flex items-center gap-3 px-2 pb-0">
           <div className="h-8 w-8 rounded-xl bg-black/90 grid place-items-center text-white font-bold">¥</div>
           <div className="hidden sm:block font-semibold">Wallet</div>
         </div>
-        <div className="flex gap-2 sm:flex-col">
+        {/* Desktop-only navigation menu */}
+        <div className="hidden sm:flex sm:flex-col sm:w-full sm:gap-2">
           <NavItem 
             icon={Home} 
             label="Dashboard" 
@@ -63,74 +106,119 @@ export default function Sidebar({ className = '' }){
             active={isActive('/analytics')}
             onClick={() => navigate('/analytics')}
           />
-          
-          {/* Кнопка з плюсиком для швидкого додавання транзакції (тільки для мобільної версії, посередині) */}
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => setShowCreateTxModal(true)}
-            className="sm:hidden p-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white transition-all shadow-lg flex items-center justify-center"
-          >
-            <Plus size={20} />
-          </motion.button>
-          
           <NavItem 
             icon={Repeat} 
             label="Підписки"
             active={isActive('/subscriptions')}
             onClick={() => navigate('/subscriptions')}
           />
-          
-          {/* Мобільна версія: іконка карток */}
-              <NavItem 
-                icon={CreditCard} 
-                label="Картки"
-                active={isActive('/cards')}
-                onClick={() => navigate('/cards')}
-              />
-              
-              <NavItem 
-                icon={Archive} 
-                label="Архів"
-                active={isActive('/archives')}
-                onClick={() => navigate('/archives')}
-              />
-              
-              <NavItem 
-                icon={HandCoins} 
-                label="Борги"
-                active={isActive('/debts')}
-                onClick={() => navigate('/debts')}
-              />
+          <NavItem 
+            icon={CreditCard} 
+            label="Картки"
+            active={isActive('/cards')}
+            onClick={() => navigate('/cards')}
+          />
+          <NavItem 
+            icon={Archive} 
+            label="Архів"
+            active={isActive('/archives')}
+            onClick={() => navigate('/archives')}
+          />
+          <NavItem 
+            icon={HandCoins} 
+            label="Борги"
+            active={isActive('/debts')}
+            onClick={() => navigate('/debts')}
+          />
         </div>
-        
-        {/* Мобільна версія: аватарка з правого боку (absolute positioning) */}
-        <div className="flex gap-2 sm:hidden items-center absolute right-3">
-          {user && (
+
+        {/* Мобільна версія з відцентрованою кнопкою + та іконками навколо */}
+        <div className="flex sm:hidden w-full items-center justify-between relative">
+          {/* Ліва група: Dashboard, Analytics, Підписки */}
+          <div className="flex items-center justify-around flex-1">
+            <NavItem 
+              icon={Home} 
+              label="Dashboard" 
+              active={isActive('/') || isActive('/dashboard')}
+              onClick={() => navigate('/')}
+            />
+            <NavItem 
+              icon={BarChart3} 
+              label="Analytics"
+              active={isActive('/analytics')}
+              onClick={() => navigate('/analytics')}
+            />
+            <NavItem 
+              icon={Repeat} 
+              label="Підписки"
+              active={isActive('/subscriptions')}
+              onClick={() => navigate('/subscriptions')}
+            />
+          </div>
+
+          {/* Центральна кнопка + */}
+          <div className="flex items-center justify-center px-1">
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              onClick={handleProfileClick}
-              className={`p-2 rounded-xl transition-all ${
-                isActive('/profile') 
-                  ? 'bg-indigo-100 border-2 border-indigo-300' 
-                  : 'bg-white/70 hover:bg-white border-2 border-transparent'
-              }`}
+              onClick={() => setShowCreateTxModal(true)}
+              className="p-2.5 rounded-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white transition-all shadow-lg flex items-center justify-center flex-shrink-0"
             >
-              {user.user_metadata?.avatar_url ? (
-                <img 
-                  src={user.user_metadata.avatar_url} 
-                  alt="Avatar" 
-                  className="h-8 w-8 rounded-full object-cover shadow-sm"
-                />
-              ) : (
-                <div className="h-8 w-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold shadow-sm">
-                  {user.email?.[0]?.toUpperCase() || 'U'}
-                </div>
-              )}
+              <Plus size={20} />
             </motion.button>
-          )}
+          </div>
+
+          {/* Права група: Картки, Архів, Борги */}
+          <div className="flex items-center justify-around flex-1 pr-11">
+            <NavItem 
+              icon={CreditCard} 
+              label="Картки"
+              active={isActive('/cards')}
+              onClick={() => navigate('/cards')}
+            />
+            <NavItem 
+              icon={Archive} 
+              label="Архів"
+              active={isActive('/archives')}
+              onClick={() => navigate('/archives')}
+            />
+            <NavItem 
+              icon={HandCoins} 
+              label="Борги"
+              active={isActive('/debts')}
+              onClick={() => navigate('/debts')}
+            />
+          </div>
+
+          {/* Аватарка справа на мобільному (абсолютно всередині відносного контейнера) */}
+          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center flex-shrink-0">
+            {user && (
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handleProfileClick}
+                className={`p-1.5 rounded-full transition-all ${
+                  isActive('/profile') 
+                    ? 'bg-indigo-100 border-2 border-indigo-300' 
+                    : 'bg-white/70 hover:bg-white border-2 border-transparent'
+                }`}
+              >
+                {user.user_metadata?.avatar_url ? (
+                  <img 
+                    src={user.user_metadata.avatar_url} 
+                    alt="Avatar" 
+                    className="h-8 w-8 rounded-full object-cover shadow-sm"
+                  />
+                ) : (
+                  <div className="h-8 w-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold shadow-sm">
+                    {user.email?.[0]?.toUpperCase() || 'U'}
+                  </div>
+                )}
+              </motion.button>
+            )}
+          </div>
         </div>
+
         <div className="mt-auto pt-4 hidden sm:flex flex-col gap-2 border-t border-gray-400/40">
           {user && (
             <motion.button
@@ -166,6 +254,7 @@ export default function Sidebar({ className = '' }){
         </div>
       </div>
 
+
       <CreateTxModal
         open={showCreateTxModal}
         onClose={() => setShowCreateTxModal(false)}
@@ -174,6 +263,23 @@ export default function Sidebar({ className = '' }){
           // Можна додати toast або інше повідомлення
         }}
       />
+
+      <svg style={{ display: 'none' }}>
+        <filter id="displacementFilter">
+          <feImage
+            href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAACXBIWXMAAA9hAAAPYQGoP6dpAAAMoElEQVRogZ1a3ZqjyI6MkBJc3XOz7/+g+53pMoq9kJQk2K6Zs0yNGzAG/YRCSgn+/r0PYpCD2IEH+SC/yIdZfj6MD9pu3M02cjMb5KC50cycNBoJ0kiCRRk8BEWCACgCAkAAIAhQAGAAIRccNGIDBjCADdilHdilh/QAH9AX+DA+yN1sM9vAYRw2SIKg1dNJkm61Y0YzGkmDGc1A0og8JEGT1Q1gBCkQJEgArENgCi4QFDR1AABIAEEJggAIECRJogBJeblIkLK0AUEOjpQUBMzMyPk/naTRUvTUgTQMjVCcRkxgfgJGIA8poE62+HNHvSeJedzngdYgZZaASNepr1HelgQhYthuhjKrpaBmrP+MZuUHt9IqP9mKWnkEZiAxzc8UkgQFkDzFLAeohZJw7qh3InRAIYYUQAhBCOVStauHbaTBQXMaPWV2L4Sb08ytxPole1wxmaftohIEX0QkT076Fe1UcZExISB3Uhp3Ctw9CSt0i2jMSKCKmP4nBB70AYsbEudtwcx++DR/DbJi7mafh6WVs2sSPQJql+Zmxm9Y/kVPSsw1OlB/K3gIhEwI4ICqDO47QM8Lj2BShCFHMCEnTaPhXYd5TBXN3H2N/7PtjezzG/nDfzDe6kw66+cRQBsQKfaSLK2RXBU6Y84SSFtwrhCOjNcULAaEIHId/f38f37tCoQAEBCBQ0uCXO+E0N7rb5j58e+y/f339/v3462t7bDaGuTMZkwZ6RgBIEvk50d/Si1DGMi8KqHVicc8ZstEIknBAh3Aojjjw/Obzb/v7z/78ez9CVAhKiAHDv8qYLPSPfX/8+vX719f//Nr/2rd9s+FWdOPNWCk9KzpZzM7Cjdr2J0+CnPSji+yEAATAPqeCO0IRccTzie9tH//7/A+ex98hISoeAhr2SCah08wSPV/7778eX3899t/DNrdJnMVXGapW4hbceSLnZP4VP9P20jw76afUUAMqACkkQYPb+OP8j8WXjnhGxHFECBQEcPCr2JFGp49tG4992x/742GeadcIFNXgBE3zQJ1sE99wX0Q/sbXkrsvRCa+ZCxonh/jc9Y3vZ4yDT4UiEJLIkIZ9mYFmNtLGw20bY9vMh/mocAVViM/Yb7uDInlyJRfEL9C/RO881HJGEFtZQJnBLc8LDBwxxrF7wCNiZmmBw3abGcvo5u6bcTg9MzEh4sXkrUMVBLwY/oV83m7pNgEpO1sNZDSUtWAZL6ag3GKjghIVRabDdzeaZx6AmRs35yCsLTq5pUHPhW1O/LwX"
+            preserveAspectRatio="none"
+            result="noise"
+          />
+          <feDisplacementMap
+            in="SourceGraphic"
+            in2="noise"
+            scale="600"
+            xChannelSelector="R"
+            yChannelSelector="G"
+          />
+        </filter>
+      </svg>
     </aside>
   )
 }

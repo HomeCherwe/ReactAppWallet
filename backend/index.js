@@ -1404,7 +1404,8 @@ app.post('/api/transfers', getUserFromToken, async (req, res) => {
       archives: false,
       category: 'ТРАНСФЕР',
       note: note || null,
-      user_id: req.user_id
+      user_id: req.user_id,
+      exclude_from_stats: true
     }
 
     const tgt = {
@@ -1419,7 +1420,8 @@ app.post('/api/transfers', getUserFromToken, async (req, res) => {
       archives: false,
       category: 'ТРАНСФЕР',
       note: note || null,
-      user_id: req.user_id
+      user_id: req.user_id,
+      exclude_from_stats: true
     }
 
     const { data, error } = await supabase
@@ -1475,6 +1477,7 @@ app.post('/api/transfers/mark-existing', getUserFromToken, async (req, res) => {
       transfer_role: 'from',
       transfer_id: transferId,
       category: 'ТРАНСФЕР',
+      exclude_from_stats: true,
       ...(note ? { note } : {}),
     }
 
@@ -1483,6 +1486,7 @@ app.post('/api/transfers/mark-existing', getUserFromToken, async (req, res) => {
       transfer_role: 'to',
       transfer_id: transferId,
       category: 'ТРАНСФЕР',
+      exclude_from_stats: true,
       ...(note ? { note } : {}),
     }
 
