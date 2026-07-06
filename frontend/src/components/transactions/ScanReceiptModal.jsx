@@ -554,7 +554,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                           <div className="flex items-center justify-between">
                             <span className="text-sm font-medium text-gray-800 truncate">{tx.note?.split('\n')[0] || 'Транзакція'}</span>
                             <span className={`text-sm font-semibold whitespace-nowrap ml-2 ${tx.type === 'income' ? 'text-emerald-600' : 'text-gray-900'}`}>
-                              {tx.type === 'income' ? '+' : '-'}{tx.amount.toFixed(2)} {getCurrencySymbol(tx.currency)}
+                              {tx.type === 'income' ? '+' : '-'}{Number(tx.amount || 0).toFixed(2)} {getCurrencySymbol(tx.currency)}
                             </span>
                           </div>
                           <div className="flex items-center gap-2 mt-0.5">
@@ -641,11 +641,11 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                                 <div>
                                   <label className="text-[11px] text-gray-500 mb-0.5 block">Сума</label>
                                   <input
-                                    type="number"
-                                    step="0.01"
+                                    type="text"
+                                    inputMode="decimal"
                                     className="border rounded-lg px-2 py-1.5 w-full text-sm"
                                     value={tx.amount}
-                                    onChange={e => updateTx(tx._id, 'amount', Math.abs(parseFloat(e.target.value) || 0))}
+                                    onChange={e => updateTx(tx._id, 'amount', e.target.value.replace(',', '.'))}
                                   />
                                 </div>
                                 <div>

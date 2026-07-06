@@ -86,7 +86,7 @@ export default function Sidebar({ className = '' }){
       style={isMobile ? { bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))' } : {}}
     >
       <div
-        className="bg-liquid-glass rounded-full sm:rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.15)] sm:shadow-glass border border-white/20 sm:border-0 flex flex-row sm:flex-col gap-2 items-center sm:items-start justify-center sm:justify-start p-1.5 sm:p-4 relative"
+        className="bg-liquid-glass sm:bg-white rounded-full sm:rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.15)] sm:shadow-sm border border-white/20 sm:border sm:border-gray-200/80 flex flex-row sm:flex-col gap-2 items-center sm:items-start justify-center sm:justify-start p-1.5 sm:p-4 relative"
       >
         <div className="hidden sm:flex items-center gap-3 px-2 pb-0">
           <div className="h-8 w-8 rounded-xl bg-black/90 grid place-items-center text-white font-bold">¥</div>

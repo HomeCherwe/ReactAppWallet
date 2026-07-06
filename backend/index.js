@@ -366,7 +366,17 @@ app.post('/api/cards', getUserFromToken, async (req, res) => {
       .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, banks(name, iban, bic, beneficiary)')
       .single()
 
-    if (error) throw error
+    if (error) {
+      // Supabase/PostgreSQL string length violation
+      if (error.code === '22001' || (error.message && error.message.includes('value too long'))) {
+        return res.status(400).json({ error: 'Назва картки занадто довга. Скоротіть назву і спробуйте ще раз.' })
+      }
+      // Unique constraint: same card name already exists in this bank
+      if (error.code === '23505' || (error.message && error.message.includes('uq_cards_bank_name'))) {
+        return res.status(400).json({ error: 'Картка з такою назвою вже існує в цьому банку. Оберіть іншу назву.' })
+      }
+      throw error
+    }
 
     // Трансформуємо для сумісності
     const transformed = {
@@ -423,7 +433,15 @@ app.put('/api/cards/:id', getUserFromToken, async (req, res) => {
       .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, banks(name, iban, bic, beneficiary)')
       .single()
 
-    if (error) throw error
+    if (error) {
+      if (error.code === '22001' || (error.message && error.message.includes('value too long'))) {
+        return res.status(400).json({ error: 'Назва картки занадто довга. Скоротіть назву і спробуйте ще раз.' })
+      }
+      if (error.code === '23505' || (error.message && error.message.includes('uq_cards_bank_name'))) {
+        return res.status(400).json({ error: 'Картка з такою назвою вже існує в цьому банку. Оберіть іншу назву.' })
+      }
+      throw error
+    }
     if (!data) return res.status(404).json({ error: 'Card not found' })
 
     // Трансформуємо для сумісності
@@ -2621,9 +2639,9 @@ app.post('/api/scan-transactions', getUserFromToken, upload.array('images', 10),
 
 The user sends one or more photos of receipts, bank statements, or transaction history screenshots.
 
-Extract ALL visible transactions and return ONLY a raw JSON array. No markdown, no backticks, no explanation — just the JSON array starting with [ and ending with ].
+Extract ALL visible transactions and return a JSON object with a single key "transactions" containing an array of transaction objects.
 
-Each object in the array must have exactly these fields:
+Each object in the "transactions" array must have exactly these fields:
 - "date": string, format "DD/MM/YYYY". If not visible, use today's date: "${today}".
 - "merchant": string, cleaned merchant/payee name in title case (e.g. "Auchan", "Zara Cannes")
 - "amount": number, always positive (e.g. 28.00)
@@ -2634,9 +2652,9 @@ Each object in the array must have exactly these fields:
 
 If the image shows a list of multiple transactions (e.g. a bank app transaction history), extract each one as a separate object.
 If the image is a single receipt, extract it as one object with the total amount.
-If there are multiple images, extract all transactions from all images into one flat array.
+If there are multiple images, extract all transactions from all images into one flat array under the "transactions" key.
 
-Return ONLY the JSON array. Nothing else.`
+Return ONLY the JSON object { "transactions": [...] }. Nothing else.`
 
     const body = {
       model: 'gpt-5.1',

@@ -395,13 +395,33 @@ function CardModal({ open, initial, onClose, onSubmit, banks = [] }) {
             ))}
           </select>
         )}
-        <input 
-          className="border rounded-xl px-3 py-2" 
-          placeholder="Назва картки *" 
-          value={form.name}
-          onChange={(e)=>setForm({...form, name:e.target.value})}
-          required
-        />
+        <div>
+          <input 
+            className={`border rounded-xl px-3 py-2 w-full ${
+              form.name.length > 50 ? 'border-rose-400 focus:ring-rose-400' :
+              form.name.length > 35 ? 'border-yellow-400 focus:ring-yellow-400' : ''
+            }`}
+            placeholder="Назва картки *" 
+            value={form.name}
+            onChange={(e)=>setForm({...form, name:e.target.value})}
+            required
+          />
+          {form.name.length > 0 && (
+            <div className={`flex justify-between items-center mt-1 text-xs px-1 ${
+              form.name.length > 50 ? 'text-rose-500' :
+              form.name.length > 35 ? 'text-yellow-600' : 'text-gray-400'
+            }`}>
+              <span>
+                {form.name.length > 50
+                  ? '⚠ Назва занадто довга — спробуйте скоротити'
+                  : form.name.length > 35
+                  ? '⚠ Назва досить довга'
+                  : ''}
+              </span>
+              <span>{form.name.length} символів</span>
+            </div>
+          )}
+        </div>
         <input 
           className="border rounded-xl px-3 py-2" 
           placeholder="Номер картки (опц., можна ****1234)" 

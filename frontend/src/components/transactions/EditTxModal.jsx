@@ -47,6 +47,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false)
   const categoryInputRef = useRef(null)
   const categoryDropdownRef = useRef(null)
+  const amountInputRef = useRef(null)
   const [debtParties, setDebtParties] = useState([])
   const [showDebtPartyDropdown, setShowDebtPartyDropdown] = useState(false)
   const debtPartyInputRef = useRef(null)
@@ -615,13 +616,15 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
 
               <div>
                 <input 
+                  ref={amountInputRef}
                   type="text" 
                   inputMode="decimal"
                   className={`border rounded-xl px-3 py-2 w-full ${errors.amount ? 'border-rose-500 focus:ring-2 focus:ring-rose-500' : 'focus:ring-2 focus:ring-indigo-500'}`}
                   placeholder="Сума (наприклад: 12-15 або 100*0.2)" 
                   value={form.amount}
                   onChange={e => {
-                    setForm({...form, amount: e.target.value})
+                    const val = e.target.value.replace(',', '.')
+                    setForm({...form, amount: val})
                     if (errors.amount) {
                       setErrors({...errors, amount: ''})
                     }
@@ -637,6 +640,47 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
                     }
                   }}
                 />
+                {/* Operator toolbar for mobile */}
+                <div className="flex gap-1 mt-1.5">
+                  {['+', '-', '×', '÷', '%'].map(op => (
+                    <button
+                      key={op}
+                      type="button"
+                      className="flex-1 py-1.5 text-sm font-semibold rounded-lg bg-gray-100 hover:bg-indigo-100 hover:text-indigo-700 active:scale-95 transition-all select-none"
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => {
+                        const realOp = op === '×' ? '*' : op === '÷' ? '/' : op
+                        const el = amountInputRef.current
+                        if (!el) return
+                        const start = el.selectionStart ?? form.amount.length
+                        const end = el.selectionEnd ?? form.amount.length
+                        const newVal = form.amount.slice(0, start) + realOp + form.amount.slice(end)
+                        setForm({ ...form, amount: newVal })
+                        if (errors.amount) setErrors({ ...errors, amount: '' })
+                        requestAnimationFrame(() => {
+                          el.focus()
+                          el.setSelectionRange(start + 1, start + 1)
+                        })
+                      }}
+                    >
+                      {op}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className="flex-1 py-1.5 text-sm font-semibold rounded-lg bg-indigo-500 text-white hover:bg-indigo-600 active:scale-95 transition-all select-none"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      const result = calculateExpression(form.amount)
+                      if (result !== null) {
+                        setForm({ ...form, amount: String(result) })
+                        toast.success(`Обчислено: ${result}`, { duration: 1500 })
+                      }
+                    }}
+                  >
+                    =
+                  </button>
+                </div>
                 {errors.amount && (
                   <motion.div
                     initial={{ opacity: 0, y: -5 }}
