@@ -215,6 +215,15 @@ export default function MonthlyPayment() {
     return { pinnedTxs: pinned, regularTxs: regular }
   }, [rawVisibleRows, pinnedRows, pinnedCategories, rows])
 
+  const lastPinnedLengthRef = useRef(0)
+  useEffect(() => {
+    const currentLength = pinnedTxs?.length || 0
+    if (currentLength > lastPinnedLengthRef.current) {
+      setPinnedExpanded(true)
+    }
+    lastPinnedLengthRef.current = currentLength
+  }, [pinnedTxs])
+
   // Instead of a single array, we will render pinned and regular separately.
   // We keep visibleRows as all of them combined just in case it's used elsewhere for counting.
   const visibleRows = rawVisibleRows
@@ -651,12 +660,23 @@ export default function MonthlyPayment() {
       return acc
     }, {})
 
-    // Sort transactions within each day (newest first)
+    // Sort transactions within each day (newest first, keeping transfers grouped)
     Object.keys(grouped).forEach(dayKey => {
       grouped[dayKey].transactions.sort((a, b) => {
+        if (a.transfer_id && b.transfer_id && a.transfer_id === b.transfer_id) {
+          return a.transfer_role === 'from' ? -1 : 1
+        }
         const dateA = new Date(a.created_at)
         const dateB = new Date(b.created_at)
-        return dateB - dateA // newest first
+        const diff = dateB - dateA
+        if (diff !== 0) return diff
+        
+        if (a.transfer_id && !b.transfer_id) return -1
+        if (!a.transfer_id && b.transfer_id) return 1
+        if (a.transfer_id && b.transfer_id) {
+          return String(a.transfer_id).localeCompare(String(b.transfer_id))
+        }
+        return 0
       })
     })
 

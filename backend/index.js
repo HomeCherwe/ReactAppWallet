@@ -222,12 +222,10 @@ app.get('/api/banks', getUserFromToken, async (req, res) => {
 
 app.post('/api/banks', getUserFromToken, async (req, res) => {
   try {
-    const { name, iban, bic, beneficiary } = req.body
+    const { name, exclude_from_stats = false } = req.body
     const payload = {
       name,
-      iban: iban || null,
-      bic: bic || null,
-      beneficiary: beneficiary || null,
+      exclude_from_stats,
       user_id: req.user_id
     }
 
@@ -304,7 +302,7 @@ app.get('/api/cards', getUserFromToken, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('cards')
-      .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, banks(name, iban, bic, beneficiary)')
+      .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, banks(name, iban, bic, beneficiary, exclude_from_stats)')
       .eq('user_id', req.user_id)
       .order('created_at', { ascending: false })
 
@@ -316,7 +314,8 @@ app.get('/api/cards', getUserFromToken, async (req, res) => {
       bank: card.banks?.name || null,
       iban: card.banks?.iban || null,
       bic: card.banks?.bic || null,
-      beneficiary: card.banks?.beneficiary || null
+      beneficiary: card.banks?.beneficiary || null,
+      bank_exclude_from_stats: card.banks?.exclude_from_stats || false
     }))
 
     res.json(transformed)
@@ -328,7 +327,7 @@ app.get('/api/cards', getUserFromToken, async (req, res) => {
 
 app.post('/api/cards', getUserFromToken, async (req, res) => {
   try {
-    const { bank_id, name, card_number, currency, initial_balance = 0, bg_url, expiry_date, cvv } = req.body
+    const { bank_id, name, currency, bg_url } = req.body
 
     // Отримуємо назву банку, якщо bank_id вказано
     let bankName = null
@@ -351,19 +350,19 @@ app.post('/api/cards', getUserFromToken, async (req, res) => {
       bank_id: bank_id || null,
       bank: bankName || 'Інші', // Заповнюємо bank (NOT NULL constraint)
       name,
-      card_number: card_number || null,
+      card_number: null,
       currency,
-      initial_balance,
+      initial_balance: 0,
       bg_url,
-      expiry_date: expiry_date || null,
-      cvv: cvv || null,
+      expiry_date: null,
+      cvv: null,
       user_id: req.user_id
     }
 
     const { data, error } = await supabase
       .from('cards')
       .insert([payload])
-      .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, banks(name, iban, bic, beneficiary)')
+      .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, banks(name, iban, bic, beneficiary, exclude_from_stats)')
       .single()
 
     if (error) {
@@ -430,7 +429,7 @@ app.put('/api/cards/:id', getUserFromToken, async (req, res) => {
       .update(patch)
       .eq('id', id)
       .eq('user_id', req.user_id) // Тільки свої картки
-      .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, banks(name, iban, bic, beneficiary)')
+      .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, banks(name, iban, bic, beneficiary, exclude_from_stats)')
       .single()
 
     if (error) {
@@ -450,7 +449,8 @@ app.put('/api/cards/:id', getUserFromToken, async (req, res) => {
       bank: data.banks?.name || data.bank || null,
       iban: data.banks?.iban || null,
       bic: data.banks?.bic || null,
-      beneficiary: data.banks?.beneficiary || null
+      beneficiary: data.banks?.beneficiary || null,
+      bank_exclude_from_stats: data.banks?.exclude_from_stats || false
     }
 
     res.json(transformed)
@@ -571,45 +571,200 @@ app.get('/api/transactions/sum-by-card', getUserFromToken, async (req, res) => {
   }
 })
 
-// Totals by bucket (cash, cards, savings)
-app.get('/api/totals/by-bucket', getUserFromToken, async (req, res) => {
+// Totals by bucket (cas// Balance history endpoint - returns raw changes by date and currency (frontend converts)
+app.get('/api/balance/history', getUserFromToken, async (req, res) => {
   try {
-    // Use RPC function from database (it was working correctly before)
-    const { data, error } = await supabase.rpc('totals_by_bucket', { user_id_param: req.user_id })
+    const { period = 'month', bucket = 'all', start, end } = req.query
+    const userId = req.user_id
 
-    if (error) {
-      console.error('[totals-by-bucket] RPC error:', error)
-      // Fallback to client-side calculation if RPC fails
-      // This would require fetching cards and transactions, which is complex
-      // So we return empty structure
-      return res.json({ cash: {}, cards: {}, savings: {} })
+    console.log('[history] Request:', { period, bucket, start, end, userId })
+
+    // Fetch banks to check if any are excluded from stats
+    let excludedBankIds = new Set()
+    try {
+      const { data: banks, error: banksError } = await supabase
+        .from('banks')
+        .select('id, exclude_from_stats')
+        .eq('user_id', userId)
+      
+      if (!banksError && banks) {
+        (banks || []).forEach(b => {
+          if (b.exclude_from_stats) {
+            excludedBankIds.add(b.id)
+          }
+        })
+      }
+    } catch (e) {
+      console.warn('Could not query exclude_from_stats from banks:', e.message)
     }
 
-    // RPC should return data in format: { cash: {}, cards: {}, savings: {} }
-    // If it returns array or different format, we need to transform it
-    let result = data
+    // Fetch cards to determine bucket and currency membership
+    const { data: cards, error: cardsError } = await supabase
+      .from('cards')
+      .select('id, name, bank, currency, bank_id')
+      .eq('user_id', userId)
+    if (cardsError) throw cardsError
 
-    // If data is an array, transform it to object format
-    if (Array.isArray(data)) {
-      result = { cash: {}, cards: {}, savings: {} }
-      for (const row of data) {
-        const bucket = row.bucket || 'cards'
-        const currency = (row.currency || 'UAH').toUpperCase()
-        const total = Number(row.total || 0)
-        if (total !== 0) {
-          result[bucket][currency] = (result[bucket][currency] || 0) + total
-        }
+    const getBucket = (card) => {
+      if (!card) return 'cash'
+      const full = `${(card.bank || '').toLowerCase()} ${(card.name || '').toLowerCase()}`
+      if (full.includes('збер') || full.includes('savings')) return 'savings'
+      if (full.includes('гот') || full.includes('cash')) return 'cash'
+      return 'cards'
+    }
+
+    const cardMap = new Map((cards || []).map(c => [c.id, c]))
+
+    // Restrict cards to bucket if not 'all'
+    const filteredCards = (cards || []).filter(c => {
+      if (c.bank_id && excludedBankIds.has(c.bank_id)) return false // exclude cards in excluded banks
+      if (bucket !== 'all' && getBucket(c) !== bucket) return false
+      return true
+    })
+    const cardIds = filteredCards.map(c => c.id)
+
+    // Calculate startDate and endDate based on query or period defaults
+    const now = new Date()
+    let startDateStr = start || ''
+    const endDateStr = end || now.toISOString().slice(0, 10)
+
+    if (!start) {
+      if (period === 'day') {
+        const d = new Date(now)
+        d.setDate(d.getDate() - 30) // 30 days
+        startDateStr = d.toISOString().slice(0, 10)
+      } else if (period === 'week') {
+        const d = new Date(now)
+        d.setDate(d.getDate() - 12 * 7) // 12 weeks
+        startDateStr = d.toISOString().slice(0, 10)
+      } else if (period === 'year') {
+        const d = new Date(now)
+        d.setFullYear(d.getFullYear() - 5) // 5 years
+        startDateStr = `${d.getFullYear()}-01-01`
+      } else {
+        const d = new Date(now)
+        d.setMonth(d.getMonth() - 12) // 12 months
+        startDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
       }
     }
 
-    res.json(result || { cash: {}, cards: {}, savings: {} })
+    // Fetch transactions — paginate to load ALL transactions in range without the 1000-row limit
+    let allTxs = []
+    let offset = 0
+    const pageSize = 1000
+    while (true) {
+      let txQuery = supabase
+        .from('transactions')
+        .select('id, amount, created_at, card_id, archives, exclude_from_stats')
+        .eq('user_id', userId)
+        .or('archives.is.null,archives.eq.false')
+        .or('exclude_from_stats.is.null,exclude_from_stats.eq.false')
+        .gte('created_at', startDateStr)
+        .order('created_at', { ascending: true })
+        .range(offset, offset + pageSize - 1)
+
+      if (bucket !== 'all') {
+        if (cardIds.length > 0) {
+          if (bucket === 'cash') {
+            txQuery = txQuery.or(`card_id.in.(${cardIds.join(',')}),card_id.is.null`)
+          } else {
+            txQuery = txQuery.in('card_id', cardIds)
+          }
+        } else if (bucket === 'cash') {
+          txQuery = txQuery.is('card_id', null)
+        } else {
+          break
+        }
+      }
+
+      const { data: chunk, error: txsError } = await txQuery
+      if (txsError) throw txsError
+      if (!chunk || chunk.length === 0) break
+      allTxs.push(...chunk)
+      if (chunk.length < pageSize) break
+      offset += pageSize
+    }
+
+    const txs = allTxs
+
+    // Period key helper
+    const periodKey = (dateStr) => {
+      const d = new Date(dateStr)
+      if (period === 'day') return dateStr.slice(0, 10)
+      if (period === 'week') {
+        const day = d.getDay() === 0 ? 7 : d.getDay()
+        const monday = new Date(d)
+        monday.setDate(d.getDate() - day + 1)
+        return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`
+      }
+      if (period === 'year') return `${d.getFullYear()}-01-01`
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+    }
+
+    // Group changes by date and currency (summing income & expenses separately)
+    const periodTotals = new Map()
+    const futureTotals = new Map()
+
+    for (const tx of (txs || [])) {
+      if (!tx.created_at) continue
+      const card = tx.card_id ? cardMap.get(tx.card_id) : null
+      if (card && card.bank_id && excludedBankIds.has(card.bank_id)) {
+        continue // skip excluded banks
+      }
+      const cardCurrency = card ? (card.currency || 'UAH').toUpperCase() : 'UAH'
+      
+      const amount = Number(tx.amount || 0)
+      const txDate = tx.created_at.slice(0, 10)
+
+      if (txDate <= endDateStr) {
+        const key = `${periodKey(tx.created_at)}_${cardCurrency}`
+        const currentObj = periodTotals.get(key) || { income: 0, expense: 0 }
+        if (amount > 0) {
+          currentObj.income += amount
+        } else {
+          currentObj.expense += amount
+        }
+        periodTotals.set(key, currentObj)
+      } else {
+        futureTotals.set(cardCurrency, (futureTotals.get(cardCurrency) || 0) + amount)
+      }
+    }
+
+    const changes = []
+    for (const [key, val] of periodTotals.entries()) {
+      const [date, currency] = key.split('_')
+      changes.push({ date, currency, income: val.income, expense: val.expense })
+    }
+
+    const futureChanges = []
+    for (const [currency, change] of futureTotals.entries()) {
+      futureChanges.push({ currency, change })
+    }
+
+    // Fetch the oldest transaction date to know when the wallet started
+    const { data: oldestTx } = await supabase
+      .from('transactions')
+      .select('created_at')
+      .eq('user_id', userId)
+      .or('archives.is.null,archives.eq.false')
+      .or('exclude_from_stats.is.null,exclude_from_stats.eq.false')
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle()
+
+    const minDate = oldestTx ? oldestTx.created_at.slice(0, 10) : '2024-01-01'
+
+    console.log('[history] Result:', { txs: txs.length, changes: changes.length, futureChanges: futureChanges.length, minDate })
+
+    res.json({ changes, futureChanges, minDate })
   } catch (error) {
-    console.error('GET /api/totals/by-bucket error:', error)
+    console.error('GET /api/balance/history error:', error)
     res.status(500).json({ error: error.message })
   }
 })
 
 // Get list of transactions with flexible filtering
+
 app.get('/api/transactions', getUserFromToken, async (req, res) => {
   try {
     const {
@@ -624,7 +779,7 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       category_in,
       has_pinned_tag,
       limit,
-      fields = 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, merchant_address, merchant_lat, merchant_lng'
+      fields = 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, merchant_address, merchant_lat, merchant_lng, is_transfer, transfer_role, transfer_id'
     } = req.query
 
     // Filter out 'currency' field if it doesn't exist in the table
@@ -641,7 +796,7 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
     const validFields = requestedFields.filter(f => allowedFields.includes(f))
 
     // Use valid fields, fallback to default if all were filtered out
-    const safeFields = validFields.length > 0 ? validFields.join(', ') : 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, merchant_address, merchant_lat, merchant_lng'
+    const safeFields = validFields.length > 0 ? validFields.join(', ') : 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, merchant_address, merchant_lat, merchant_lng, is_transfer, transfer_role, transfer_id'
 
     let q = supabase
       .from('transactions')
@@ -650,10 +805,12 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
 
     // Date range filter
     if (start_date) {
-      q = q.gte('created_at', start_date)
+      const parsedStart = start_date.length === 10 ? `${start_date}T00:00:00.000Z` : start_date
+      q = q.gte('created_at', parsedStart)
     }
     if (end_date) {
-      q = q.lte('created_at', end_date)
+      const parsedEnd = end_date.length === 10 ? `${end_date}T23:59:59.999Z` : end_date
+      q = q.lte('created_at', parsedEnd)
     }
 
     // Card filter (including null for cash)

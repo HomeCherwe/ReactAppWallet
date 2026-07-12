@@ -76,9 +76,14 @@ function SortableCardTile({ c, onEdit, onDelete, showActions = true, isFavorite 
 
 function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false, onToggleFavorite, isDragging = false, isGrouped = false, onViewBank, onCardClick }) {
   const g = GRADS[Math.abs((c.id || '').charCodeAt(0) || 0) % GRADS.length]
-  const cardNumber = formatCardNumber(c.card_number, c.bank, c.name)
+  const hideAllBalances = useSettingsStore(state => state.settings.hideAllBalances ?? false)
+  const cardNumber = hideAllBalances ? '**** **** **** ****' : formatCardNumber(c.card_number, c.bank, c.name)
   
   const copyCardNumber = async () => {
+    if (hideAllBalances) {
+      toast.error('Неможливо скопіювати приховані дані')
+      return
+    }
     try {
       await navigator.clipboard.writeText(c.card_number || cardNumber)
       toast.success('Номер картки скопійовано', {
@@ -148,7 +153,7 @@ function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false,
         <div className="mt-2 sm:mt-3">
           <div className="text-white/80 text-[10px] sm:text-xs">Balance</div>
           <div className="text-lg sm:text-xl font-extrabold leading-tight">
-            {(() => {
+            {hideAllBalances ? '***' : (() => {
               const currency = c.currency || 'EUR'
               const valid = ['USD','EUR','UAH','PLN','GBP','CHF','CZK','HUF'].includes(currency)
               const v = Number(c._balance ?? 0)
@@ -163,18 +168,20 @@ function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false,
             <div className="font-mono tracking-wider text-xs sm:text-sm">
               {cardNumber}
             </div>
-            <button 
-              onClick={(e) => {
-                e.stopPropagation()
-                e.preventDefault()
-                copyCardNumber()
-              }}
-              onMouseDown={(e) => e.stopPropagation()}
-              className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors"
-              title="Копіювати номер картки"
-            >
-              <Copy size={12} />
-            </button>
+            {!hideAllBalances && (
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  copyCardNumber()
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
+                className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors"
+                title="Копіювати номер картки"
+              >
+                <Copy size={12} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -242,15 +249,13 @@ function EmptyCard({ onCreate }) {
 }
 
 function BankModal({ open, initial, onClose, onSubmit }) {
-  const [form, setForm] = useState({ name: '', iban: '', bic: '', beneficiary: '' })
+  const [form, setForm] = useState({ name: '', exclude_from_stats: false })
 
   useEffect(() => {
     setForm(initial ? {
       name: initial.name || '',
-      iban: initial.iban || '',
-      bic: initial.bic || '',
-      beneficiary: initial.beneficiary || ''
-    } : { name: '', iban: '', bic: '', beneficiary: '' })
+      exclude_from_stats: !!initial.exclude_from_stats
+    } : { name: '', exclude_from_stats: false })
   }, [initial, open])
 
   const submit = async (e) => {
@@ -278,27 +283,15 @@ function BankModal({ open, initial, onClose, onSubmit }) {
           onChange={(e)=>setForm({...form, name:e.target.value})}
           required
         />
-        <input 
-          className="border rounded-xl px-3 py-2" 
-          placeholder="IBAN (опц.)" 
-          value={form.iban}
-          onChange={(e)=>setForm({...form, iban:e.target.value})}
-        />
-        <div className="grid grid-cols-2 gap-3">
+        <label className="flex items-center gap-2.5 py-1.5 text-sm cursor-pointer select-none border rounded-xl px-3 bg-gray-50/50 hover:bg-gray-50 transition-colors">
           <input 
-            className="border rounded-xl px-3 py-2" 
-            placeholder="BIC/SWIFT/ЄДРПОУ (опц.)" 
-            value={form.bic}
-            onChange={(e)=>setForm({...form, bic:e.target.value.toUpperCase()})}
-            maxLength={11}
+            type="checkbox"
+            checked={form.exclude_from_stats}
+            onChange={(e) => setForm({ ...form, exclude_from_stats: e.target.checked })}
+            className="accent-black w-4 h-4 rounded border-gray-300 focus:ring-black"
           />
-          <input 
-            className="border rounded-xl px-3 py-2" 
-            placeholder="Бенефіціар (опц.)" 
-            value={form.beneficiary}
-            onChange={(e)=>setForm({...form, beneficiary:e.target.value})}
-          />
-        </div>
+          <span className="text-gray-700 font-medium">Виключити весь банк та всі його картки зі статистики</span>
+        </label>
         <div className="mt-2 flex gap-2">
           <button className="btn btn-primary flex-1" type="submit">{initial ? 'Зберегти' : 'Додати'}</button>
           <button type="button" className="btn btn-soft" onClick={onClose}>Скасувати</button>
@@ -309,7 +302,7 @@ function BankModal({ open, initial, onClose, onSubmit }) {
 }
 
 function CardModal({ open, initial, onClose, onSubmit, banks = [] }) {
-  const [form, setForm] = useState({ bank_id: '', name: '', card_number: '', currency: 'EUR', initial_balance: 0, expiry_date: '', cvv: '' })
+  const [form, setForm] = useState({ bank_id: '', name: '', currency: 'EUR' })
   const [file, setFile] = useState(null)
   const [previewUrl, setPreviewUrl] = useState(null)
 
@@ -317,12 +310,8 @@ function CardModal({ open, initial, onClose, onSubmit, banks = [] }) {
     setForm(initial ? {
       bank_id: initial.bank_id || '',
       name: initial.name || '',
-      card_number: initial.card_number || '',
-      currency: initial.currency || 'EUR',
-      initial_balance: Number(initial.initial_balance) || 0,
-      expiry_date: initial.expiry_date || '',
-      cvv: initial.cvv || ''
-    } : { bank_id: '', name: '', card_number: '', currency: 'EUR', initial_balance: 0, expiry_date: '', cvv: '' })
+      currency: initial.currency || 'EUR'
+    } : { bank_id: '', name: '', currency: 'EUR' })
     setFile(null)
     setPreviewUrl(initial?.bg_url || null)
   }, [initial, open])
@@ -354,20 +343,14 @@ function CardModal({ open, initial, onClose, onSubmit, banks = [] }) {
     }
     
     try {
-      // Визначаємо файл для відправки:
-      // - Якщо редагуємо і previewUrl === null, значить користувач видалив зображення -> 'REMOVE'
-      // - Якщо є новий файл -> file
-      // - Інакше -> null (немає файлу)
       let fileToSubmit = null
       if (previewUrl === null && initial) {
-        // Редагуємо і зображення видалено
         fileToSubmit = 'REMOVE'
       } else if (file && file instanceof File) {
-        // Є новий файл
         fileToSubmit = file
       }
       
-    await onSubmit(form, fileToSubmit)
+      await onSubmit(form, fileToSubmit)
     } catch (error) {
       console.error('[CardModal] Error in submit:', error)
       toast.error(error?.message || 'Помилка збереження картки')
@@ -422,74 +405,41 @@ function CardModal({ open, initial, onClose, onSubmit, banks = [] }) {
             </div>
           )}
         </div>
-        <input 
+        <select 
           className="border rounded-xl px-3 py-2" 
-          placeholder="Номер картки (опц., можна ****1234)" 
-          value={form.card_number}
-          onChange={(e)=>setForm({...form, card_number:e.target.value})}
-        />
-              <div className="grid grid-cols-2 gap-3">
-          <select 
-            className="border rounded-xl px-3 py-2" 
-            value={form.currency} 
-            onChange={(e)=>setForm({...form, currency:e.target.value})}
-          >
-                  <option>UAH</option><option>EUR</option><option>USD</option><option>GBP</option><option>PLN</option>
-                </select>
-          <input 
-            className="border rounded-xl px-3 py-2" 
-            type="number" 
-            step="0.01" 
-            placeholder="Початковий баланс"
-            value={form.initial_balance} 
-            onChange={(e)=>setForm({...form, initial_balance: Number(e.target.value)})}
-          />
+          value={form.currency} 
+          onChange={(e)=>setForm({...form, currency:e.target.value})}
+        >
+          <option>UAH</option><option>EUR</option><option>USD</option><option>GBP</option><option>PLN</option>
+        </select>
+        <div>
+          <label className="text-sm text-gray-600 mb-1 block">Фонова картинка (опц.)</label>
+          <input type="file" accept="image/*" onChange={handleFileChange} className="text-sm"/>
+          
+          {previewUrl && (
+            <div className="mt-2 relative">
+              <img 
+                src={previewUrl} 
+                alt="Preview" 
+                className="w-full h-32 object-cover rounded-xl"
+              />
+              <button
+                type="button"
+                onClick={removeImage}
+                className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1.5 hover:bg-red-600"
+                title="Видалити зображення"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <input 
-            className="border rounded-xl px-3 py-2" 
-            placeholder="Термін дії (MM/YYYY)" 
-            value={form.expiry_date}
-            onChange={(e)=>setForm({...form, expiry_date:e.target.value})}
-            maxLength={7}
-          />
-          <input 
-            className="border rounded-xl px-3 py-2" 
-            type="password"
-            placeholder="CVV (опц.)" 
-            value={form.cvv}
-            onChange={(e)=>setForm({...form, cvv:e.target.value.replace(/\D/g, '').slice(0, 4)})}
-            maxLength={4}
-          />
-              </div>
-              <div>
-                <label className="text-sm text-gray-600 mb-1 block">Фонова картинка (опц.)</label>
-                <input type="file" accept="image/*" onChange={handleFileChange} className="text-sm"/>
-                
-                {previewUrl && (
-                  <div className="mt-2 relative">
-                    <img 
-                      src={previewUrl} 
-                      alt="Preview" 
-                      className="w-full h-32 object-cover rounded-xl"
-                    />
-                    <button
-                      type="button"
-                      onClick={removeImage}
-                      className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1.5 hover:bg-red-600"
-                      title="Видалити зображення"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                )}
-              </div>
 
-              <div className="mt-2 flex gap-2">
-                <button className="btn btn-primary flex-1" type="submit">{initial ? 'Зберегти' : 'Додати'}</button>
-                <button type="button" className="btn btn-soft" onClick={onClose}>Скасувати</button>
-              </div>
-            </form>
+        <div className="mt-2 flex gap-2">
+          <button className="btn btn-primary flex-1" type="submit">{initial ? 'Зберегти' : 'Додати'}</button>
+          <button type="button" className="btn btn-soft" onClick={onClose}>Скасувати</button>
+        </div>
+      </form>
     </BaseModal>
   )
 }
@@ -804,13 +754,9 @@ export default function CardsManager({ groupByBank = false, showActions = true }
     }
     
     const payload = {
-      bank_id: form.bank_id || null,
-      name: form.name.trim(), 
-      card_number: form.card_number || null,
-      currency: form.currency || 'EUR', 
-      initial_balance: Number(form.initial_balance) || 0,
-      expiry_date: form.expiry_date || null, 
-      cvv: form.cvv || null
+      bank_id: form.bank_id || null, 
+      name: form.name, 
+      currency: form.currency || 'EUR'
     }
     
     try {
@@ -832,9 +778,7 @@ export default function CardsManager({ groupByBank = false, showActions = true }
   const handleBankSubmit = async (form) => {
     const payload = {
       name: form.name,
-      iban: form.iban || null,
-      bic: form.bic || null,
-      beneficiary: form.beneficiary || null
+      exclude_from_stats: form.exclude_from_stats || false
     }
     try {
       if (editingBank?.id) { 
@@ -1094,92 +1038,6 @@ return (
                         </div>
                       )}
                     </div>
-                    
-                    {/* Реквізити */}
-                    {(iban || bic || beneficiary || expiryDates.length > 0 || cvvs.length > 0) && (
-                      <div className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-gray-300 space-y-2 sm:space-y-2.5 text-xs sm:text-sm">
-                        {iban && (
-                          <div className="flex items-center gap-2">
-                            <span className="text-gray-600 font-medium">IBAN:</span>
-                            <span className="font-mono">{iban}</span>
-                            <button
-                              onClick={async () => {
-                                try {
-                                  await navigator.clipboard.writeText(iban)
-                                  toast.success('IBAN скопійовано')
-                                } catch (e) {
-                                  toast.error('Не вдалося скопіювати')
-                                }
-                              }}
-                              className="p-1 rounded hover:bg-gray-200 transition-colors"
-                              title="Копіювати IBAN"
-                            >
-                              <Copy size={14} className="text-gray-600" />
-                            </button>
-                          </div>
-                        )}
-                        
-                        {bic && (
-                          <div className="flex items-center gap-2">
-                            <span className="text-gray-600 font-medium">BIC/SWIFT/ЄДРПОУ:</span>
-                            <span className="font-mono">{bic}</span>
-                            <button
-                              onClick={async () => {
-                                try {
-                                  await navigator.clipboard.writeText(bic)
-                                  toast.success('BIC скопійовано')
-                                } catch (e) {
-                                  toast.error('Не вдалося скопіювати')
-                                }
-                              }}
-                              className="p-1 rounded hover:bg-gray-200 transition-colors"
-                              title="Копіювати BIC"
-                            >
-                              <Copy size={14} className="text-gray-600" />
-                            </button>
-                          </div>
-                        )}
-                        
-                        {beneficiary && (
-                          <div className="flex items-center gap-2">
-                            <span className="text-gray-600 font-medium">Бенефіціар:</span>
-                            <span>{beneficiary}</span>
-                            <button
-                              onClick={async () => {
-                                try {
-                                  await navigator.clipboard.writeText(beneficiary)
-                                  toast.success('Бенефіціар скопійовано')
-                                } catch (e) {
-                                  toast.error('Не вдалося скопіювати')
-                                }
-                              }}
-                              className="p-1 rounded hover:bg-gray-200 transition-colors"
-                              title="Копіювати бенефіціар"
-                            >
-                              <Copy size={14} className="text-gray-600" />
-                            </button>
-                          </div>
-                        )}
-                        
-                        {expiryDates.length > 0 && (
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-gray-600 font-medium">Терміни дії:</span>
-                            {expiryDates.map((exp, idx) => (
-                              <span key={idx} className="font-mono bg-white px-2 py-1 rounded border">{exp}</span>
-            ))}
-          </div>
-                        )}
-                        
-                        {cvvs.length > 0 && (
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-gray-600 font-medium">CVV:</span>
-                            {cvvs.map((cvv, idx) => (
-                              <span key={idx} className="font-mono bg-white px-2 py-1 rounded border">***</span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
                     </div>
                     
                     {/* Картки банку */}

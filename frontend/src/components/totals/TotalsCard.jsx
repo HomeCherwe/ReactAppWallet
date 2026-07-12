@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Eye, EyeOff, Wallet, CreditCard, PiggyBank, Globe } from 'lucide-react'
+import { Eye, EyeOff, Wallet, CreditCard, PiggyBank, Globe, BarChart2 } from 'lucide-react'
 import { fetchTotalsByBucket } from '../../api/totals'
 import { txBus } from '../../utils/txBus'
 import BalanceCard from './BalanceCard'
 import TotalsGrid from './TotalsGrid'
+import BalanceHistoryModal from './BalanceHistoryModal'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import useMonoRates from '../../hooks/useMonoRates'
 
@@ -15,9 +16,11 @@ export default function TotalsCard({ title = 'Total balance' }) {
   const settings = useSettingsStore((state) => state.settings)
   const updateNestedSetting = useSettingsStore((state) => state.updateNestedSetting)
   const initialized = useSettingsStore((state) => state.initialized)
+  const hideAllBalances = useSettingsStore(state => state.settings.hideAllBalances ?? false)
   const [loading, setLoading] = useState(true)
   const [idx, setIdx] = useState(0) // За замовчуванням All (індекс 0)
   const [isVisible, setIsVisible] = useState(true)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [data, setData] = useState({ cash:{}, cards:{}, savings:{} })
   const rootRef = useRef(null)
   const tabsRef = useRef(null)
@@ -28,6 +31,7 @@ export default function TotalsCard({ title = 'Total balance' }) {
   // Touch swipe state
   const touchStartX = useRef(0)
   const touchStartY = useRef(0)
+  const didSwipeRef = useRef(false)
 
   const initializedRef = useRef(false)
   const lastSavedIdxRef = useRef(null)
@@ -91,6 +95,7 @@ export default function TotalsCard({ title = 'Total balance' }) {
   const handleTouchStart = (e) => {
     touchStartX.current = e.touches[0].clientX
     touchStartY.current = e.touches[0].clientY
+    didSwipeRef.current = false
   }
 
   const handleTouchEnd = (e) => {
@@ -101,6 +106,7 @@ export default function TotalsCard({ title = 'Total balance' }) {
     
     // Only swipe horizontally if horizontal movement is greater than vertical
     if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
+      didSwipeRef.current = true
       if (deltaX > 0) {
         // Swipe left - next section
         setIdx((i) => Math.min(3, i + 1))
@@ -236,6 +242,17 @@ export default function TotalsCard({ title = 'Total balance' }) {
 
   const current = sections[idx]
 
+  // Determine primary currency for the current section (first non-zero key in its totals)
+  const primaryCurrency = useMemo(() => {
+    const totals = current?.totals || {}
+    const ORDER = ['EUR', 'USD', 'UAH', 'PLN', 'GBP', 'CHF', 'CZK', 'HUF']
+    for (const cur of ORDER) {
+      if (totals[cur] && Math.abs(totals[cur]) > 0.01) return cur
+    }
+    const first = Object.keys(totals).find(k => Math.abs(totals[k] || 0) > 0.01)
+    return first || 'UAH'
+  }, [current])
+
   // Автоматичний скрол вкладок до вибраної
   useEffect(() => {
     // Невелика затримка, щоб DOM встиг оновитися
@@ -301,14 +318,6 @@ export default function TotalsCard({ title = 'Total balance' }) {
             <Wallet size={16} className="text-indigo-600" />
             <h3 className="text-sm font-semibold text-gray-800">{title}</h3>
           </div>
-          <motion.button
-            onClick={() => setIsVisible(v=>!v)}
-            className="p-1 rounded-md hover:bg-gray-100 transition-colors"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            {isVisible ? <Eye size={14} /> : <EyeOff size={14} />}
-          </motion.button>
         </div>
       </div>
 
@@ -333,11 +342,20 @@ export default function TotalsCard({ title = 'Total balance' }) {
         </div>
       </div>
 
-      <div 
-        className="p-3 select-none"
+      <motion.div 
+        className="p-3 select-none cursor-pointer group relative"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
+        onClick={() => { if (!didSwipeRef.current) setHistoryOpen(true) }}
+        whileHover={{ backgroundColor: 'rgba(99,102,241,0.04)' }}
+        transition={{ duration: 0.15 }}
+        title="Переглянути графік балансу"
       >
+        {/* Chart hint icon */}
+        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <BarChart2 size={13} className="text-indigo-400" />
+        </div>
+
         <div className="min-h-[120px]">
           <AnimatePresence mode="wait">
             <motion.div
@@ -354,13 +372,13 @@ export default function TotalsCard({ title = 'Total balance' }) {
                 </div>
               ) : (
                 <div className="flex-1 flex flex-col justify-center">
-                  <TotalsGrid totals={current?.totals || {}} sectionType={current?.key} isVisible={isVisible} />
+                  <TotalsGrid totals={current?.totals || {}} sectionType={current?.key} isVisible={!hideAllBalances} />
                 </div>
               )}
             </motion.div>
           </AnimatePresence>
         </div>
-      </div>
+      </motion.div>
 
       <div className="px-3 pb-2">
         <div className="flex items-center justify-between">
@@ -372,6 +390,15 @@ export default function TotalsCard({ title = 'Total balance' }) {
           <div className="text-xs text-gray-500">{idx+1}/{sections.length}</div>
         </div>
       </div>
+
+      <BalanceHistoryModal
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        bucket={current?.key || 'all'}
+        sectionTitle={current?.title}
+        initialCurrency={primaryCurrency}
+        totals={current?.totals || {}}
+      />
     </motion.div>
   )
 }

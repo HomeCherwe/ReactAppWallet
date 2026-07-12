@@ -1,9 +1,10 @@
-import { Home, CreditCard, BarChart3, Wallet, Repeat, Plus, Archive, HandCoins } from 'lucide-react'
+import { Home, CreditCard, BarChart3, Wallet, Repeat, Plus, Archive, HandCoins, Eye, EyeOff } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { supabase, cacheUser } from '../lib/supabase'
 import { useState, useEffect, useRef } from 'react'
 import CreateTxModal from './transactions/CreateTxModal'
+import { useSettingsStore } from '../store/useSettingsStore'
 
 const NavItem = ({ icon:Icon, label, active=false, onClick, className = '' }) => (
   <motion.button
@@ -20,6 +21,8 @@ const NavItem = ({ icon:Icon, label, active=false, onClick, className = '' }) =>
 export default function Sidebar({ className = '' }){
   const [user, setUser] = useState(null)
   const [showCreateTxModal, setShowCreateTxModal] = useState(false)
+  const hideAllBalances = useSettingsStore(state => state.settings.hideAllBalances ?? false)
+  const updateSetting = useSettingsStore(state => state.updateSetting)
   const navigate = useNavigate()
   const location = useLocation()
   const [isVisible, setIsVisible] = useState(true)
@@ -88,9 +91,18 @@ export default function Sidebar({ className = '' }){
       <div
         className="bg-liquid-glass sm:bg-white rounded-full sm:rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.15)] sm:shadow-sm border border-white/20 sm:border sm:border-gray-200/80 flex flex-row sm:flex-col gap-2 items-center sm:items-start justify-center sm:justify-start p-1.5 sm:p-4 relative"
       >
-        <div className="hidden sm:flex items-center gap-3 px-2 pb-0">
-          <div className="h-8 w-8 rounded-xl bg-black/90 grid place-items-center text-white font-bold">¥</div>
-          <div className="hidden sm:block font-semibold">Wallet</div>
+        <div className="hidden sm:flex items-center justify-between w-full px-2 pb-0">
+          <div className="flex items-center gap-3">
+            <div className="h-8 w-8 rounded-xl bg-black/90 grid place-items-center text-white font-bold">¥</div>
+            <div className="font-semibold">Wallet</div>
+          </div>
+          <button 
+            onClick={() => updateSetting('hideAllBalances', !hideAllBalances)}
+            className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-800 transition-colors"
+            title={hideAllBalances ? "Показати баланси" : "Приховати баланси"}
+          >
+            {hideAllBalances ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
         </div>
         {/* Desktop-only navigation menu */}
         <div className="hidden sm:flex sm:flex-col sm:w-full sm:gap-2">
@@ -191,7 +203,14 @@ export default function Sidebar({ className = '' }){
           </div>
 
           {/* Аватарка справа на мобільному (абсолютно всередині відносного контейнера) */}
-          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center flex-shrink-0">
+          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1.5 flex-shrink-0">
+            <button 
+              onClick={() => updateSetting('hideAllBalances', !hideAllBalances)}
+              className="p-2 rounded-full bg-white/70 hover:bg-white text-gray-500 hover:text-gray-800 transition-all flex items-center justify-center shadow-sm"
+              title={hideAllBalances ? "Показати баланси" : "Приховати баланси"}
+            >
+              {hideAllBalances ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
             {user && (
               <motion.button
                 whileHover={{ scale: 1.05 }}

@@ -3,6 +3,8 @@ import { motion } from 'framer-motion'
 import { fmtDate, fmtAmount } from '../../utils/format'
 import { Trash2, RotateCcw, Link2Off } from 'lucide-react'
 
+import { useSettingsStore } from '../../store/useSettingsStore'
+
 export default function Row({
   tx,
   currency,
@@ -19,6 +21,7 @@ export default function Row({
   swipeActions = false,
   showEditButton = true,
 }) {
+  const hideAllBalances = useSettingsStore(state => state.settings.hideAllBalances ?? false)
   const isExp = Number(tx.amount) < 0
   const pad = compact ? 'p-2' : 'p-3'
   const round = compact ? 'rounded-lg' : 'rounded-xl'
@@ -108,9 +111,19 @@ export default function Row({
         <div>
           <div className={`font-semibold ${titleText} flex items-center gap-2`}>
             {tx.category || 'Без категорії'}
+            {tx.is_transfer && (
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100/80">
+                ⇄ Переказ
+              </span>
+            )}
           </div>
           <div className={`${metaText} text-gray-500`}>
             {[tx.card].filter(Boolean).join(' · ') || '—'} · {fmtDate(tx.created_at)}
+            {tx.is_transfer && tx.transfer_role && (
+              <span className="ml-1.5 text-indigo-500/85 font-medium">
+                ({tx.transfer_role === 'from' ? 'відправлено' : 'отримано'})
+              </span>
+            )}
             {noteSnippet && (
               <span
                 className="ml-2 text-indigo-600 inline-block align-bottom max-w-[220px] truncate"
@@ -127,17 +140,17 @@ export default function Row({
         {amountOverride ? (
           <div className="flex flex-col items-end leading-tight">
             <div className={`font-semibold ${titleText} ${Number(amountOverride.primaryAmount) < 0 ? '' : 'text-emerald-600'}`}>
-              {Number(amountOverride.primaryAmount) > 0 ? '+' : ''}{fmtAmount(amountOverride.primaryAmount, amountOverride.currency || currency)}
+              {hideAllBalances ? '***' : `${Number(amountOverride.primaryAmount) > 0 ? '+' : ''}${fmtAmount(amountOverride.primaryAmount, amountOverride.currency || currency)}`}
             </div>
             {amountOverride.secondaryAmount != null && (
               <div className={`${metaText} text-gray-500`}>
-                {Number(amountOverride.secondaryAmount) > 0 ? '+' : ''}{fmtAmount(amountOverride.secondaryAmount, amountOverride.currency || currency)}
+                {hideAllBalances ? '***' : `${Number(amountOverride.secondaryAmount) > 0 ? '+' : ''}${fmtAmount(amountOverride.secondaryAmount, amountOverride.currency || currency)}`}
               </div>
             )}
           </div>
         ) : (
           <div className={`font-semibold ${titleText} ${isExp ? '' : 'text-emerald-600'}`}>
-            {!isExp ? '+' : ''}{fmtAmount(tx.amount, currency)}
+            {hideAllBalances ? '***' : `${!isExp ? '+' : ''}${fmtAmount(tx.amount, currency)}`}
           </div>
         )}
 

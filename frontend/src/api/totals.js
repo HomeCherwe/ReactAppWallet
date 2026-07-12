@@ -45,6 +45,9 @@ export async function fetchTotalsByBucket() {
 
       // Process each card
       for (const card of cards) {
+        if (card.bank_exclude_from_stats) {
+          continue
+        }
         const bucket = getBucket(card)
         const currency = (card.currency || 'UAH').toUpperCase()
         const initialBalance = Number(card.initial_balance || 0)
@@ -86,3 +89,23 @@ export async function fetchTotalsByBucket() {
     }
   }
 }
+
+/**
+ * Fetch balance history for a given bucket and period
+ * @param {{ bucket?: 'all'|'cash'|'cards'|'savings', period?: 'week'|'month'|'year', currency?: string }} params
+ * @returns {Promise<Array<{ date: string, balance: number, change: number }>>}
+ */
+export async function fetchBalanceHistory({ bucket = 'all', period = 'month', currency = 'UAH', start, end } = {}) {
+  try {
+    const queryObj = { bucket, period, currency }
+    if (start) queryObj.start = start
+    if (end) queryObj.end = end
+    const params = new URLSearchParams(queryObj)
+    const result = await apiFetch(`/api/balance/history?${params}`)
+    return result || { changes: [], futureChanges: [] }
+  } catch (e) {
+    console.error('fetchBalanceHistory error', e)
+    return { changes: [], futureChanges: [] }
+  }
+}
+
