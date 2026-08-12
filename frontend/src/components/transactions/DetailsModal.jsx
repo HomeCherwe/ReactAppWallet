@@ -2,7 +2,7 @@ import { fmtDate, fmtAmount } from '../../utils/format'
 import { Pencil } from 'lucide-react'
 import BaseModal from '../BaseModal'
 
-export default function DetailsModal({ open, tx, currency, onClose, onEdit }) {
+export default function DetailsModal({ open, tx, currency, onClose, onEdit, onSplit }) {
   return (
     <BaseModal
       open={open}
@@ -45,15 +45,27 @@ export default function DetailsModal({ open, tx, currency, onClose, onEdit }) {
               </div>
 
               {onEdit && tx?.id && (
-                <div className="pt-2">
+                <div className="pt-2 flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => onEdit(tx)}
-                    className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium"
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium transition"
                   >
                     <Pencil size={16} />
                     Редагувати
                   </button>
+                  {onSplit && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose?.()
+                        onSplit(tx)
+                      }}
+                      className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 font-medium border border-purple-200 transition"
+                    >
+                      ✂️ Розділити
+                    </button>
+                  )}
                 </div>
               )}
             </div>

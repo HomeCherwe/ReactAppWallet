@@ -11,6 +11,7 @@ import CreateTxModal from './CreateTxModal'
 import EditTxModal from './EditTxModal'
 import TransferModal from './TransferModal'
 import ScanReceiptModal from './ScanReceiptModal'
+import SplitTxModal from './SplitTxModal'
 import { apiFetch, getApiUrl } from '../../utils.jsx'
 import { listTransactions, updateTransaction, deleteTransaction, archiveTransaction, deleteTransactions, getTransactionCategories } from '../../api/transactions'
 import { txBus } from '../../utils/txBus'
@@ -81,6 +82,14 @@ export default function MonthlyPayment() {
 
   const [editOpen, setEditOpen] = useState(false)
   const [editTx, setEditTx] = useState(null)
+
+  const [splitOpen, setSplitOpen] = useState(false)
+  const [splitTx, setSplitTx] = useState(null)
+
+  // Bulk category change
+  const [bulkCategoryOpen, setBulkCategoryOpen] = useState(false)
+  const [bulkCategoryValue, setBulkCategoryValue] = useState('')
+  const [bulkCategoryLoading, setBulkCategoryLoading] = useState(false)
 
   const [createOpen, setCreateOpen] = useState(false)
   const [transferOpen, setTransferOpen] = useState(false)
@@ -942,6 +951,43 @@ export default function MonthlyPayment() {
     setBulkDeleteOpen(true)
   }
 
+  const handleBulkCategoryChange = async () => {
+    if (selectedIds.size === 0 || !bulkCategoryValue.trim()) return
+    setBulkCategoryLoading(true)
+    const idsArray = Array.from(selectedIds)
+    try {
+      await Promise.all(
+        idsArray.map(id => {
+          const tx = rows.find(r => r.id === id)
+          if (!tx) return Promise.resolve()
+          return updateTransaction(id, {
+            amount: tx.amount,
+            category: bulkCategoryValue.trim(),
+            note: tx.note,
+            card: tx.card,
+            card_id: tx.card_id,
+            created_at: tx.created_at,
+            exclude_from_stats: tx.exclude_from_stats,
+            is_debt: tx.is_debt,
+          })
+        })
+      )
+      setRows(prev => prev.map(r =>
+        selectedIds.has(r.id) ? { ...r, category: bulkCategoryValue.trim() } : r
+      ))
+      toast.success(`Категорію змінено для ${idsArray.length} транзакцій`)
+      setSelectedIds(new Set())
+      setBulkCategoryOpen(false)
+      setBulkCategoryValue('')
+      txBus.emit('tx-updated')
+    } catch (e) {
+      console.error('Bulk category error:', e)
+      toast.error('Не вдалося змінити категорію')
+    } finally {
+      setBulkCategoryLoading(false)
+    }
+  }
+
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return
 
@@ -1043,24 +1089,76 @@ export default function MonthlyPayment() {
       <div className="mb-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
           <div className="font-semibold text-gray-900">Recent transactions</div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 relative">
             {selectedIds.size > 0 && (
-              <button
-                className="btn btn-danger text-xs inline-flex items-center gap-1"
-                onClick={handleBulkDeleteClick}
-                disabled={bulkDeleteLoading}
-              >
-                {bulkDeleteLoading ? (
-                  <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-                  </svg>
-                ) : (
-                  <Trash2 size={14} />
-                )}
-                Видалити ({selectedIds.size})
-              </button>
+              <>
+                <button
+                  className="btn btn-soft text-xs inline-flex items-center gap-1 border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                  onClick={() => { setBulkCategoryOpen(v => !v); setBulkCategoryValue('') }}
+                >
+                  🏷️ Категорія ({selectedIds.size})
+                </button>
+                <button
+                  className="btn btn-danger text-xs inline-flex items-center gap-1"
+                  onClick={handleBulkDeleteClick}
+                  disabled={bulkDeleteLoading}
+                >
+                  {bulkDeleteLoading ? (
+                    <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                    </svg>
+                  ) : (
+                    <Trash2 size={14} />
+                  )}
+                  Видалити ({selectedIds.size})
+                </button>
+              </>
             )}
+
+            {/* Bulk category picker */}
+            <AnimatePresence>
+              {bulkCategoryOpen && selectedIds.size > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: -6, scale: 0.97 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -6, scale: 0.97 }}
+                  className="absolute right-0 top-full mt-1 z-50 w-72 p-3 rounded-2xl bg-white border border-indigo-100 shadow-xl space-y-2"
+                >
+                  <div className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Нова категорія для {selectedIds.size} транз.</div>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={bulkCategoryValue}
+                    onChange={e => setBulkCategoryValue(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleBulkCategoryChange(); if (e.key === 'Escape') setBulkCategoryOpen(false) }}
+                    placeholder="Введіть або оберіть категорію..."
+                    list="bulk-categories-list"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                  />
+                  <datalist id="bulk-categories-list">
+                    {categories.map(c => <option key={c} value={c} />)}
+                  </datalist>
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setBulkCategoryOpen(false)}
+                      className="flex-1 px-3 py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium transition"
+                    >
+                      Скасувати
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!bulkCategoryValue.trim() || bulkCategoryLoading}
+                      onClick={handleBulkCategoryChange}
+                      className="flex-1 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium transition disabled:opacity-50"
+                    >
+                      {bulkCategoryLoading ? 'Збереження...' : 'Застосувати'}
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
             <button className="btn btn-primary text-xs inline-flex items-center gap-1" onClick={() => setCreateOpen(true)}>
               <Plus size={14} /> Add
             </button>
@@ -1509,6 +1607,20 @@ export default function MonthlyPayment() {
         currency={activeCurrency}
         onClose={() => setShowDetails(false)}
         onEdit={openEditFromDetails}
+        onSplit={(txToSplit) => {
+          setSplitTx(txToSplit)
+          setSplitOpen(true)
+        }}
+      />
+
+      <SplitTxModal
+        open={splitOpen}
+        tx={splitTx}
+        currency={activeCurrency}
+        onClose={() => { setSplitOpen(false); setSplitTx(null) }}
+        onSplitComplete={() => {
+          fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })
+        }}
       />
 
       <CreateTxModal

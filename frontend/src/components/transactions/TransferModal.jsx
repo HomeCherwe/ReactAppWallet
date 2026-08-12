@@ -6,8 +6,12 @@ import { txBus } from '../../utils/txBus'
 import BaseModal from '../BaseModal'
 import { listCards } from '../../api/cards'
 import { apiFetch } from '../../utils.jsx'
+import { useSettingsStore } from '../../store/useSettingsStore'
 
 export default function TransferModal({ open, onClose, onDone }) {
+  const settings = useSettingsStore((state) => state.settings)
+  const showUsdt = settings?.transactionsFilters?.showUsdt ?? true
+
   const [cards, setCards] = useState([])
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
@@ -31,8 +35,9 @@ export default function TransferModal({ open, onClose, onDone }) {
       
       // Load recent transactions for selection (last 200)
       try {
+        const excludeUsdtParam = !showUsdt ? '&exclude_usdt=true' : ''
         const txs = await apiFetch(
-          '/api/transactions?limit=200&fields=id,amount,card,created_at,note&order_by=created_at&order_asc=false'
+          `/api/transactions?limit=200&fields=id,amount,card,card_id,created_at,note&order_by=created_at&order_asc=false${excludeUsdtParam}`
         ) || []
       const opts = (txs || []).map(t => {
         const amt = Number(t.amount || 0)
@@ -51,7 +56,7 @@ export default function TransferModal({ open, onClose, onDone }) {
         setTxOptions([])
       }
     })()
-  }, [open])
+  }, [open, showUsdt])
 
   useEffect(() => {
     if (!open) {
