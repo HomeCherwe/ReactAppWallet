@@ -245,7 +245,7 @@ export default function ProfilePage() {
     try {
       // For HashRouter, the redirect URI MUST MATCH what is registered in Console and what was used in the AUTH URL
       // We are using origin + '/#/profile'
-      const redirectUri = window.location.origin + '/#/profile'
+      const redirectUri = window.location.href.split('#')[0] + '#/profile'
 
       console.log('Exchanging code:', code)
       console.log('Using Redirect URI:', redirectUri)
@@ -582,7 +582,7 @@ export default function ProfilePage() {
 
     // ВАЖЛИВО: Для HashRouter ми МАЄМО вказати # в redirect URI
     // TrueLayer поверне користувача сюди
-    const redirectUri = window.location.origin + '/#/profile'
+    const redirectUri = window.location.href.split('#')[0] + '#/profile'
 
     // Scopes: info accounts balance cards transactions direct_debits standing_orders offline_access
     const scope = 'info accounts balance cards transactions direct_debits standing_orders offline_access'
@@ -924,7 +924,7 @@ export default function ProfilePage() {
             </div>
 
             <p className="text-xs text-gray-400 mt-2">
-              Використовується TrueLayer Live. Redirect URI: {window.location.origin}/#/profile
+              Використовується TrueLayer Live. Redirect URI: {window.location.href.split('#')[0]}#/profile
             </p>
           </div>
 
