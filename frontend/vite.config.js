@@ -1,12 +1,16 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// GitHub Pages використовує base path якщо репозиторій не на root
-// Якщо репозиторій називається ReactAppWallet, то base буде /ReactAppWallet/
-// Для root репозиторію встановіть base: '/'
-const base = process.env.GITHUB_REPOSITORY 
-  ? `/${process.env.GITHUB_REPOSITORY.split('/')[1]}/`
-  : process.env.VITE_BASE_PATH || '/'
+// Capacitor завантажує файли локально — base ОБОВ'ЯЗКОВО має бути '/'
+// GitHub Pages використовує base path від назви репозиторію
+// CAPACITOR_BUILD=true встановлюється при збірці для iOS
+const isCapacitorBuild = process.env.CAPACITOR_BUILD === 'true'
+
+const base = isCapacitorBuild
+  ? '/'
+  : (process.env.GITHUB_REPOSITORY
+      ? `/${process.env.GITHUB_REPOSITORY.split('/')[1]}/`
+      : process.env.VITE_BASE_PATH || '/')
 
 export default defineConfig({
   base,

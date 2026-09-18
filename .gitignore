@@ -58,5 +58,8 @@ Thumbs.db
 
 # Temporary files
 *.tmp
-*.temp
-
+# Capacitor iOS build artifacts (генеруються автоматично)
+frontend/ios/App/Pods/
+frontend/ios/App/build/
+frontend/ios/DerivedData/
+frontend/ios/App/output/
