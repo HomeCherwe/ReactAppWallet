@@ -52,19 +52,27 @@ jobs:
         working-directory: frontend
         run: npx cap sync ios
 
-      - name: Install CocoaPods dependencies
+      # Capacitor 8 використовує Swift Package Manager замість CocoaPods
+      # Package.swift знаходиться в CapApp-SPM/ — SPM вирішується автоматично
+      - name: Resolve Swift Package Manager dependencies
         working-directory: frontend/ios/App
-        run: pod install
-
-      - name: Build unsigned IPA (for Sideloadly)
-        working-directory: frontend/ios
         run: |
           xcodebuild \
-            -workspace App/App.xcworkspace \
+            -project App.xcodeproj \
+            -scheme App \
+            -resolvePackageDependencies \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/spm"
+
+      - name: Build unsigned IPA (for Sideloadly)
+        working-directory: frontend/ios/App
+        run: |
+          xcodebuild \
+            -project App.xcodeproj \
             -scheme App \
             -configuration Release \
             -destination "generic/platform=iOS" \
             -archivePath "$RUNNER_TEMP/Wallet.xcarchive" \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/spm" \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
