@@ -218,7 +218,7 @@ async function ensureCardForItem(supabase, userId, conn, item, links) {
   const link = links.find(l => l.account_id === item.account_id)
   if (link?.card_id) {
     const { data: card } = await supabase.from('cards').select('id').eq('id', link.card_id).maybeSingle()
-    if (card) return { cardId: card.id, created: false, isNewLink: false }
+    if (card) return { cardId: card.id }
   }
 
   // Reuse an existing card of this bank in the same currency that isn't linked yet
@@ -230,7 +230,6 @@ async function ensureCardForItem(supabase, userId, conn, item, links) {
     .ilike('bank', `%${conn.provider_name}%`)
     .eq('currency', item.currency)
   let cardId = (candidates || []).map(c => c.id).find(id => !linkedCardIds.includes(id))
-  let created = false
 
   if (!cardId) {
     const baseName = item.kind === 'card'
@@ -247,7 +246,6 @@ async function ensureCardForItem(supabase, userId, conn, item, links) {
       else if (error.code !== '23505') throw error // anything but "name already taken"
     }
     if (!cardId) throw new Error(`Could not create a card for ${conn.provider_name}`)
-    created = true
   }
 
   await supabase.from('bank_connection_accounts').upsert(
@@ -262,7 +260,43 @@ async function ensureCardForItem(supabase, userId, conn, item, links) {
     },
     { onConflict: 'connection_id,account_id' }
   )
-  return { cardId, created, isNewLink: !link }
+  return { cardId }
+}
+
+async function countCardTransactions(supabase, cardId) {
+  const { count } = await supabase
+    .from('transactions')
+    .select('id', { count: 'exact', head: true })
+    .eq('card_id', cardId)
+  return count ?? 0
+}
+
+// Banks limit how far back transactions can be read (and some count the range strictly).
+// On "invalid_date_range" retry with shorter windows.
+const FALLBACK_WINDOWS_DAYS = [60, 30, 7]
+
+async function fetchTransactions(client, base, days, now) {
+  const iso = d => d.toISOString().split('.')[0] + 'Z'
+  const windows = [days, ...FALLBACK_WINDOWS_DAYS.filter(w => w < days)]
+  // A little before "now": some banks reject a range ending in their future (clock skew)
+  const end = new Date(now.getTime() - 2 * 60000)
+  for (const w of windows) {
+    const since = new Date(end)
+    since.setDate(since.getDate() - w)
+    try {
+      return (await client.get(`${base}/transactions`, { from: iso(since), to: iso(end) }))?.results || []
+    } catch (e) {
+      if (e instanceof ConsentExpiredError) throw e
+      if (e.response?.status === 404) return [] // no transactions for this account
+      const code = e.response?.data?.error
+      if (e.response?.status === 400 && code === 'invalid_date_range' && w !== windows[windows.length - 1]) {
+        console.warn(`[Banks] ${base}: ${w}-day range rejected, trying shorter`)
+        continue
+      }
+      throw e
+    }
+  }
+  return []
 }
 
 async function syncConnection(supabase, conn, psuHeaders) {
@@ -280,19 +314,17 @@ async function syncConnection(supabase, conn, psuHeaders) {
   let added = 0
 
   for (const item of items) {
-    const { cardId, created, isNewLink } = await ensureCardForItem(supabase, userId, conn, item, links || [])
-    const since = new Date(now)
-    since.setDate(since.getDate() - (isNewLink ? FIRST_SYNC_DAYS : SYNC_DAYS))
-    const from = since.toISOString().split('.')[0] + 'Z'
-    const base = item.kind === 'card' ? `cards/${item.account_id}` : `accounts/${item.account_id}`
+    // First import for this account: never linked, or linked to a card that is still empty
+    // (e.g. an earlier first sync failed half-way) — then pull full history and set the balance
+    const link = (links || []).find(l => l.account_id === item.account_id && l.card_id)
+    const firstImport = !link || (await countCardTransactions(supabase, link.card_id)) === 0
 
-    let txs = []
-    try {
-      txs = (await client.get(`${base}/transactions`, { from, to }))?.results || []
-    } catch (e) {
-      if (e instanceof ConsentExpiredError) throw e
-      if (e.response?.status !== 404) throw e
-    }
+    // Fetch before creating anything, so a rejected request leaves no half-made card behind
+    const base = item.kind === 'card' ? `cards/${item.account_id}` : `accounts/${item.account_id}`
+    const txs = await fetchTransactions(client, base, firstImport ? FIRST_SYNC_DAYS : SYNC_DAYS, now)
+    const { cardId } = await ensureCardForItem(supabase, userId, conn, item, links || [])
+    // Starting balance only for a card with no history yet (never overwrite an existing card's)
+    const setStartingBalance = firstImport && (await countCardTransactions(supabase, cardId)) === 0
 
     // Skip transactions imported before (matched by the bank's transaction id)
     const ids = txs.map(t => t.transaction_id).filter(Boolean)
@@ -327,8 +359,8 @@ async function syncConnection(supabase, conn, psuHeaders) {
       added += rows.length
     }
 
-    // A card created just now: set its starting balance so the app matches the bank
-    if (created) {
+    // First import into an empty card: set its starting balance so the app matches the bank
+    if (setStartingBalance) {
       try {
         const bal = (await client.get(`${base}/balance`))?.results?.[0]
         const current = Number(bal?.current)
