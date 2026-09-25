@@ -160,6 +160,8 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
   )
   const pinned = usePinnedTransactions({ excludeCardIds: excludedCardIds, pinnedCategories, enabled: !loading })
   const refreshPinned = pinned.refresh
+  // Refunds of loaded expenses (feed and pinned), shown nested under the expense
+  const allRefunds = useMemo(() => ({ ...txFeed.refunds, ...pinned.refunds }), [txFeed.refunds, pinned.refunds])
   const togglePin = pinned.togglePin
   const [refreshing, setRefreshing] = useState(false)
 
@@ -769,7 +771,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
             onUnlinkRefund={handleUnlinkRefund}
             refundFor={refundFor}
             onRefundForChange={setRefundFor}
-            refunds={txFeed.refunds}
+            refunds={allRefunds}
             pinned={pinned.items}
             pinnedCategories={pinnedCategories}
           />

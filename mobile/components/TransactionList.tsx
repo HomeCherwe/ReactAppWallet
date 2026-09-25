@@ -279,6 +279,11 @@ function TransactionList({
   }, [cards])
 
   // Pinned ones live only in their section (like the web); they join the list once categorized
+  const pinnedTop = useMemo(() => {
+    const ids = new Set(pinned.map(t => t.id))
+    return pinned.filter(t => !(t.refund_for && ids.has(t.refund_for)))
+  }, [pinned])
+
   // A refund whose expense is loaded shows only under that expense (no duplicate row)
   const regular = useMemo(() => {
     const loaded = new Set(transactions.map(t => t.id))
@@ -316,7 +321,7 @@ function TransactionList({
         <BankSyncIndicator />
       </View>
 
-      {!loading && pinned.length > 0 && (
+      {!loading && pinnedTop.length > 0 && (
         <View style={styles.pinnedWrap}>
           <Pressable onPress={togglePinned} style={({ pressed }) => [styles.pinnedHeader, pressed && styles.pinnedHeaderPressed]}>
             <Text style={styles.pinnedEmoji}>📌</Text>
@@ -324,32 +329,52 @@ function TransactionList({
               <Text style={styles.pinnedTitle}>Закріплені</Text>
               {pinnedCollapsed && (
                 <Text style={styles.pinnedSub}>
-                  {pinned.length} {pluralTx(pinned.length)} · натисніть, щоб розгорнути
+                  {pinnedTop.length} {pluralTx(pinnedTop.length)} · натисніть, щоб розгорнути
                 </Text>
               )}
             </View>
             <View style={styles.pinnedBadge}>
-              <Text style={styles.pinnedBadgeText}>{pinned.length}</Text>
+              <Text style={styles.pinnedBadgeText}>{pinnedTop.length}</Text>
             </View>
             <Animated.Text style={[styles.pinnedChevron, { transform: [{ rotate: chevronRotate }] }]}>⌄</Animated.Text>
           </Pressable>
           {!pinnedCollapsed &&
-            pinned.map((tx, i) => (
-              <TxRow
-                key={`pin-${tx.id}`}
-                tx={tx}
-                card={tx.card_id ? cardsById[tx.card_id] : undefined}
-                hidden={hidden}
-                showDate
-                last={i === pinned.length - 1}
-                mode={modeFor(tx)}
-                wiggle={wiggle}
-                wiggleDir={i % 2 ? 1 : -1}
-                onPress={handlePress}
-                onLongPress={onLongPressTx}
-                {...swipeProps}
-              />
-            ))}
+            pinnedTop.map((tx, i) => {
+              const kids = Number(tx.amount) < 0 ? refunds[tx.id] ?? [] : []
+              const lastRow = i === pinnedTop.length - 1
+              return (
+                <React.Fragment key={`pin-${tx.id}`}>
+                  <TxRow
+                    tx={tx}
+                    card={tx.card_id ? cardsById[tx.card_id] : undefined}
+                    hidden={hidden}
+                    showDate
+                    last={lastRow || kids.length > 0}
+                    mode={modeFor(tx)}
+                    wiggle={wiggle}
+                    wiggleDir={i % 2 ? 1 : -1}
+                    onPress={handlePress}
+                    onLongPress={onLongPressTx}
+                    {...swipeProps}
+                  />
+                  {kids.map((r, k) => (
+                    <TxRow
+                      key={`pin-${r.id}`}
+                      tx={r}
+                      card={r.card_id ? cardsById[r.card_id] : undefined}
+                      hidden={hidden}
+                      nested
+                      showDate
+                      last={lastRow && k === kids.length - 1}
+                      mode={refundFor ? 'dimmed' : 'normal'}
+                      onPress={handlePress}
+                      onLongPress={onLongPressTx}
+                      {...swipeProps}
+                    />
+                  ))}
+                </React.Fragment>
+              )
+            })}
         </View>
       )}
 
