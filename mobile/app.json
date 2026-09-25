@@ -29,6 +29,23 @@
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#000000"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "f7d73b14-22b4-452c-901b-2ff822bb408f"
+      }
+    },
+    "owner": "kolokol72",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/f7d73b14-22b4-452c-901b-2ff822bb408f",
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      },
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
     }
   }
 }
