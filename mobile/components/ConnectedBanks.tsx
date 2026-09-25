@@ -12,9 +12,7 @@ import {
 import { syncBanks } from '../store/useBankSyncStore'
 import { txBus } from '../utils/txBus'
 import { triggerErrorHaptic, triggerLightHaptic, triggerSuccessHaptic } from '../utils/haptics'
-import { GlassPressable } from './LiquidGlass'
 import BankLogo from './BankLogo'
-import AddBankModal from './AddBankModal'
 
 function timeAgo(iso: string): string {
   const min = Math.round((Date.now() - new Date(iso).getTime()) / 60000)
@@ -40,12 +38,15 @@ function statusLine(c: BankConnection): { text: string; color: string } {
   return { text: parts.filter(Boolean).join(' · '), color: Colors.textSub }
 }
 
-/** Settings block: connected banks (TrueLayer) + "Add bank". */
-export default function BanksSection({ visible }: { visible: boolean }) {
+/**
+ * Cards screen block: banks connected through TrueLayer — status, last sync, and per bank
+ * sync now / reconnect / disconnect. Hidden until loaded and when nothing is connected.
+ * Reloads whenever `reloadKey` changes.
+ */
+export default function ConnectedBanks({ reloadKey = 0, onChanged }: { reloadKey?: number; onChanged?: () => void }) {
   const [connections, setConnections] = useState<BankConnection[] | null>(null)
   const [error, setError] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
-  const [addOpen, setAddOpen] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -57,8 +58,8 @@ export default function BanksSection({ visible }: { visible: boolean }) {
   }, [])
 
   useEffect(() => {
-    if (visible) load()
-  }, [visible, load])
+    load()
+  }, [reloadKey, load])
 
   const syncOne = async (c: BankConnection) => {
     setBusyId(c.id)
@@ -67,7 +68,10 @@ export default function BanksSection({ visible }: { visible: boolean }) {
       const failed = results.find(r => r.error)
       if (failed) throw new Error(failed.error === 'consent_expired' ? 'Термін доступу сплив' : failed.error)
       triggerSuccessHaptic()
-      if (added > 0) txBus.emit({ type: 'SYNCED', source: 'banks', count: added })
+      if (added > 0) {
+        txBus.emit({ type: 'SYNCED', source: 'banks', count: added })
+        onChanged?.()
+      }
       Toast.show({ type: 'success', text1: added > 0 ? `${c.provider_name}: +${added}` : `${c.provider_name}: нових транзакцій немає` })
     } catch (e: any) {
       triggerErrorHaptic()
@@ -111,6 +115,7 @@ export default function BanksSection({ visible }: { visible: boolean }) {
             try {
               await disconnectBank(c.id)
               await load()
+              onChanged?.()
             } catch (e: any) {
               Toast.show({ type: 'error', text1: 'Не вдалося відключити', text2: e?.message })
             } finally {
@@ -133,20 +138,14 @@ export default function BanksSection({ visible }: { visible: boolean }) {
     ])
   }
 
+  // Hidden while loading and when nothing is connected (connecting starts from "＋ Додати")
+  if (!connections || connections.length === 0) return null
+
   return (
-    <View style={styles.group}>
-      {connections === null ? (
-        <View style={styles.loading}>
-          {error ? (
-            <Pressable onPress={load}>
-              <Text style={styles.errorText}>Не вдалося завантажити банки · Повторити</Text>
-            </Pressable>
-          ) : (
-            <ActivityIndicator color={Colors.orange} />
-          )}
-        </View>
-      ) : (
-        connections.map((c, i) => {
+    <View style={styles.wrap}>
+      <Text style={styles.title}>🔄 Підключені банки</Text>
+      <View style={styles.group}>
+      {connections.map((c, i) => {
           const status = statusLine(c)
           return (
             <Pressable
@@ -166,51 +165,28 @@ export default function BanksSection({ visible }: { visible: boolean }) {
               )}
             </Pressable>
           )
-        })
-      )}
-
-      {connections !== null && connections.length === 0 && (
-        <Text style={styles.emptyHint}>
-          Підключіть банк — і нові транзакції підтягуватимуться автоматично при кожному відкритті застосунку.
-        </Text>
-      )}
-
-      <View style={styles.divider} />
-      <GlassPressable style={styles.addBtn} onPress={() => setAddOpen(true)}>
-        <Text style={styles.addText}>＋ Додати банк</Text>
-      </GlassPressable>
-
-      <AddBankModal
-        visible={addOpen}
-        onClose={() => setAddOpen(false)}
-        connectedProviderIds={(connections ?? []).filter(c => c.status === 'active').map(c => c.provider_id)}
-        defaultCountry={connections?.[0]?.country ?? 'fr'}
-        onConnected={async () => {
-          await load()
-          // First sync right away (pulls ~90 days of history) — shown by the indicator on Home
-          syncBanks().catch(() => {})
-        }}
-      />
+        })}
+      </View>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
+  wrap: {
+    marginBottom: 20,
+  },
+  title: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: Colors.white80,
+    marginBottom: 10,
+  },
   group: {
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 20,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
     overflow: 'hidden',
-  },
-  loading: {
-    paddingVertical: 20,
-    alignItems: 'center',
-  },
-  errorText: {
-    fontSize: 13,
-    color: Colors.orange,
-    fontWeight: '600',
   },
   row: {
     flexDirection: 'row',
@@ -242,27 +218,5 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-  },
-  emptyHint: {
-    fontSize: 12,
-    lineHeight: 17,
-    color: Colors.textMuted,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(255, 255, 255, 0.10)',
-  },
-  addBtn: {
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 0,
-  },
-  addText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.orange,
   },
 })

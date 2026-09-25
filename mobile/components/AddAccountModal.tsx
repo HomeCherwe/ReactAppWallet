@@ -40,22 +40,30 @@ const CONNECT_ERRORS: Record<string, string> = {
   exchange_failed: 'Банк не підтвердив підключення. Спробуйте ще раз',
 }
 
-interface AddBankModalProps {
+interface AddAccountModalProps {
   visible: boolean
   onClose: () => void
   /** Called after a bank was connected */
   onConnected: (bankName: string) => void
+  /** "Власний рахунок" chosen: open the manual card form */
+  onManual: () => void
   connectedProviderIds: string[]
   defaultCountry?: string
 }
 
-export default function AddBankModal({
+/**
+ * "Додати" on the cards screen: connect a real bank with automatic sync (catalog as the next
+ * step in the same sheet), or add your own account kept up to date manually.
+ */
+export default function AddAccountModal({
   visible,
   onClose,
   onConnected,
+  onManual,
   connectedProviderIds,
   defaultCountry = 'fr',
-}: AddBankModalProps) {
+}: AddAccountModalProps) {
+  const [step, setStep] = useState<'choice' | 'catalog'>('choice')
   const [providers, setProviders] = useState<BankProvider[] | null>(null)
   const [error, setError] = useState(false)
   const [country, setCountry] = useState(defaultCountry)
@@ -64,7 +72,10 @@ export default function AddBankModal({
 
   useEffect(() => {
     if (!visible) return
+    setStep('choice')
     setQuery('')
+    setCountry(defaultCountry)
+    // Prefetch the catalog while the user reads the choice
     if (providers) return
     setError(false)
     listBankProviders()
@@ -112,14 +123,67 @@ export default function AddBankModal({
   }
 
   return (
-    <SheetModal visible={visible} onClose={onClose} sheetStyle={styles.sheet}>
+    <SheetModal
+      visible={visible}
+      onClose={onClose}
+      sheetStyle={step === 'catalog' ? styles.sheetTall : styles.sheet}
+    >
       <View style={styles.header}>
-        <Text style={styles.title}>Додати банк</Text>
+        {step === 'catalog' ? (
+          <Pressable onPress={() => setStep('choice')} hitSlop={10} style={styles.backBtn}>
+            <Text style={styles.backText}>‹ Назад</Text>
+          </Pressable>
+        ) : null}
+        <Text style={styles.title}>{step === 'catalog' ? 'Підключити банк' : 'Додати рахунок'}</Text>
         <GlassPressable onPress={onClose} style={styles.closeBtn}>
           <Text style={styles.closeText}>✕</Text>
         </GlassPressable>
       </View>
 
+      {step === 'choice' ? (
+        <View style={styles.choices}>
+          <Pressable
+            onPress={() => {
+              triggerLightHaptic()
+              setStep('catalog')
+            }}
+            style={({ pressed }) => [styles.option, styles.optionPrimary, pressed && styles.optionPressed]}
+          >
+            <View style={[styles.optionIcon, styles.optionIconPrimary]}>
+              <Text style={styles.optionEmoji}>🔄</Text>
+            </View>
+            <View style={styles.optionText}>
+              <View style={styles.optionTitleRow}>
+                <Text style={styles.optionTitle}>Підключити банк</Text>
+                <Text style={styles.badge}>РЕКОМЕНДОВАНО</Text>
+              </View>
+              <Text style={styles.optionDesc}>
+                Транзакції й баланс підтягуються автоматично. Revolut, Wise, BNP Paribas, Monzo та ще 80+ банків.
+              </Text>
+              <Text style={styles.optionNote}>🔒 Open Banking · лише читання</Text>
+            </View>
+          </Pressable>
+
+          <Pressable
+            onPress={() => {
+              triggerLightHaptic()
+              onManual()
+            }}
+            style={({ pressed }) => [styles.option, pressed && styles.optionPressed]}
+          >
+            <View style={styles.optionIcon}>
+              <Text style={styles.optionEmoji}>✍️</Text>
+            </View>
+            <View style={styles.optionText}>
+              <Text style={styles.optionTitle}>Власний рахунок</Text>
+              <Text style={styles.optionDesc}>
+                Готівка, скарбничка або банк без синхронізації — транзакції ви додаєте самі.
+              </Text>
+            </View>
+          </Pressable>
+        </View>
+      ) : (
+      <>
       <View style={styles.searchBox}>
         <Text style={styles.searchIcon}>🔍</Text>
         <TextInput
@@ -217,6 +281,8 @@ export default function AddBankModal({
         Підключення через TrueLayer (Open Banking). Ви входите у свій банк напряму — застосунок не бачить ваш
         пароль. Доступ лише на читання, діє 90 днів.
       </Text>
+      </>
+      )}
     </SheetModal>
   )
 }
@@ -226,7 +292,94 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 32,
     borderTopRightRadius: 32,
     overflow: 'hidden',
+  },
+  // Catalog step: tall fixed height so the list can scroll
+  sheetTall: {
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    overflow: 'hidden',
     height: '88%',
+  },
+  backBtn: {
+    paddingRight: 8,
+  },
+  backText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.orange,
+  },
+  choices: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 40,
+    gap: 12,
+  },
+  option: {
+    flexDirection: 'row',
+    gap: 14,
+    padding: 16,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+  },
+  optionPrimary: {
+    backgroundColor: 'rgba(255, 107, 0, 0.08)',
+    borderColor: 'rgba(255, 107, 0, 0.45)',
+  },
+  optionPressed: {
+    opacity: 0.75,
+    transform: [{ scale: 0.98 }],
+  },
+  optionIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  optionIconPrimary: {
+    backgroundColor: Colors.orange,
+  },
+  optionEmoji: {
+    fontSize: 20,
+  },
+  optionText: {
+    flex: 1,
+  },
+  optionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  optionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.white,
+  },
+  badge: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    color: Colors.orange,
+    backgroundColor: 'rgba(255, 107, 0, 0.16)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  optionDesc: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: Colors.textSub,
+    marginTop: 4,
+  },
+  optionNote: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 8,
   },
   header: {
     flexDirection: 'row',
