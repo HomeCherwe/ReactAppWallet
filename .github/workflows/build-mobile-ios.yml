@@ -1,7 +1,10 @@
 name: Build Mobile iOS IPA (Expo)
 
 # Builds the React Native / Expo app from mobile/ into an unsigned .ipa for Sideloadly.
-# Runs only when something in mobile/ changes (or manually from the Actions tab).
+# Code-only changes reach installed apps through EAS Update (eas-update.yml), so a new .ipa
+# is built only when native config/dependencies may have changed (or manually).
+# When native code changes, also bump "version" in mobile/app.json: updates only apply to
+# builds with the same version (runtimeVersion policy "appVersion").
 on:
   workflow_dispatch:
     inputs:
@@ -13,7 +16,8 @@ on:
     branches:
       - main
     paths:
-      - 'mobile/**'
+      - 'mobile/package.json'
+      - 'mobile/app.json'
       - '.github/workflows/build-mobile-ios.yml'
 
 concurrency:
