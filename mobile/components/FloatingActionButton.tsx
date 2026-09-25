@@ -15,6 +15,7 @@ import {
   frame,
   menuIndicator,
   menuStyle,
+  onAppear,
   shadow,
   tint,
 } from '@expo/ui/swift-ui/modifiers'
@@ -60,6 +61,14 @@ export default function FloatingActionButton({
   hidden = false,
 }: FloatingActionButtonProps) {
   const scale = useRef(new Animated.Value(1)).current
+  // The menu's items appear each time it opens — buzz then (once per opening)
+  const lastMenuBuzz = useRef(0)
+  const onMenuOpened = () => {
+    const now = Date.now()
+    if (now - lastMenuBuzz.current < 500) return
+    lastMenuBuzz.current = now
+    triggerHeavyHaptic()
+  }
 
   const handlePressIn = () => {
     Animated.spring(scale, {
@@ -95,7 +104,10 @@ export default function FloatingActionButton({
           triggerHeavyHaptic()
           onPress()
         }}
-        onLongPress={handleFallbackLongPress}
+        onLongPress={() => {
+          triggerHeavyHaptic()
+          handleFallbackLongPress()
+        }}
         delayLongPress={280}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
@@ -171,7 +183,12 @@ export default function FloatingActionButton({
             ]}
           >
             <Section>
-              <Button label="Нова транзакція" systemImage="plus.circle.fill" onPress={onPress} />
+              <Button
+                label="Нова транзакція"
+                systemImage="plus.circle.fill"
+                onPress={onPress}
+                modifiers={[onAppear(onMenuOpened)]}
+              />
             </Section>
             <Section title="Рахунки та операції">
               <Button

@@ -709,7 +709,6 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
                   )})}
                 </Animated.ScrollView>
 
-      <PullToRefreshIndicator scrollY={scrollY} refreshing={refreshing} top={SAFE_TOP} />
                 <View style={styles.statsDots}>
                   {recentMonthsStats.map((_, i) => {
                     const width_ = statsScrollX.interpolate({
@@ -796,6 +795,9 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
 
         <View style={{ height: 110 }} />
       </Animated.ScrollView>
+
+      {/* Pull-to-refresh pill: slides down from the top of the screen */}
+      <PullToRefreshIndicator scrollY={scrollY} refreshing={refreshing} top={SAFE_TOP} />
 
       <RefundPickBar
         expense={refundFor}
