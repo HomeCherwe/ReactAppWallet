@@ -6,7 +6,6 @@ import { Card } from '../api/cards'
 import { getCategoryIcon } from '../utils/categoryIcon'
 import { txDisplayTitle } from '../utils/pinned'
 import { triggerLightHaptic } from '../utils/haptics'
-import { LinearGradient } from 'expo-linear-gradient'
 import Icon from './Icon'
 
 const CURRENCY_SYMBOLS: Record<string, string> = { UAH: '₴', USD: '$', EUR: '€', GBP: '£', PLN: 'zł' }
@@ -20,9 +19,9 @@ export function fmtMoney(amount: number, currency?: string): string {
   return `${abs} ${CURRENCY_SYMBOLS[currency] ?? currency}`
 }
 
-const ACTION_W = 72
-const ACTION_GAP = 8
-const ACTIONS_W = ACTION_W * 2 + ACTION_GAP * 3
+// Minimal icon buttons revealed by the swipe
+const SLOT_W = 56
+const BTN = 42
 
 // Only one row is open at a time: opening another closes the previous one
 let closeOpenRow: (() => void) | null = null
@@ -53,8 +52,8 @@ interface TxRowProps {
 }
 
 /**
- * One transaction row. Swipe left reveals "Повернення" (or "Скасувати" for a linked refund)
- * and "Видалити", like the web app.
+ * One transaction row. Swipe left reveals icon buttons: refund (expenses only; "unlink" on a
+ * linked refund) and delete.
  */
 function TxRow({
   tx,
@@ -74,7 +73,17 @@ function TxRow({
 }: TxRowProps) {
   const x = useRef(new Animated.Value(0)).current
   const openRef = useRef(false)
-  const canSwipe = swipeEnabled && mode === 'normal' && (!!onRefund || !!onDelete)
+
+  const amount = Number(tx.amount)
+  const isRefund = !!tx.refund_for
+  // Refund only for expenses (and "unlink" on an income that already is a refund)
+  const showRefund = !!onRefund && (amount < 0 || isRefund)
+  const actionCount = (showRefund ? 1 : 0) + (onDelete ? 1 : 0)
+  const actionsW = actionCount * SLOT_W + 6
+  const actionsWRef = useRef(actionsW)
+  actionsWRef.current = actionsW
+
+  const canSwipe = swipeEnabled && mode === 'normal' && actionCount > 0
   const canSwipeRef = useRef(canSwipe)
   canSwipeRef.current = canSwipe
 
@@ -118,29 +127,29 @@ function TxRow({
         x.stopAnimation()
       },
       onPanResponderMove: (_, g) => {
-        const base = openRef.current ? -ACTIONS_W : 0
+        const w = actionsWRef.current
+        const base = openRef.current ? -w : 0
         let next = base + g.dx
         if (next > 0) next = 0
         // Rubber band past the buttons
-        if (next < -ACTIONS_W) next = -ACTIONS_W + (next + ACTIONS_W) * 0.3
+        if (next < -w) next = -w + (next + w) * 0.3
         x.setValue(next)
       },
       onPanResponderRelease: (_, g) => {
-        const base = openRef.current ? -ACTIONS_W : 0
+        const w = actionsWRef.current
+        const base = openRef.current ? -w : 0
         const pos = base + g.dx
-        const open = g.vx < -0.4 || (pos < -ACTIONS_W / 2 && g.vx < 0.4)
+        const open = g.vx < -0.4 || (pos < -w / 2 && g.vx < 0.4)
         if (open && !openRef.current) triggerLightHaptic()
-        animateTo(open ? -ACTIONS_W : 0)
+        animateTo(open ? -w : 0)
       },
-      onPanResponderTerminate: () => animateTo(openRef.current ? -ACTIONS_W : 0),
+      onPanResponderTerminate: () => animateTo(openRef.current ? -actionsWRef.current : 0),
     })
   ).current
 
-  const amount = Number(tx.amount)
   const isIncome = amount > 0
   const currency = tx.currency || card?.currency
   const title = txDisplayTitle(tx)
-  const isRefund = !!tx.refund_for
   const d = new Date(tx.created_at)
   const time = d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
   const when = showDate ? `${d.toLocaleDateString('uk-UA', { day: 'numeric', month: 'short' })}, ${time}` : time
@@ -164,10 +173,10 @@ function TxRow({
     onPress?.(tx)
   }
 
-  // Buttons grow in one after another as the row slides
+  // Buttons pop in one after another as the row slides
   const btnAnim = (from: number) => ({
-    opacity: x.interpolate({ inputRange: [-ACTIONS_W, -from, 0], outputRange: [1, 0, 0], extrapolate: 'clamp' }),
-    transform: [{ scale: x.interpolate({ inputRange: [-ACTIONS_W, -from, 0], outputRange: [1, 0.6, 0.6], extrapolate: 'clamp' }) }],
+    opacity: x.interpolate({ inputRange: [-actionsW, -from, 0], outputRange: [1, 0, 0], extrapolate: 'clamp' }),
+    transform: [{ scale: x.interpolate({ inputRange: [-actionsW, -from, 0], outputRange: [1, 0.5, 0.5], extrapolate: 'clamp' }) }],
   })
 
   const jiggle =
@@ -178,43 +187,35 @@ function TxRow({
   return (
     <View style={styles.wrap}>
       {canSwipe && (
-        <View style={styles.actions}>
-          <Animated.View style={[styles.actionSlot, btnAnim(ACTION_W * 0.9)]}>
-            <Pressable
-              onPress={() => {
-                close()
-                onRefund?.(tx)
-              }}
-              style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}
-            >
-              <LinearGradient
-                colors={isRefund ? ['#5B5B66', '#3A3A44'] : ['#FF8A2A', '#FF5A00']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={StyleSheet.absoluteFill}
-              />
-              <Icon name={isRefund ? 'close' : 'undo'} size={20} color="#fff" strokeWidth={2.4} />
-              <Text style={styles.actionText}>{isRefund ? 'Скасувати' : 'Повернення'}</Text>
-            </Pressable>
-          </Animated.View>
-          <Animated.View style={[styles.actionSlot, btnAnim(ACTION_W * 0.3)]}>
-            <Pressable
-              onPress={() => {
-                close()
-                onDelete?.(tx)
-              }}
-              style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}
-            >
-              <LinearGradient
-                colors={['#FF5F5F', '#D92D3A']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={StyleSheet.absoluteFill}
-              />
-              <Icon name="trash" size={20} color="#fff" strokeWidth={2.2} />
-              <Text style={styles.actionText}>Видалити</Text>
-            </Pressable>
-          </Animated.View>
+        <View style={[styles.actions, { width: actionsW }]}>
+          {showRefund && (
+            <Animated.View style={[styles.slot, btnAnim(actionsW - 8)]}>
+              <Pressable
+                accessibilityLabel={isRefund ? 'Скасувати повернення' : 'Повернення'}
+                onPress={() => {
+                  close()
+                  onRefund?.(tx)
+                }}
+                style={({ pressed }) => [styles.btn, isRefund ? styles.btnMuted : styles.btnRefund, pressed && styles.btnPressed]}
+              >
+                <Icon name={isRefund ? 'close' : 'undo'} size={19} color={isRefund ? Colors.white80 : Colors.orange} strokeWidth={2.4} />
+              </Pressable>
+            </Animated.View>
+          )}
+          {onDelete && (
+            <Animated.View style={[styles.slot, btnAnim(showRefund ? SLOT_W / 2 : actionsW - 8)]}>
+              <Pressable
+                accessibilityLabel="Видалити"
+                onPress={() => {
+                  close()
+                  onDelete(tx)
+                }}
+                style={({ pressed }) => [styles.btn, styles.btnDelete, pressed && styles.btnPressed]}
+              >
+                <Icon name="trash" size={19} color="#FF6B6B" strokeWidth={2.2} />
+              </Pressable>
+            </Animated.View>
+          )}
         </View>
       )}
 
@@ -281,34 +282,38 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     right: 0,
-    width: ACTIONS_W,
     flexDirection: 'row',
-    alignItems: 'stretch',
-    paddingVertical: 6,
-    paddingHorizontal: ACTION_GAP / 2,
-    gap: ACTION_GAP,
-    paddingRight: ACTION_GAP,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingRight: 6,
   },
-  actionSlot: {
-    width: ACTION_W,
+  slot: {
+    width: SLOT_W,
+    alignItems: 'center',
   },
-  action: {
-    flex: 1,
-    borderRadius: 16,
-    overflow: 'hidden',
+  btn: {
+    width: BTN,
+    height: BTN,
+    borderRadius: BTN / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  actionPressed: {
+  btnRefund: {
+    backgroundColor: 'rgba(255, 107, 0, 0.14)',
+    borderColor: 'rgba(255, 107, 0, 0.35)',
+  },
+  btnMuted: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+  },
+  btnDelete: {
+    backgroundColor: 'rgba(239, 68, 68, 0.14)',
+    borderColor: 'rgba(239, 68, 68, 0.35)',
+  },
+  btnPressed: {
+    transform: [{ scale: 0.92 }],
     opacity: 0.8,
-    transform: [{ scale: 0.96 }],
-  },
-  actionText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: Colors.white,
-    letterSpacing: 0.1,
   },
   item: {
     flexDirection: 'row',
