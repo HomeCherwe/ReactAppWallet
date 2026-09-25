@@ -14,6 +14,7 @@ import ScanReceiptModal from './ScanReceiptModal'
 import SplitTxModal from './SplitTxModal'
 import { apiFetch, getApiUrl } from '../../utils.jsx'
 import { listTransactions, updateTransaction, deleteTransaction, archiveTransaction, deleteTransactions, getTransactionCategories } from '../../api/transactions'
+import { listBankConnections } from '../../api/bankConnections'
 import { txBus } from '../../utils/txBus'
 import { listCards } from '../../api/cards'
 import { useSettingsStore } from '../../store/useSettingsStore'
@@ -96,7 +97,9 @@ export default function MonthlyPayment() {
   const [syncLoading, setSyncLoading] = useState(false)
   const [scanOpen, setScanOpen] = useState(false)
   const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false)
-  const [revolutConnected, setRevolutConnected] = useState(null) // null=checking, true, false
+  // Banks connected through TrueLayer: null = checking
+  const [hasBanks, setHasBanks] = useState(null)
+  const [expiredBanks, setExpiredBanks] = useState([]) // names of banks whose 90-day access ran out
 
   const [searchQuery, setSearchQuery] = useState('')
   const [hasMore, setHasMore] = useState(true)
@@ -337,18 +340,20 @@ export default function MonthlyPayment() {
     }
   }
 
-  // Check Revolut connection status on mount
-  useEffect(() => {
-    const checkRevolut = async () => {
-      try {
-        const result = await apiFetch('/api/truelayer/check-token')
-        setRevolutConnected(result?.connected === true && result?.valid !== false)
-      } catch (e) {
-        setRevolutConnected(false)
-      }
+  // Check connected banks on mount (to show an "access expired" banner)
+  const refreshBankStatus = useCallback(async () => {
+    try {
+      const list = await listBankConnections()
+      setHasBanks(list.some(c => c.status === 'active'))
+      setExpiredBanks(list.filter(c => c.status === 'expired').map(c => c.provider_name))
+    } catch (e) {
+      setHasBanks(false)
     }
-    checkRevolut()
   }, [])
+
+  useEffect(() => {
+    refreshBankStatus()
+  }, [refreshBankStatus])
 
   // Load categories once on mount (не залежить від preferences)
   useEffect(() => {
@@ -1071,18 +1076,18 @@ export default function MonthlyPayment() {
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-2xl p-5 shadow-soft min-h-[400px]">
 
-      {/* Persistent Revolut not connected banner */}
-      {revolutConnected === false && (
+      {/* A bank's 90-day access ran out */}
+      {expiredBanks.length > 0 && (
         <div className="mb-4 flex items-start gap-3 bg-amber-50 border-2 border-amber-400 rounded-xl p-3 sticky top-0 z-10">
           <AlertTriangle size={18} className="text-amber-600 mt-0.5 flex-shrink-0" />
           <div className="flex-1 min-w-0">
-            <span className="text-xs font-semibold text-amber-900">⚠️ Revolut не підключено</span>
-            <span className="text-xs text-amber-800 ml-1">— синхронізація транзакцій Revolut призупинена.</span>
+            <span className="text-xs font-semibold text-amber-900">⚠️ Доступ до {expiredBanks.join(', ')} сплив</span>
+            <span className="text-xs text-amber-800 ml-1">— синхронізація цих банків призупинена.</span>
             <a
               href="#/profile"
               className="ml-2 text-xs font-bold text-amber-700 underline hover:text-amber-900 whitespace-nowrap"
             >
-              Підключити в профілі →
+              Підключити знову в профілі →
             </a>
           </div>
         </div>
@@ -1178,8 +1183,8 @@ export default function MonthlyPayment() {
 
                 // Toast IDs for per-bank notifications
                 const monoToastId = toast.loading('⏳ Mono: синхронізація...')
-                const revToastId = revolutConnected !== false
-                  ? toast.loading('⏳ Revolut: синхронізація...')
+                const revToastId = hasBanks !== false
+                  ? toast.loading('⏳ Банки: синхронізація...')
                   : null
 
                 try {
@@ -1213,27 +1218,23 @@ export default function MonthlyPayment() {
                     )
                   }
 
-                  // --- Revolut notification ---
-                  if (tlRes?.success === false && !tlRes?.error && !revolutConnected) {
-                    // Not connected — show persistent warning but don't spam
-                    setRevolutConnected(false)
-                  } else if (tlRes?.error) {
-                    toast.error(`🔵 Revolut: помилка — ${tlRes.error}`, { duration: 6000, id: 'rev-sync' })
-                    if (tlRes.error.includes('auth') || tlRes.error.includes('connect')) {
-                      setRevolutConnected(false)
-                    }
-                  } else if (tlRes?.message?.includes('not connected') || tlRes?.message?.includes('TrueLayer not connected')) {
-                    setRevolutConnected(false)
-                  } else {
+                  // --- Connected banks (TrueLayer) notification ---
+                  if (tlRes?.error) {
+                    toast.error(`🏦 Банки: помилка — ${tlRes.error}`, { duration: 6000, id: 'rev-sync' })
+                  } else if (hasBanks !== false || (tlRes?.results || []).length > 0) {
                     const tlCount = tlRes?.count || 0
+                    const failed = (tlRes?.results || []).filter(r => r.error)
+                    if (failed.length > 0) {
+                      toast.error(`🏦 ${failed.map(r => r.provider_name).join(', ')}: не вдалося синхронізувати`, { duration: 6000, id: 'rev-sync-err' })
+                    }
                     toast.success(
                       tlCount > 0
-                        ? `🔵 Revolut: додано ${tlCount} транзакцій`
-                        : '🔵 Revolut: нових транзакцій немає',
+                        ? `🏦 Банки: додано ${tlCount} транзакцій`
+                        : '🏦 Банки: нових транзакцій немає',
                       { duration: 4000, id: 'rev-sync' }
                     )
-                    setRevolutConnected(true)
                   }
+                  refreshBankStatus()
 
                   // Emit SYNC event if any transactions were added
                   const totalCount = (monoRes?.count || 0) + (tlRes?.count || 0)
