@@ -5,6 +5,10 @@ on:
     branches:
       - main
       - master
+    # Only redeploy the web app when the web app changes (not on mobile/ or backend/ edits)
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
 permissions:
