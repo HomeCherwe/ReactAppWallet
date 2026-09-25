@@ -14,6 +14,11 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from 'react-native'
+import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
+import { initialWindowMetrics } from 'react-native-safe-area-context'
+
+// The pull indicator slides out from just under the status bar
+const SAFE_TOP = initialWindowMetrics?.insets.top ?? 47
 import { LinearGradient } from 'expo-linear-gradient'
 import { GlassView } from 'expo-glass-effect'
 import { BlurView } from 'expo-blur'
@@ -42,12 +47,15 @@ import GlassButton from '../components/GlassButton'
 import SettingsModal from '../components/SettingsModal'
 import { useSettingsStore } from '../store/useSettingsStore'
 import FloatingActionButton from '../components/FloatingActionButton'
+import RefundPickBar from '../components/RefundPickBar'
+import { useMenuOverlay } from '../store/useMenuOverlay'
+import { syncBanks } from '../store/useBankSyncStore'
+import { checkForAppUpdate } from '../utils/appUpdate'
 import QuickActionPopup from '../components/QuickActionPopup'
 import AddTransactionModal from '../components/AddTransactionModal'
 import AddAccountFlow from '../components/AddAccountFlow'
 import CardTransactionsSheet from '../components/CardTransactionsSheet'
-import DetailsModal from '../components/DetailsModal'
-import EditTxModal from '../components/EditTxModal'
+import TxSheet from '../components/TxSheet'
 import TransferModal from '../components/TransferModal'
 import SplitTxModal from '../components/SplitTxModal'
 import ScanReceiptModal from '../components/ScanReceiptModal'
@@ -119,7 +127,6 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
   // Tx operations modals
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null)
   const [detailsVisible, setDetailsVisible] = useState(false)
-  const [editVisible, setEditVisible] = useState(false)
   const [splitVisible, setSplitVisible] = useState(false)
 
   // Data state
@@ -129,6 +136,9 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
   const excludedKey = excludedCardIds.join(',')
   const [settingsCard, setSettingsCard] = useState<Card | null>(null)
   const [cardTxCard, setCardTxCard] = useState<Card | null>(null)
+  // Refund picking (swipe an expense → "Повернення"): the list highlights incomes, the bar explains
+  const [refundFor, setRefundFor] = useState<Transaction | null>(null)
+  const menuOpen = useMenuOverlay(s => !!s.menu)
   const [balances, setBalances] = useState<Record<string, number>>({})
   const [totals, setTotals] = useState<TotalsData>({ cash: {}, cards: {}, savings: {} })
   const [rates, setRates] = useState<RatesMap | null>(null)
@@ -157,6 +167,8 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
   )
   const pinned = usePinnedTransactions({ excludeCardIds: excludedCardIds, pinnedCategories, enabled: !loading })
   const refreshPinned = pinned.refresh
+  // Refunds of loaded expenses (feed and pinned), shown nested under the expense
+  const allRefunds = useMemo(() => ({ ...txFeed.refunds, ...pinned.refunds }), [txFeed.refunds, pinned.refunds])
   const togglePin = pinned.togglePin
   const [refreshing, setRefreshing] = useState(false)
 
@@ -220,11 +232,14 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
     loadData()
   }, [loadData])
 
+  // Pull down: reload everything, pull new bank transactions, and look for a new app version
   const onRefresh = () => {
     setRefreshing(true)
     loadData()
     refreshTxFeed()
     refreshPinned()
+    syncBanks().catch(() => {})
+    checkForAppUpdate()
   }
 
   // Background bank sync (e.g. Revolut on app open) added transactions — reload quietly
@@ -413,12 +428,6 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
     [primaryCurrency]
   )
 
-  const headerBgOpacity = scrollY.interpolate({
-    inputRange: [0, 60],
-    outputRange: [0, 1],
-    extrapolate: 'clamp',
-  })
-
   const getBucketLabel = () => {
     switch (bucketTab) {
       case 'all': return 'Загальний баланс'
@@ -484,22 +493,16 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
       <View style={styles.glowMidLeft} pointerEvents="none" />
       <View style={styles.glowBottomDock} pointerEvents="none" />
 
-      {/* Floating header blur */}
-      <Animated.View style={[styles.floatingHeader, { opacity: headerBgOpacity }]} pointerEvents="none">
-        <BlurView intensity={75} tint="dark" style={StyleSheet.absoluteFill} />
-        <GlassView style={StyleSheet.absoluteFill} glassEffectStyle="regular" colorScheme="dark" />
-        <View style={styles.floatingHeaderBorder} />
-      </Animated.View>
-
       {/* Scroll */}
       <Animated.ScrollView
+        scrollEnabled={!menuOpen}
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={Colors.orange}
+            tintColor="transparent"
           />
         }
         onScroll={Animated.event(
@@ -705,6 +708,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
                     </View>
                   )})}
                 </Animated.ScrollView>
+
                 <View style={styles.statsDots}>
                   {recentMonthsStats.map((_, i) => {
                     const width_ = statsScrollX.interpolate({
@@ -773,10 +777,17 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
             onFilterChange={txFeed.changeFilter}
             onRetry={txFeed.retry}
             onPressTx={handlePressTx}
-            onLongPressTx={handleTogglePin}
+            onTogglePin={handleTogglePin}
+            onSplitTx={tx => {
+              setSelectedTx(tx)
+              setSplitVisible(true)
+            }}
             onDeleteTx={handleDeleteTx}
             onLinkRefund={handleLinkRefund}
             onUnlinkRefund={handleUnlinkRefund}
+            refundFor={refundFor}
+            onRefundForChange={setRefundFor}
+            refunds={allRefunds}
             pinned={pinned.items}
             pinnedCategories={pinnedCategories}
           />
@@ -785,8 +796,19 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         <View style={{ height: 110 }} />
       </Animated.ScrollView>
 
-      {/* Floating Plus button */}
+      {/* Pull-to-refresh pill: slides down from the top of the screen */}
+      <PullToRefreshIndicator scrollY={scrollY} refreshing={refreshing} top={SAFE_TOP} />
+
+      <RefundPickBar
+        expense={refundFor}
+        currency={refundFor ? refundFor.currency || cards.find(c => c.id === refundFor.card_id)?.currency : undefined}
+        hidden={hideBalances}
+        onCancel={() => setRefundFor(null)}
+      />
+
+      {/* Floating Plus button (hidden while picking a refund — the bar takes that spot) */}
       <FloatingActionButton
+        hidden={!!refundFor}
         onPress={() => setAddTxVisible(true)}
         onAddCard={() => setAddCardVisible(true)}
         onTransfer={() => setTransferVisible(true)}
@@ -852,40 +874,16 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         usedCurrencies={usedCurrencies}
       />
 
-      {/* Tx Details */}
-      <DetailsModal
-        visible={detailsVisible}
-        tx={selectedTx}
-        currency={primaryCurrency}
+      {/* Tap on a transaction: view and edit in one sheet */}
+      <TxSheet
+        tx={detailsVisible ? selectedTx : null}
+        cards={cards}
+        hidden={hideBalances}
         onClose={() => {
           setDetailsVisible(false)
           setSelectedTx(null)
         }}
-        // iOS can't present a sheet while the details sheet is still closing — the new one never
-        // appears but blocks every touch (looked like a freeze). Open it once that one is gone.
-        onEdit={tx => {
-          setSelectedTx(tx)
-          setTimeout(() => setEditVisible(true), SHEET_SWAP_DELAY_MS)
-        }}
-        onSplit={tx => {
-          setSelectedTx(tx)
-          setTimeout(() => setSplitVisible(true), SHEET_SWAP_DELAY_MS)
-        }}
-        onDelete={handleDeleteTx}
-        pinState={selectedTx ? pinStateOf(selectedTx, pinnedCategories) : 'none'}
-        onTogglePin={handleTogglePin}
-      />
-
-      {/* Tx Edit */}
-      <EditTxModal
-        visible={editVisible}
-        tx={selectedTx}
-        cards={cards}
-        onClose={() => {
-          setEditVisible(false)
-          setSelectedTx(null)
-        }}
-        onSaved={onRefresh}
+        onSaved={() => onRefresh()}
       />
 
       {/* Tx Split */}
@@ -944,14 +942,6 @@ const styles = StyleSheet.create({
   glowBottomDock: {
     position: 'absolute', width: 360, height: 180, borderRadius: 90,
     backgroundColor: 'rgba(255, 107, 0, 0.26)', bottom: -10, alignSelf: 'center',
-  },
-  floatingHeader: {
-    position: 'absolute', top: 0, left: 0, right: 0,
-    height: Platform.OS === 'ios' ? 90 : 70, zIndex: 100, overflow: 'hidden',
-  },
-  floatingHeaderBorder: {
-    position: 'absolute', bottom: 0, left: 0, right: 0, height: 1,
-    backgroundColor: Colors.glassBorder,
   },
   scroll: {
     paddingTop: Platform.OS === 'ios' ? 60 : 44,

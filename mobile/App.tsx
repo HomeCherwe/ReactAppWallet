@@ -15,6 +15,7 @@ import { GlassSurface } from "./components/LiquidGlass"
 import { useSettingsStore } from "./store/useSettingsStore"
 import { useBankAutoSync } from "./hooks/useBankAutoSync"
 import { toastConfig } from "./components/ToastConfig"
+import MenuOverlayHost from "./components/MenuOverlayHost"
 
 // Screens
 import AuthScreen from "./screens/AuthScreen"
@@ -161,6 +162,9 @@ export default function App() {
           })}
         </View>
       </View>
+
+      {/* Long-press menus (drawn above everything; the finger can slide over them) */}
+      <MenuOverlayHost />
 
       <Toast config={toastConfig} topOffset={58} />
     </View>

@@ -10,6 +10,7 @@ import { triggerErrorHaptic, triggerLightHaptic, triggerMediumHaptic, triggerSuc
 import { TransactionRowsSkeleton } from './Skeleton'
 import BankSyncIndicator from './BankSyncIndicator'
 import TxRow, { RowMode, closeSwipedRow, fmtMoney } from './TxRow'
+import { MenuAction, MenuFrame, openMenu as openMenuOverlay } from '../store/useMenuOverlay'
 import { pinStateOf, txDisplayTitle } from '../utils/pinned'
 
 const PINNED_COLLAPSED_KEY = 'pinned_collapsed'
@@ -73,8 +74,10 @@ interface TransactionListProps {
   onFilterChange?: (filter: TxFilter) => void
   onRetry?: () => void
   onPressTx?: (tx: Transaction) => void
-  /** Long press: pin / unpin */
-  onLongPressTx?: (tx: Transaction) => void
+  /** Long-press menu: pin / unpin */
+  onTogglePin?: (tx: Transaction) => void
+  /** Long-press menu: split into parts */
+  onSplitTx?: (tx: Transaction) => void
   /** Swipe → Видалити (the screen confirms) */
   onDeleteTx?: (tx: Transaction) => void
   /** Links `refund` (income) as a refund of `expense` */
@@ -83,6 +86,11 @@ interface TransactionListProps {
   onUnlinkRefund?: (refund: Transaction) => Promise<void>
   pinned?: Transaction[]
   pinnedCategories?: string[]
+  /** Refund picking is controlled by the screen, which shows the floating hint bar */
+  refundFor: Transaction | null
+  onRefundForChange: (tx: Transaction | null) => void
+  /** Refunds of loaded expenses, by expense id: shown nested under the expense */
+  refunds?: Record<string, Transaction[]>
 }
 
 export default React.memo(TransactionList)
@@ -99,12 +107,16 @@ function TransactionList({
   onFilterChange,
   onRetry,
   onPressTx,
-  onLongPressTx,
+  onTogglePin,
+  onSplitTx,
   onDeleteTx,
   onLinkRefund,
   onUnlinkRefund,
   pinned = [],
   pinnedCategories = [],
+  refundFor,
+  onRefundForChange,
+  refunds = {},
 }: TransactionListProps) {
   // ---- Pinned section: collapsible, remembered between launches ----
   const [pinnedCollapsed, setPinnedCollapsed] = useState(false)
@@ -129,11 +141,29 @@ function TransactionList({
   const chevronRotate = chevron.interpolate({ inputRange: [0, 1], outputRange: ['-90deg', '0deg'] })
 
   // ---- Refund picking (like the web): swipe an expense → "Повернення" → tap the income ----
-  const [refundFor, setRefundFor] = useState<Transaction | null>(null)
+  const setRefundFor = (tx: Transaction | null) => onRefundForChange(tx)
   const [linking, setLinking] = useState(false)
 
+  // Pickable rows jiggle while picking (one shared native-driven value)
+  const wiggle = useRef(new Animated.Value(0)).current
+  useEffect(() => {
+    if (!refundFor) {
+      wiggle.stopAnimation()
+      wiggle.setValue(0)
+      return
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(wiggle, { toValue: 1, duration: 110, useNativeDriver: true }),
+        Animated.timing(wiggle, { toValue: -1, duration: 220, useNativeDriver: true }),
+        Animated.timing(wiggle, { toValue: 0, duration: 110, useNativeDriver: true }),
+      ])
+    )
+    loop.start()
+    return () => loop.stop()
+  }, [refundFor])
+
   const cancelRefundPick = useCallback(() => {
-    smoothLayout()
     setRefundFor(null)
   }, [])
 
@@ -180,8 +210,7 @@ function TransactionList({
         return
       }
       triggerMediumHaptic()
-      smoothLayout()
-      setRefundFor(tx)
+      setTimeout(() => setRefundFor(tx), 180)
     },
     [onUnlinkRefund]
   )
@@ -207,7 +236,6 @@ function TransactionList({
       try {
         await onLinkRefund?.(expense, refund)
         triggerSuccessHaptic()
-        smoothLayout()
         setRefundFor(null)
         const refundAmount = Number(refund.amount)
         const left = Math.abs(Number(expense.amount)) - refundAmount
@@ -243,6 +271,43 @@ function TransactionList({
     [refundFor, pickRefund, onPressTx]
   )
 
+  // ---- Long press: the row lifts and a glass menu offers everything you can do with it ----
+  const openMenu = (tx: Transaction, frame: MenuFrame) => {
+    closeSwipedRow()
+    openMenuOverlay({
+      frame,
+      actions: menuActions(tx),
+      previewStyle: styles.menuPreview,
+      preview: (
+        <TxRow
+          tx={tx}
+          card={tx.card_id ? cardsById[tx.card_id] : undefined}
+          hidden={hidden}
+          last
+          swipeEnabled={false}
+          nested={!!tx.refund_for && Number(tx.amount) > 0}
+        />
+      ),
+    })
+  }
+
+  const menuActions = (tx: Transaction): MenuAction[] => {
+    const out: MenuAction[] = []
+    const pin = pinStateOf(tx, pinnedCategories)
+    if (pin === 'category') {
+      out.push({ label: 'Обрати категорію', icon: 'tag', onPress: () => onPressTx?.(tx) })
+    } else if (onTogglePin) {
+      out.push({ label: pin === 'tag' ? 'Відкріпити' : 'Закріпити', icon: pin === 'tag' ? 'pinOff' : 'pin', onPress: () => onTogglePin(tx) })
+    }
+    if (onSplitTx && !tx.refund_for) out.push({ label: 'Розділити', icon: 'split', onPress: () => onSplitTx(tx) })
+    if (onLinkRefund && Number(tx.amount) < 0 && !tx.is_transfer) {
+      out.push({ label: 'Прив’язати повернення', icon: 'undo', onPress: () => startRefund(tx) })
+    }
+    if (onUnlinkRefund && tx.refund_for) out.push({ label: 'Скасувати повернення', icon: 'close', onPress: () => startRefund(tx) })
+    if (onDeleteTx) out.push({ label: 'Видалити', icon: 'trash', destructive: true, onPress: () => onDeleteTx(tx) })
+    return out
+  }
+
   const swipeProps = {
     onRefund: onLinkRefund ? startRefund : undefined,
     onDelete: onDeleteTx,
@@ -255,10 +320,18 @@ function TransactionList({
   }, [cards])
 
   // Pinned ones live only in their section (like the web); they join the list once categorized
-  const regular = useMemo(
-    () => transactions.filter(t => pinStateOf(t, pinnedCategories) === 'none'),
-    [transactions, pinnedCategories]
-  )
+  const pinnedTop = useMemo(() => {
+    const ids = new Set(pinned.map(t => t.id))
+    return pinned.filter(t => !(t.refund_for && ids.has(t.refund_for)))
+  }, [pinned])
+
+  // A refund whose expense is loaded shows only under that expense (no duplicate row)
+  const regular = useMemo(() => {
+    const loaded = new Set(transactions.map(t => t.id))
+    return transactions.filter(
+      t => pinStateOf(t, pinnedCategories) === 'none' && !(t.refund_for && (loaded.has(t.refund_for) || refunds[t.refund_for]))
+    )
+  }, [transactions, pinnedCategories, refunds])
 
   const groups = useMemo(() => {
     const out: DayGroup[] = []
@@ -273,14 +346,14 @@ function TransactionList({
       g.items.push(tx)
       if (!tx.exclude_from_stats) {
         const cur = tx.currency || (tx.card_id && cardsById[tx.card_id]?.currency) || ''
-        g.totals[cur] = (g.totals[cur] || 0) + Number(tx.amount)
+        // amount_stat: an expense minus its refunds
+        g.totals[cur] = (g.totals[cur] || 0) + Number(tx.amount_stat ?? tx.amount)
       }
     }
     return out
   }, [regular, cardsById])
 
   const mask = (s: string) => (hidden ? '••••' : s)
-  const hasPickable = !!refundFor && transactions.some(canBeRefund)
 
   return (
     <View style={styles.card}>
@@ -289,29 +362,8 @@ function TransactionList({
         <BankSyncIndicator />
       </View>
 
-      {refundFor && (
-        <View style={styles.pickBanner}>
-          <View style={styles.pickIcon}>
-            <Text style={styles.pickIconText}>↩︎</Text>
-          </View>
-          <View style={styles.pickTextWrap}>
-            <Text style={styles.pickTitle}>Оберіть дохід-повернення</Text>
-            <Text style={styles.pickSub} numberOfLines={2}>
-              для «{txDisplayTitle(refundFor)}» · {mask(`−${fmtMoney(Number(refundFor.amount), refundFor.currency || (refundFor.card_id ? cardsById[refundFor.card_id]?.currency : undefined))}`)}
-              {!hasPickable ? '\nДоходів у списку немає — прокрутіть нижче' : ''}
-            </Text>
-          </View>
-          {linking ? (
-            <ActivityIndicator color={Colors.orange} />
-          ) : (
-            <Pressable onPress={cancelRefundPick} hitSlop={8} style={styles.pickCancel}>
-              <Text style={styles.pickCancelText}>Скасувати</Text>
-            </Pressable>
-          )}
-        </View>
-      )}
 
-      {!loading && pinned.length > 0 && (
+      {!loading && pinnedTop.length > 0 && (
         <View style={styles.pinnedWrap}>
           <Pressable onPress={togglePinned} style={({ pressed }) => [styles.pinnedHeader, pressed && styles.pinnedHeaderPressed]}>
             <Text style={styles.pinnedEmoji}>📌</Text>
@@ -319,30 +371,52 @@ function TransactionList({
               <Text style={styles.pinnedTitle}>Закріплені</Text>
               {pinnedCollapsed && (
                 <Text style={styles.pinnedSub}>
-                  {pinned.length} {pluralTx(pinned.length)} · натисніть, щоб розгорнути
+                  {pinnedTop.length} {pluralTx(pinnedTop.length)} · натисніть, щоб розгорнути
                 </Text>
               )}
             </View>
             <View style={styles.pinnedBadge}>
-              <Text style={styles.pinnedBadgeText}>{pinned.length}</Text>
+              <Text style={styles.pinnedBadgeText}>{pinnedTop.length}</Text>
             </View>
             <Animated.Text style={[styles.pinnedChevron, { transform: [{ rotate: chevronRotate }] }]}>⌄</Animated.Text>
           </Pressable>
           {!pinnedCollapsed &&
-            pinned.map((tx, i) => (
-              <TxRow
-                key={`pin-${tx.id}`}
-                tx={tx}
-                card={tx.card_id ? cardsById[tx.card_id] : undefined}
-                hidden={hidden}
-                showDate
-                last={i === pinned.length - 1}
-                mode={modeFor(tx)}
-                onPress={handlePress}
-                onLongPress={onLongPressTx}
-                {...swipeProps}
-              />
-            ))}
+            pinnedTop.map((tx, i) => {
+              const kids = Number(tx.amount) < 0 ? refunds[tx.id] ?? [] : []
+              const lastRow = i === pinnedTop.length - 1
+              return (
+                <React.Fragment key={`pin-${tx.id}`}>
+                  <TxRow
+                    tx={tx}
+                    card={tx.card_id ? cardsById[tx.card_id] : undefined}
+                    hidden={hidden}
+                    showDate
+                    last={lastRow || kids.length > 0}
+                    mode={modeFor(tx)}
+                    wiggle={wiggle}
+                    wiggleDir={i % 2 ? 1 : -1}
+                    onPress={handlePress}
+                    onLongPress={openMenu}
+                    {...swipeProps}
+                  />
+                  {kids.map((r, k) => (
+                    <TxRow
+                      key={`pin-${r.id}`}
+                      tx={r}
+                      card={r.card_id ? cardsById[r.card_id] : undefined}
+                      hidden={hidden}
+                      nested
+                      showDate
+                      last={lastRow && k === kids.length - 1}
+                      mode={refundFor ? 'dimmed' : 'normal'}
+                      onPress={handlePress}
+                      onLongPress={openMenu}
+                      {...swipeProps}
+                    />
+                  ))}
+                </React.Fragment>
+              )
+            })}
         </View>
       )}
 
@@ -400,19 +474,41 @@ function TransactionList({
                 </Text>
               </View>
 
-              {group.items.map((tx, i) => (
-                <TxRow
-                  key={tx.id}
-                  tx={tx}
-                  card={tx.card_id ? cardsById[tx.card_id] : undefined}
-                  hidden={hidden}
-                  last={i === group.items.length - 1}
-                  mode={modeFor(tx)}
-                  onPress={handlePress}
-                  onLongPress={onLongPressTx}
-                  {...swipeProps}
-                />
-              ))}
+              {group.items.map((tx, i) => {
+                const kids = Number(tx.amount) < 0 ? refunds[tx.id] ?? [] : []
+                const lastInDay = i === group.items.length - 1
+                return (
+                  <React.Fragment key={tx.id}>
+                    <TxRow
+                      tx={tx}
+                      card={tx.card_id ? cardsById[tx.card_id] : undefined}
+                      hidden={hidden}
+                      last={lastInDay || kids.length > 0}
+                      mode={modeFor(tx)}
+                      wiggle={wiggle}
+                      wiggleDir={i % 2 ? 1 : -1}
+                      onPress={handlePress}
+                      onLongPress={openMenu}
+                      {...swipeProps}
+                    />
+                    {kids.map((r, k) => (
+                      <TxRow
+                        key={r.id}
+                        tx={r}
+                        card={r.card_id ? cardsById[r.card_id] : undefined}
+                        hidden={hidden}
+                        nested
+                        showDate={new Date(r.created_at).toDateString() !== new Date(tx.created_at).toDateString()}
+                        last={lastInDay && k === kids.length - 1}
+                        mode={refundFor ? 'dimmed' : 'normal'}
+                        onPress={handlePress}
+                        onLongPress={openMenu}
+                        {...swipeProps}
+                      />
+                    ))}
+                  </React.Fragment>
+                )
+              })}
             </View>
           ))}
 
@@ -553,6 +649,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: Colors.white,
+  },
+  menuPreview: {
+    backgroundColor: '#141416',
   },
   pinnedWrap: {
     marginHorizontal: 12,

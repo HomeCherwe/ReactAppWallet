@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { listPinnedTransactions, Transaction, updateTransaction } from '../api/transactions'
+import { listPinnedTransactions, listRefundsFor, Transaction, updateTransaction } from '../api/transactions'
 import { hasPinTag, pinStateOf, withPinTag } from '../utils/pinned'
 
 /**
@@ -16,6 +16,8 @@ export function usePinnedTransactions({
   enabled: boolean
 }) {
   const [items, setItems] = useState<Transaction[]>([])
+  // Refunds of pinned expenses, by expense id (shown nested under them)
+  const [refunds, setRefunds] = useState<Record<string, Transaction[]>>({})
   // Stable dependencies for the id/category lists
   const excludeKey = excludeCardIds.join(',')
   const categoriesKey = pinnedCategories.join('\u0001')
@@ -28,7 +30,12 @@ export function usePinnedTransactions({
         pinnedCategories: categoriesKey ? categoriesKey.split('\u0001') : [],
         excludeCardIds: excludeKey ? excludeKey.split(',') : [],
       })
-      if (id === requestId.current) setItems(list)
+      const kids = await listRefundsFor(list.filter(t => Number(t.amount) < 0).map(t => t.id)).catch(() => [])
+      if (id !== requestId.current) return
+      const map: Record<string, Transaction[]> = {}
+      for (const r of kids) (map[r.refund_for as string] ||= []).push(r)
+      setItems(list)
+      setRefunds(map)
     } catch (e) {
       console.warn('[Pinned] load failed:', e)
     }
@@ -67,5 +74,5 @@ export function usePinnedTransactions({
     [categoriesKey, refresh]
   )
 
-  return { items, refresh, togglePin }
+  return { items, refunds, refresh, togglePin }
 }

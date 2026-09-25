@@ -1,8 +1,14 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from "react"
-import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+﻿import React, { useCallback, useEffect, useMemo, useState , useRef} from "react"
+import { Animated,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl,
   ActivityIndicator, Platform, Dimensions
 } from "react-native"
+import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
+import { initialWindowMetrics } from 'react-native-safe-area-context'
+
+// The pull indicator slides out from just under the status bar
+const SAFE_TOP = initialWindowMetrics?.insets.top ?? 47
+import { checkForAppUpdate } from '../utils/appUpdate'
 import { Colors, Typography, Radius } from "../constants/theme"
 import { listTransactions, Transaction } from "../api/transactions"
 import { listCards, Card } from "../api/cards"
@@ -58,8 +64,11 @@ export default function AnalyticsScreen() {
   const [loading, setLoading] = useState(true)
   const [txType, setTxType] = useState<"expense" | "income">("expense")
 
-  const loadData = useCallback(async () => {
-    setLoading(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const pullY = useRef(new Animated.Value(0)).current
+
+  const loadData = useCallback(async (pulled = false) => {
+    if (!pulled) setLoading(true)
     try {
       const start = new Date(selectedMonth.year, selectedMonth.month - 1, 1)
       const end = new Date(selectedMonth.year, selectedMonth.month, 0)
@@ -87,6 +96,7 @@ export default function AnalyticsScreen() {
       })
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }, [selectedMonth])
 
@@ -143,7 +153,24 @@ export default function AnalyticsScreen() {
   }
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+    <View style={styles.rootWrap}>
+    <Animated.ScrollView
+      style={styles.root}
+      contentContainerStyle={styles.content}
+      onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: pullY } } }], { useNativeDriver: true })}
+      scrollEventThrottle={16}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          tintColor="transparent"
+          onRefresh={() => {
+            setRefreshing(true)
+            loadData(true)
+            checkForAppUpdate()
+          }}
+        />
+      }
+    >
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Аналітика</Text>
         <Text style={styles.headerSub}>{selectedMonth.label}</Text>
@@ -253,11 +280,14 @@ export default function AnalyticsScreen() {
       </View>
 
       <View style={{ height: 120 }} />
-    </ScrollView>
+    </Animated.ScrollView>
+    <PullToRefreshIndicator scrollY={pullY} refreshing={refreshing} top={SAFE_TOP} />
+    </View>
   )
 }
 
 const styles = StyleSheet.create({
+  rootWrap: { flex: 1 },
   root: { flex: 1, backgroundColor: Colors.bg },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: Colors.bg },
   content: { paddingBottom: 130 },

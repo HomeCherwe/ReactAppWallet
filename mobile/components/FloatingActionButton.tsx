@@ -15,6 +15,7 @@ import {
   frame,
   menuIndicator,
   menuStyle,
+  onAppear,
   shadow,
   tint,
 } from '@expo/ui/swift-ui/modifiers'
@@ -23,11 +24,13 @@ import { GlassView } from 'expo-glass-effect'
 import { HAS_LIQUID_GLASS } from './LiquidGlass'
 import { LinearGradient } from 'expo-linear-gradient'
 import { Colors } from '../constants/theme'
-import { triggerLightHaptic } from '../utils/haptics'
+import { triggerHeavyHaptic } from '../utils/haptics'
 
 const FAB_SIZE = 64
 // Label size inside the circular button; the button's own padding brings it to ~FAB_SIZE
 const PLUS_BOX = 38
+// Hold this long on the + and iOS opens its menu
+const MENU_HOLD_MS = 420
 
 interface FloatingActionButtonProps {
   onPress: () => void
@@ -37,6 +40,8 @@ interface FloatingActionButtonProps {
   onScan?: () => void
   onLongPress?: () => void
   onLongPressFallback?: () => void
+  /** Hidden without unmounting (the native menu host is costly to re-create) */
+  hidden?: boolean
 }
 
 /**
@@ -55,8 +60,43 @@ export default function FloatingActionButton({
   onScan = () => {},
   onLongPress,
   onLongPressFallback,
+  hidden = false,
 }: FloatingActionButtonProps) {
   const scale = useRef(new Animated.Value(1)).current
+  // The menu's items appear each time it opens — buzz then (once per opening)
+  const lastMenuBuzz = useRef(0)
+  const onMenuOpened = () => {
+    const now = Date.now()
+    if (now - lastMenuBuzz.current < 500) return
+    lastMenuBuzz.current = now
+    triggerHeavyHaptic()
+  }
+
+  // Touches on the native button still reach RN: a hold that lasts → the menu is opening
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const holdStart = useRef(0)
+  const clearHold = () => {
+    if (holdTimer.current) clearTimeout(holdTimer.current)
+    holdTimer.current = null
+  }
+  const holdHandlers = {
+    onTouchStart: () => {
+      clearHold()
+      holdStart.current = Date.now()
+      holdTimer.current = setTimeout(() => {
+        holdTimer.current = null
+        onMenuOpened()
+      }, MENU_HOLD_MS)
+    },
+    onTouchEnd: clearHold,
+    // iOS may take the touch over as the menu lifts — buzz right then
+    onTouchCancel: () => {
+      if (holdTimer.current && Date.now() - holdStart.current > 250) {
+        clearHold()
+        onMenuOpened()
+      }
+    },
+  }
 
   const handlePressIn = () => {
     Animated.spring(scale, {
@@ -88,8 +128,14 @@ export default function FloatingActionButton({
   const renderLiquidGlassButton = () => (
     <Animated.View style={{ transform: [{ scale }], backgroundColor: 'transparent' }}>
       <TouchableOpacity
-        onPress={onPress}
-        onLongPress={handleFallbackLongPress}
+        onPress={() => {
+          triggerHeavyHaptic()
+          onPress()
+        }}
+        onLongPress={() => {
+          triggerHeavyHaptic()
+          handleFallbackLongPress()
+        }}
         delayLongPress={280}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
@@ -136,7 +182,8 @@ export default function FloatingActionButton({
   // No RN views inside SwiftUI, so touches and the glass press animation run natively.
   if (Platform.OS === 'ios') {
     return (
-      <View style={styles.fabWrapper} pointerEvents="box-none">
+      <View style={[styles.fabWrapper, hidden && styles.hidden]} pointerEvents={hidden ? 'none' : 'box-none'}>
+        <View {...holdHandlers}>
         <Host style={styles.host} seedColor={Colors.orange} colorScheme="dark">
           <Menu
             label={
@@ -148,7 +195,8 @@ export default function FloatingActionButton({
               />
             }
             onPrimaryAction={() => {
-              triggerLightHaptic()
+              clearHold() // a tap, not a hold — no menu
+              triggerHeavyHaptic() // solid, noticeable tap for the main button
               onPress()
             }}
             modifiers={[
@@ -165,7 +213,12 @@ export default function FloatingActionButton({
             ]}
           >
             <Section>
-              <Button label="Нова транзакція" systemImage="plus.circle.fill" onPress={onPress} />
+              <Button
+                label="Нова транзакція"
+                systemImage="plus.circle.fill"
+                onPress={onPress}
+                modifiers={[onAppear(onMenuOpened)]}
+              />
             </Section>
             <Section title="Рахунки та операції">
               <Button
@@ -185,13 +238,14 @@ export default function FloatingActionButton({
             </Section>
           </Menu>
         </Host>
+        </View>
       </View>
     )
   }
 
   // 2. Cross-platform fallback for Android & Web
   return (
-    <View style={styles.fabWrapper} pointerEvents="box-none">
+    <View style={[styles.fabWrapper, hidden && styles.hidden]} pointerEvents={hidden ? 'none' : 'box-none'}>
       <View style={styles.fabGlowContainer}>
         {renderLiquidGlassButton()}
       </View>
@@ -200,6 +254,9 @@ export default function FloatingActionButton({
 }
 
 const styles = StyleSheet.create({
+  hidden: {
+    opacity: 0,
+  },
   fabWrapper: {
     position: 'absolute',
     bottom: Platform.OS === 'ios' ? 90 : 90,

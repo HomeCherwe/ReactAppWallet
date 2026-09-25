@@ -16,6 +16,7 @@ import {
 } from 'react-native'
 import { initialWindowMetrics } from 'react-native-safe-area-context'
 import { InsideGlassContext } from './LiquidGlass'
+import { triggerSelectionHaptic } from '../utils/haptics'
 
 interface SheetModalProps {
   visible: boolean
@@ -65,6 +66,35 @@ export default function SheetModal({
   const dragY = useRef(new Animated.Value(0)).current
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
+  // Dismissed from inside (drag / backdrop): the sheet slides away first, and only then the
+  // parent is told — its re-render no longer lands in the middle of the animation (the micro-lag)
+  const closingRef = useRef(false)
+  const pastDismissRef = useRef(false)
+  const heightRef = useRef(height)
+  heightRef.current = height
+
+  const dismiss = () => {
+    if (closingRef.current) return
+    closingRef.current = true
+    Keyboard.dismiss()
+    Animated.timing(dragY, {
+      toValue: heightRef.current,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => {
+      onCloseRef.current()
+      // Safety: if the parent kept the sheet open, bring it back
+      setTimeout(() => {
+        if (closingRef.current) {
+          closingRef.current = false
+          Animated.spring(dragY, { toValue: 0, damping: 20, stiffness: 300, useNativeDriver: true }).start()
+        }
+      }, 800)
+    })
+  }
+  const dismissRef = useRef(dismiss)
+  dismissRef.current = dismiss
 
   const panResponder = useRef(
     PanResponder.create({
@@ -73,11 +103,21 @@ export default function SheetModal({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: () => Keyboard.dismiss(),
-      onPanResponderMove: (_, g) => dragY.setValue(Math.max(0, g.dy)),
+      onPanResponderGrant: () => {
+        Keyboard.dismiss()
+        pastDismissRef.current = false
+      },
+      onPanResponderMove: (_, g) => {
+        dragY.setValue(Math.max(0, g.dy))
+        const past = g.dy > DISMISS_DISTANCE
+        if (past !== pastDismissRef.current) {
+          pastDismissRef.current = past
+          triggerSelectionHaptic()
+        }
+      },
       onPanResponderRelease: (_, g) => {
         if (g.dy > DISMISS_DISTANCE || g.vy > DISMISS_VELOCITY) {
-          onCloseRef.current()
+          dismissRef.current()
         } else {
           Animated.spring(dragY, { toValue: 0, damping: 20, stiffness: 300, useNativeDriver: true }).start()
         }
@@ -93,7 +133,15 @@ export default function SheetModal({
       // The slide-in starts once the sheet is actually on screen (onShow / first layout) —
       // starting earlier drops the first frames while the modal is still being created.
       opening.current = false
+      closingRef.current = false
+      dragY.setValue(0)
       setMounted(true)
+    } else if (mounted && closingRef.current) {
+      // Already slid away (drag / backdrop): just remove it
+      closingRef.current = false
+      setMounted(false)
+      progress.setValue(0)
+      dragY.setValue(0)
     } else if (mounted) {
       Animated.timing(progress, {
         toValue: 0,
@@ -145,11 +193,11 @@ export default function SheetModal({
       animationType="none"
       statusBarTranslucent
       onShow={animateIn}
-      onRequestClose={onClose}
+      onRequestClose={dismiss}
     >
       {/* Backdrop sits outside the keyboard-avoiding layout, so the keyboard never resizes it */}
       <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <Pressable style={StyleSheet.absoluteFill} onPress={dismiss} />
       </Animated.View>
 
       <KeyboardAvoidingView
