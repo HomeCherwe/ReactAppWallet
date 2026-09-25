@@ -994,6 +994,47 @@ export function registerBankConnections(app, { supabase, getUserFromToken, getUs
     }
   })
 
+  // PUT /api/bank-connections/:id/accounts/:accountId { card_id } — link a bank account to one of
+  // the user's existing cards; its transactions are imported there from the next sync on
+  app.put('/api/bank-connections/:id/accounts/:accountId', getUserFromToken, async (req, res) => {
+    try {
+      const cardId = String(req.body?.card_id || '')
+      const [{ data: link }, { data: card }] = await Promise.all([
+        supabase
+          .from('bank_connection_accounts')
+          .select('id, connection_id')
+          .eq('connection_id', req.params.id)
+          .eq('account_id', req.params.accountId)
+          .eq('user_id', req.user_id)
+          .maybeSingle(),
+        supabase.from('cards').select('id').eq('id', cardId).eq('user_id', req.user_id).maybeSingle(),
+      ])
+      if (!link) return res.status(404).json({ error: 'Account not found' })
+      if (!card) return res.status(404).json({ error: 'Card not found' })
+
+      // One bank account per card within a connection
+      const { data: taken } = await supabase
+        .from('bank_connection_accounts')
+        .select('account_id')
+        .eq('connection_id', req.params.id)
+        .eq('card_id', cardId)
+        .neq('account_id', req.params.accountId)
+        .limit(1)
+      if (taken?.length) return res.status(409).json({ error: 'Ця картка вже прив’язана до іншого рахунку цього банку' })
+
+      // last_sync_at reset: the next sync reads the full history window into the card
+      const { error } = await supabase
+        .from('bank_connection_accounts')
+        .update({ card_id: cardId, last_sync_at: null })
+        .eq('id', link.id)
+      if (error) throw error
+      res.json({ success: true })
+    } catch (e) {
+      console.error('[Banks] link account error:', e.message)
+      res.status(500).json({ error: e.message })
+    }
+  })
+
   // DELETE /api/bank-connections/:id — disconnect (imported transactions and cards stay)
   app.delete('/api/bank-connections/:id', getUserFromToken, async (req, res) => {
     try {

@@ -4,10 +4,12 @@ import {
   Alert, ActivityIndicator, Platform, RefreshControl
 } from 'react-native'
 import { Colors, Typography, Radius } from '../constants/theme'
-import { listCards, deleteCard, Card } from '../api/cards'
+import { listCards, deleteCard, setCardExcludedFromStats, Card } from '../api/cards'
 import { getSumByCard } from '../api/transactions'
 import { fmtAmount } from '../utils/format'
 import AddAccountFlow from '../components/AddAccountFlow'
+import CardTransactionsSheet from '../components/CardTransactionsSheet'
+import CardSettingsModal from '../components/CardSettingsModal'
 import ConnectedBanks from '../components/ConnectedBanks'
 import { BankProvider } from '../api/bankConnections'
 import { txBus } from '../utils/txBus'
@@ -23,6 +25,8 @@ export default function CardsScreen() {
   // "+ Додати": connect a bank (sync) or add your own account
   const [addAccountVisible, setAddAccountVisible] = useState(false)
   const [banksReloadKey, setBanksReloadKey] = useState(0)
+  const [cardTxCard, setCardTxCard] = useState<Card | null>(null)
+  const [settingsCard, setSettingsCard] = useState<Card | null>(null)
   // Reconnecting a token bank (Monobank): the add sheet opens straight on its token form
   const [tokenReconnect, setTokenReconnect] = useState<BankProvider | null>(null)
 
@@ -60,6 +64,22 @@ export default function CardsScreen() {
       }
     })
   }, [loadData])
+
+  // Card settings (from a card's transactions sheet): update right away, roll back on failure
+  const handleToggleExcluded = useCallback(async (card: Card, excluded: boolean) => {
+    const apply = (value: boolean) => {
+      setCards(cs => cs.map(c => (c.id === card.id ? { ...c, exclude_from_stats: value } : c)))
+      setSettingsCard(c => (c?.id === card.id ? { ...c, exclude_from_stats: value } : c))
+    }
+    apply(excluded)
+    try {
+      await setCardExcludedFromStats(card.id, excluded)
+      txBus.emit({ type: 'SYNCED', source: 'card-settings', count: 0 })
+    } catch (e: any) {
+      apply(!excluded)
+      Alert.alert('Помилка', e?.message || 'Не вдалося зберегти')
+    }
+  }, [])
 
   const openAddAccount = () => {
     setTokenReconnect(null)
@@ -168,6 +188,9 @@ export default function CardsScreen() {
             <ConnectedBanks
               reloadKey={banksReloadKey}
               onChanged={loadData}
+              cards={cards}
+              balances={balances}
+              onOpenCard={setCardTxCard}
               onReconnectToken={c => {
                 setTokenReconnect({ provider_id: c.provider_id, name: c.provider_name, logo: c.provider_logo, country: c.country ?? 'ua', auth: 'token' })
                 setAddAccountVisible(true)
@@ -207,6 +230,24 @@ export default function CardsScreen() {
           renderItem={() => null}
         />
       )}
+
+      <CardTransactionsSheet
+        card={cardTxCard}
+        balance={cardTxCard ? balances[cardTxCard.id] : undefined}
+        onClose={() => setCardTxCard(null)}
+        onOpenSettings={card => {
+          setCardTxCard(null)
+          setTimeout(() => setSettingsCard(card), 380)
+        }}
+      />
+
+      <CardSettingsModal
+        card={settingsCard}
+        balance={settingsCard ? balances[settingsCard.id] : undefined}
+        excluded={!!settingsCard?.exclude_from_stats}
+        onToggleExcluded={handleToggleExcluded}
+        onClose={() => setSettingsCard(null)}
+      />
 
       <AddAccountFlow
         visible={addAccountVisible}
