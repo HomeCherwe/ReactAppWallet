@@ -769,6 +769,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
             onUnlinkRefund={handleUnlinkRefund}
             refundFor={refundFor}
             onRefundForChange={setRefundFor}
+            refunds={txFeed.refunds}
             pinned={pinned.items}
             pinnedCategories={pinnedCategories}
           />

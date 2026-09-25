@@ -140,6 +140,26 @@ export async function listFeedTransactions({
   return (data || []) as Transaction[]
 }
 
+/** Refunds linked to these expenses (refund_for), oldest first — shown nested under them. */
+export async function listRefundsFor(expenseIds: string[]): Promise<Transaction[]> {
+  if (expenseIds.length === 0) return []
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+  const out: Transaction[] = []
+  for (let i = 0; i < expenseIds.length; i += 100) {
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('user_id', user.id)
+      .in('refund_for', expenseIds.slice(i, i + 100))
+      .not('archives', 'is', true)
+      .order('created_at', { ascending: true })
+    if (error) throw error
+    out.push(...((data || []) as Transaction[]))
+  }
+  return out
+}
+
 export interface CardPeriod {
   cardId: string
   /** ISO bounds; null = open-ended */

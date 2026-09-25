@@ -86,6 +86,8 @@ interface TransactionListProps {
   /** Refund picking is controlled by the screen, which shows the floating hint bar */
   refundFor: Transaction | null
   onRefundForChange: (tx: Transaction | null) => void
+  /** Refunds of loaded expenses, by expense id: shown nested under the expense */
+  refunds?: Record<string, Transaction[]>
 }
 
 export default React.memo(TransactionList)
@@ -110,6 +112,7 @@ function TransactionList({
   pinnedCategories = [],
   refundFor,
   onRefundForChange,
+  refunds = {},
 }: TransactionListProps) {
   // ---- Pinned section: collapsible, remembered between launches ----
   const [pinnedCollapsed, setPinnedCollapsed] = useState(false)
@@ -276,10 +279,13 @@ function TransactionList({
   }, [cards])
 
   // Pinned ones live only in their section (like the web); they join the list once categorized
-  const regular = useMemo(
-    () => transactions.filter(t => pinStateOf(t, pinnedCategories) === 'none'),
-    [transactions, pinnedCategories]
-  )
+  // A refund whose expense is loaded shows only under that expense (no duplicate row)
+  const regular = useMemo(() => {
+    const loaded = new Set(transactions.map(t => t.id))
+    return transactions.filter(
+      t => pinStateOf(t, pinnedCategories) === 'none' && !(t.refund_for && (loaded.has(t.refund_for) || refunds[t.refund_for]))
+    )
+  }, [transactions, pinnedCategories, refunds])
 
   const groups = useMemo(() => {
     const out: DayGroup[] = []
@@ -294,7 +300,8 @@ function TransactionList({
       g.items.push(tx)
       if (!tx.exclude_from_stats) {
         const cur = tx.currency || (tx.card_id && cardsById[tx.card_id]?.currency) || ''
-        g.totals[cur] = (g.totals[cur] || 0) + Number(tx.amount)
+        // amount_stat: an expense minus its refunds
+        g.totals[cur] = (g.totals[cur] || 0) + Number(tx.amount_stat ?? tx.amount)
       }
     }
     return out
@@ -400,21 +407,41 @@ function TransactionList({
                 </Text>
               </View>
 
-              {group.items.map((tx, i) => (
-                <TxRow
-                  key={tx.id}
-                  tx={tx}
-                  card={tx.card_id ? cardsById[tx.card_id] : undefined}
-                  hidden={hidden}
-                  last={i === group.items.length - 1}
-                  mode={modeFor(tx)}
-                  wiggle={wiggle}
-                  wiggleDir={i % 2 ? 1 : -1}
-                  onPress={handlePress}
-                  onLongPress={onLongPressTx}
-                  {...swipeProps}
-                />
-              ))}
+              {group.items.map((tx, i) => {
+                const kids = Number(tx.amount) < 0 ? refunds[tx.id] ?? [] : []
+                const lastInDay = i === group.items.length - 1
+                return (
+                  <React.Fragment key={tx.id}>
+                    <TxRow
+                      tx={tx}
+                      card={tx.card_id ? cardsById[tx.card_id] : undefined}
+                      hidden={hidden}
+                      last={lastInDay || kids.length > 0}
+                      mode={modeFor(tx)}
+                      wiggle={wiggle}
+                      wiggleDir={i % 2 ? 1 : -1}
+                      onPress={handlePress}
+                      onLongPress={onLongPressTx}
+                      {...swipeProps}
+                    />
+                    {kids.map((r, k) => (
+                      <TxRow
+                        key={r.id}
+                        tx={r}
+                        card={r.card_id ? cardsById[r.card_id] : undefined}
+                        hidden={hidden}
+                        nested
+                        showDate={new Date(r.created_at).toDateString() !== new Date(tx.created_at).toDateString()}
+                        last={lastInDay && k === kids.length - 1}
+                        mode={refundFor ? 'dimmed' : 'normal'}
+                        onPress={handlePress}
+                        onLongPress={onLongPressTx}
+                        {...swipeProps}
+                      />
+                    ))}
+                  </React.Fragment>
+                )
+              })}
             </View>
           ))}
 

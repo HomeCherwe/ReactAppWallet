@@ -50,6 +50,8 @@ interface TxRowProps {
   wiggle?: Animated.Value
   /** Alternate direction per row so the list doesn't sway as one block */
   wiggleDir?: 1 | -1
+  /** A refund shown under its expense */
+  nested?: boolean
 }
 
 /**
@@ -71,6 +73,7 @@ function TxRow({
   onDelete,
   wiggle,
   wiggleDir = 1,
+  nested = false,
 }: TxRowProps) {
   const x = useRef(new Animated.Value(0)).current
   const openRef = useRef(false)
@@ -150,6 +153,10 @@ function TxRow({
 
   const isIncome = amount > 0
   const currency = tx.currency || card?.currency
+  // Expense with refunds: amount_stat = amount + refunds (what it really cost)
+  const stat = tx.amount_stat == null ? null : Number(tx.amount_stat)
+  const netAmount = !isIncome && stat != null && Math.abs(stat - amount) > 0.004 ? stat : null
+  const fullyRefunded = netAmount != null && Math.abs(netAmount) < 0.005
   const title = txDisplayTitle(tx)
   const d = new Date(tx.created_at)
   const time = d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
@@ -227,14 +234,20 @@ function TxRow({
           delayLongPress={350}
           style={({ pressed }) => [
             styles.item,
+            nested && styles.itemNested,
             mode === 'pickable' && styles.itemPickable,
             mode === 'target' && styles.itemTarget,
             mode === 'dimmed' && styles.itemDimmed,
             pressed && styles.itemPressed,
           ]}
         >
-          <View style={[styles.iconWrap, isIncome && styles.iconWrapGreen]}>
-            <Text style={styles.iconEmoji}>{getCategoryIcon(tx.category ?? null, amount)}</Text>
+          {nested && <View style={styles.nestLine} />}
+          <View style={[styles.iconWrap, isIncome && styles.iconWrapGreen, nested && styles.iconWrapNested]}>
+            {nested ? (
+              <Icon name="undo" size={15} color={Colors.green} strokeWidth={2.4} />
+            ) : (
+              <Text style={styles.iconEmoji}>{getCategoryIcon(tx.category ?? null, amount)}</Text>
+            )}
           </View>
 
           <View style={[styles.info, !last && styles.infoBorder]}>
@@ -248,9 +261,27 @@ function TxRow({
               </Text>
             </View>
             <View style={styles.amountCol}>
-              <Text style={[styles.amount, isIncome && styles.amountGreen, tx.exclude_from_stats && styles.amountMuted]}>
-                {hidden ? '••••' : `${isIncome ? '+' : '−'}${fmtMoney(amount, currency)}`}
-              </Text>
+              {netAmount != null ? (
+                <>
+                  {fullyRefunded ? (
+                    <Text style={[styles.amount, styles.amountGreen]}>Повернено</Text>
+                  ) : (
+                    <Text style={styles.amount}>{hidden ? '••••' : `−${fmtMoney(netAmount, currency)}`}</Text>
+                  )}
+                  <Text style={styles.amountOriginal}>{hidden ? '••••' : `−${fmtMoney(amount, currency)}`}</Text>
+                </>
+              ) : (
+                <Text
+                  style={[
+                    styles.amount,
+                    nested && styles.amountNested,
+                    isIncome && styles.amountGreen,
+                    tx.exclude_from_stats && !nested && styles.amountMuted,
+                  ]}
+                >
+                  {hidden ? '••••' : `${isIncome ? '+' : '−'}${fmtMoney(amount, currency)}`}
+                </Text>
+              )}
               {mode === 'pickable' && (
                 <View style={styles.pickPill}>
                   <Icon name="plus" size={12} color="#0B2E17" strokeWidth={3} />
@@ -323,6 +354,34 @@ const styles = StyleSheet.create({
     paddingLeft: 16,
     gap: 12,
     backgroundColor: '#141416', // covers the actions until the row slides
+  },
+  // Refund under its expense: indented, with a connecting line
+  itemNested: {
+    paddingLeft: 44,
+  },
+  nestLine: {
+    position: 'absolute',
+    left: 35,
+    top: 0,
+    bottom: 0,
+    width: 2,
+    borderRadius: 1,
+    backgroundColor: 'rgba(34, 197, 94, 0.35)',
+  },
+  iconWrapNested: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+  },
+  amountNested: {
+    fontSize: 14,
+  },
+  amountOriginal: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    textDecorationLine: 'line-through',
+    marginTop: 1,
+    fontVariant: ['tabular-nums'],
   },
   itemPressed: {
     backgroundColor: '#1C1C1F',
