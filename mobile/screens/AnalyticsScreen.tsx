@@ -3,7 +3,7 @@ import { Animated,
   View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl,
   ActivityIndicator, Platform, Dimensions
 } from "react-native"
-import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
+import PullToRefreshIndicator, { usePullToRefresh } from '../components/PullToRefreshIndicator'
 import { initialWindowMetrics } from 'react-native-safe-area-context'
 
 // The pull indicator slides out from just under the status bar
@@ -144,6 +144,12 @@ export default function AnalyticsScreen() {
 
   const chartWidth = SCREEN_W - 40
 
+  const pull = usePullToRefresh(() => {
+    setRefreshing(true)
+    loadData(true)
+    checkForAppUpdate()
+  }, refreshing)
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -161,15 +167,12 @@ export default function AnalyticsScreen() {
       scrollEventThrottle={16}
       refreshControl={
         <RefreshControl
-          refreshing={refreshing}
+          refreshing={pull.controlRefreshing}
           tintColor="transparent"
-          onRefresh={() => {
-            setRefreshing(true)
-            loadData(true)
-            checkForAppUpdate()
-          }}
+          onRefresh={pull.onRefresh}
         />
       }
+      onScrollEndDrag={pull.onScrollEndDrag}
     >
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Аналітика</Text>

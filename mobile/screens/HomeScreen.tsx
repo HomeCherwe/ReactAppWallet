@@ -14,7 +14,7 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from 'react-native'
-import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
+import PullToRefreshIndicator, { usePullToRefresh } from '../components/PullToRefreshIndicator'
 import { initialWindowMetrics } from 'react-native-safe-area-context'
 
 // The pull indicator slides out from just under the status bar
@@ -241,6 +241,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
     syncBanks().catch(() => {})
     checkForAppUpdate()
   }
+  const pull = usePullToRefresh(onRefresh, refreshing)
 
   // Background bank sync (e.g. Revolut on app open) added transactions — reload quietly
   useEffect(() => {
@@ -500,11 +501,12 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
+            refreshing={pull.controlRefreshing}
+            onRefresh={pull.onRefresh}
             tintColor="transparent"
           />
         }
+        onScrollEndDrag={pull.onScrollEndDrag}
         onScroll={Animated.event(
           [{ nativeEvent: { contentOffset: { y: scrollY } } }],
           { useNativeDriver: true, listener: handleScrollForMore }
