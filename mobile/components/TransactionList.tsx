@@ -157,7 +157,6 @@ function TransactionList({
   }, [refundFor])
 
   const cancelRefundPick = useCallback(() => {
-    smoothLayout()
     setRefundFor(null)
   }, [])
 
@@ -204,8 +203,7 @@ function TransactionList({
         return
       }
       triggerMediumHaptic()
-      smoothLayout()
-      setRefundFor(tx)
+      setTimeout(() => setRefundFor(tx), 180)
     },
     [onUnlinkRefund]
   )
@@ -231,7 +229,6 @@ function TransactionList({
       try {
         await onLinkRefund?.(expense, refund)
         triggerSuccessHaptic()
-        smoothLayout()
         setRefundFor(null)
         const refundAmount = Number(refund.amount)
         const left = Math.abs(Number(expense.amount)) - refundAmount

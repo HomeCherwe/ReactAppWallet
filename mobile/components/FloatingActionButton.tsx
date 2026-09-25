@@ -37,6 +37,8 @@ interface FloatingActionButtonProps {
   onScan?: () => void
   onLongPress?: () => void
   onLongPressFallback?: () => void
+  /** Hidden without unmounting (the native menu host is costly to re-create) */
+  hidden?: boolean
 }
 
 /**
@@ -55,6 +57,7 @@ export default function FloatingActionButton({
   onScan = () => {},
   onLongPress,
   onLongPressFallback,
+  hidden = false,
 }: FloatingActionButtonProps) {
   const scale = useRef(new Animated.Value(1)).current
 
@@ -136,7 +139,7 @@ export default function FloatingActionButton({
   // No RN views inside SwiftUI, so touches and the glass press animation run natively.
   if (Platform.OS === 'ios') {
     return (
-      <View style={styles.fabWrapper} pointerEvents="box-none">
+      <View style={[styles.fabWrapper, hidden && styles.hidden]} pointerEvents={hidden ? 'none' : 'box-none'}>
         <Host style={styles.host} seedColor={Colors.orange} colorScheme="dark">
           <Menu
             label={
@@ -191,7 +194,7 @@ export default function FloatingActionButton({
 
   // 2. Cross-platform fallback for Android & Web
   return (
-    <View style={styles.fabWrapper} pointerEvents="box-none">
+    <View style={[styles.fabWrapper, hidden && styles.hidden]} pointerEvents={hidden ? 'none' : 'box-none'}>
       <View style={styles.fabGlowContainer}>
         {renderLiquidGlassButton()}
       </View>
@@ -200,6 +203,9 @@ export default function FloatingActionButton({
 }
 
 const styles = StyleSheet.create({
+  hidden: {
+    opacity: 0,
+  },
   fabWrapper: {
     position: 'absolute',
     bottom: Platform.OS === 'ios' ? 90 : 90,

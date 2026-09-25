@@ -785,14 +785,15 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
       />
 
       {/* Floating Plus button (hidden while picking a refund — the bar takes that spot) */}
-      {!refundFor && <FloatingActionButton
+      <FloatingActionButton
+        hidden={!!refundFor}
         onPress={() => setAddTxVisible(true)}
         onAddCard={() => setAddCardVisible(true)}
         onTransfer={() => setTransferVisible(true)}
         onAddGoal={() => setAddCardVisible(true)}
         onLongPress={() => setQuickActionPopupVisible(true)}
         onLongPressFallback={() => setQuickActionPopupVisible(true)}
-      />}
+      />
 
       {/* Modals */}
       <QuickActionPopup
