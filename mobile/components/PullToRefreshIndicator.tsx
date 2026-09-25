@@ -82,10 +82,10 @@ export default function PullToRefreshIndicator({
     extrapolate: 'clamp',
   })
   const pullOpacity = scrollY.interpolate({ inputRange: [-40, -8, 0], outputRange: [1, 0, 0], extrapolate: 'clamp' })
-  // Rides the top of the content: sits in the opened gap, just above it
+  // Slides down from the top edge with the pull and stops there (never drifts down the screen)
   const follow = scrollY.interpolate({
-    inputRange: [-400, 0],
-    outputRange: [400 - PILL_H - PILL_GAP, -PILL_H - PILL_GAP],
+    inputRange: [-(PILL_H + PILL_GAP * 2), 0],
+    outputRange: [PILL_GAP, -PILL_H - PILL_GAP],
     extrapolate: 'clamp',
   })
   const pullScale = scrollY.interpolate({ inputRange: [-THRESHOLD - 20, -THRESHOLD, 0], outputRange: [1.05, 1, 0.85], extrapolate: 'clamp' })

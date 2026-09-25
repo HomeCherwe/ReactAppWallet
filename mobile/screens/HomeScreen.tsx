@@ -15,6 +15,10 @@ import {
   NativeScrollEvent,
 } from 'react-native'
 import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
+import { initialWindowMetrics } from 'react-native-safe-area-context'
+
+// The pull indicator slides out from just under the status bar
+const SAFE_TOP = initialWindowMetrics?.insets.top ?? 47
 import { LinearGradient } from 'expo-linear-gradient'
 import { GlassView } from 'expo-glass-effect'
 import { BlurView } from 'expo-blur'
@@ -705,7 +709,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
                   )})}
                 </Animated.ScrollView>
 
-      <PullToRefreshIndicator scrollY={scrollY} refreshing={refreshing} top={Platform.OS === 'ios' ? 60 : 40} />
+      <PullToRefreshIndicator scrollY={scrollY} refreshing={refreshing} top={SAFE_TOP} />
                 <View style={styles.statsDots}>
                   {recentMonthsStats.map((_, i) => {
                     const width_ = statsScrollX.interpolate({

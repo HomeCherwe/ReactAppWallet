@@ -4,6 +4,10 @@ import { Animated,
   ActivityIndicator, Platform, Dimensions
 } from "react-native"
 import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
+import { initialWindowMetrics } from 'react-native-safe-area-context'
+
+// The pull indicator slides out from just under the status bar
+const SAFE_TOP = initialWindowMetrics?.insets.top ?? 47
 import { checkForAppUpdate } from '../utils/appUpdate'
 import { Colors, Typography, Radius } from "../constants/theme"
 import { listTransactions, Transaction } from "../api/transactions"
@@ -277,7 +281,7 @@ export default function AnalyticsScreen() {
 
       <View style={{ height: 120 }} />
     </Animated.ScrollView>
-    <PullToRefreshIndicator scrollY={pullY} refreshing={refreshing} top={Platform.OS === 'ios' ? 60 : 40} />
+    <PullToRefreshIndicator scrollY={pullY} refreshing={refreshing} top={SAFE_TOP} />
     </View>
   )
 }
