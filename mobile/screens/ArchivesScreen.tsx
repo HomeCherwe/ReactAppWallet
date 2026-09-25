@@ -1,8 +1,9 @@
-﻿import React, { useCallback, useEffect, useState } from 'react'
-import {
+﻿import React, { useCallback, useEffect, useState , useRef} from 'react'
+import { Animated,
   View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl,
   TextInput, Alert, ActivityIndicator, Platform
 } from 'react-native'
+import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
 import { checkForAppUpdate } from '../utils/appUpdate'
 import { Colors, Typography, Radius } from '../constants/theme'
 import { listArchivedTransactions, unarchiveTransaction, Transaction } from '../api/transactions'
@@ -30,6 +31,7 @@ export default function ArchivesScreen() {
   const [unarchivingId, setUnarchivingId] = useState<string | null>(null)
 
   const [refreshing, setRefreshing] = useState(false)
+  const pullY = useRef(new Animated.Value(0)).current
 
   const fetchArchived = useCallback(async (pulled = false) => {
     if (!pulled) setLoading(true)
@@ -102,13 +104,15 @@ export default function ArchivesScreen() {
       {loading ? (
         <View style={styles.centered}><ActivityIndicator color={Colors.orange} size="large" /></View>
       ) : (
-        <FlatList
+        <Animated.FlatList
+          onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: pullY } } }], { useNativeDriver: true })}
+          scrollEventThrottle={16}
           data={rows}
           keyExtractor={(item) => item.id}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              tintColor={Colors.orange}
+              tintColor="transparent"
               onRefresh={() => {
                 setRefreshing(true)
                 fetchArchived(true)
@@ -155,6 +159,8 @@ export default function ArchivesScreen() {
           }}
         />
       )}
+
+      <PullToRefreshIndicator scrollY={pullY} refreshing={refreshing} />
     </View>
   )
 }

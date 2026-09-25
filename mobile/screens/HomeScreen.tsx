@@ -14,6 +14,7 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from 'react-native'
+import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
 import { LinearGradient } from 'expo-linear-gradient'
 import { GlassView } from 'expo-glass-effect'
 import { BlurView } from 'expo-blur'
@@ -497,7 +498,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={Colors.orange}
+            tintColor="transparent"
           />
         }
         onScroll={Animated.event(
@@ -703,6 +704,8 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
                     </View>
                   )})}
                 </Animated.ScrollView>
+
+      <PullToRefreshIndicator scrollY={scrollY} refreshing={refreshing} />
                 <View style={styles.statsDots}>
                   {recentMonthsStats.map((_, i) => {
                     const width_ = statsScrollX.interpolate({

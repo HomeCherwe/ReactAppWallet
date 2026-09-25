@@ -1,8 +1,9 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from "react"
-import {
+﻿import React, { useCallback, useEffect, useMemo, useState , useRef} from "react"
+import { Animated,
   View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl,
   ActivityIndicator, Platform, Dimensions
 } from "react-native"
+import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
 import { checkForAppUpdate } from '../utils/appUpdate'
 import { Colors, Typography, Radius } from "../constants/theme"
 import { listTransactions, Transaction } from "../api/transactions"
@@ -60,6 +61,7 @@ export default function AnalyticsScreen() {
   const [txType, setTxType] = useState<"expense" | "income">("expense")
 
   const [refreshing, setRefreshing] = useState(false)
+  const pullY = useRef(new Animated.Value(0)).current
 
   const loadData = useCallback(async (pulled = false) => {
     if (!pulled) setLoading(true)
@@ -147,13 +149,16 @@ export default function AnalyticsScreen() {
   }
 
   return (
-    <ScrollView
+    <View style={styles.rootWrap}>
+    <Animated.ScrollView
       style={styles.root}
       contentContainerStyle={styles.content}
+      onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: pullY } } }], { useNativeDriver: true })}
+      scrollEventThrottle={16}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
-          tintColor={Colors.orange}
+          tintColor="transparent"
           onRefresh={() => {
             setRefreshing(true)
             loadData(true)
@@ -271,11 +276,14 @@ export default function AnalyticsScreen() {
       </View>
 
       <View style={{ height: 120 }} />
-    </ScrollView>
+    </Animated.ScrollView>
+    <PullToRefreshIndicator scrollY={pullY} refreshing={refreshing} />
+    </View>
   )
 }
 
 const styles = StyleSheet.create({
+  rootWrap: { flex: 1 },
   root: { flex: 1, backgroundColor: Colors.bg },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: Colors.bg },
   content: { paddingBottom: 130 },

@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useState, useMemo } from 'react'
-import {
+import React, { useCallback, useEffect, useState, useMemo , useRef} from 'react'
+import { Animated,
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   Alert, ActivityIndicator, Platform, RefreshControl
 } from 'react-native'
+import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
 import { Colors, Typography, Radius } from '../constants/theme'
 import { listCards, deleteCard, setCardExcludedFromStats, Card } from '../api/cards'
 import { getSumByCard } from '../api/transactions'
@@ -28,6 +29,7 @@ export default function CardsScreen() {
   // "+ Додати": connect a bank (sync) or add your own account
   const [addAccountVisible, setAddAccountVisible] = useState(false)
   const [banksReloadKey, setBanksReloadKey] = useState(0)
+  const pullY = useRef(new Animated.Value(0)).current
   // No scrolling while a long-press menu is open (the finger slides over the menu instead)
   const menuOpen = useMenuOverlay(s => !!s.menu)
   const [cardTxCard, setCardTxCard] = useState<Card | null>(null)
@@ -175,7 +177,9 @@ export default function CardsScreen() {
           <ActivityIndicator color={Colors.orange} size="large" />
         </View>
       ) : (
-        <FlatList
+        <Animated.FlatList
+          onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: pullY } } }], { useNativeDriver: true })}
+          scrollEventThrottle={16}
           scrollEnabled={!menuOpen}
           data={[]} // using FlatList just for the refresh control and scroll
           keyExtractor={() => 'dummy'}
@@ -190,7 +194,7 @@ export default function CardsScreen() {
                 syncBanks().catch(() => {})
                 checkForAppUpdate()
               }}
-              tintColor={Colors.orange}
+              tintColor="transparent"
             />
           }
           ListHeaderComponent={
@@ -267,6 +271,8 @@ export default function CardsScreen() {
         initialProvider={tokenReconnect}
         onChanged={what => (what === 'bank' ? setBanksReloadKey(k => k + 1) : loadData())}
       />
+
+      <PullToRefreshIndicator scrollY={pullY} refreshing={refreshing} />
     </View>
   )
 }
