@@ -59,6 +59,8 @@ import {
   getRecentMonthsStats,
   MonthStat,
   deleteTransaction,
+  linkRefund,
+  unlinkRefund,
   Transaction,
 } from '../api/transactions'
 import { fetchTotalsByBucket, TotalsData } from '../api/totals'
@@ -85,6 +87,9 @@ interface HomeScreenProps {
 
 // Stable default, so the settings selector doesn't return a new array every render
 const NO_PINNED_CATEGORIES: string[] = []
+
+// Time for a sheet to finish closing before the next one opens
+const SHEET_SWAP_DELAY_MS = 380
 
 export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) {
   const scrollY = useRef(new Animated.Value(0)).current
@@ -408,6 +413,22 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
       case 'savings': return 'Баланс заощаджень'
       case 'cash': return 'Баланс готівки'
     }
+  }
+
+  const refreshAfterTxChange = () => {
+    loadData()
+    refreshTxFeed()
+    refreshPinned()
+  }
+
+  const handleLinkRefund = async (expense: Transaction, refund: Transaction) => {
+    await linkRefund(expense.id, refund.id)
+    refreshAfterTxChange()
+  }
+
+  const handleUnlinkRefund = async (refund: Transaction) => {
+    await unlinkRefund(refund.id)
+    refreshAfterTxChange()
   }
 
   const handleDeleteTx = (tx: Transaction) => {
@@ -740,6 +761,9 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
             onRetry={txFeed.retry}
             onPressTx={handlePressTx}
             onLongPressTx={handleTogglePin}
+            onDeleteTx={handleDeleteTx}
+            onLinkRefund={handleLinkRefund}
+            onUnlinkRefund={handleUnlinkRefund}
             pinned={pinned.items}
             pinnedCategories={pinnedCategories}
           />
@@ -811,13 +835,15 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
           setDetailsVisible(false)
           setSelectedTx(null)
         }}
+        // iOS can't present a sheet while the details sheet is still closing — the new one never
+        // appears but blocks every touch (looked like a freeze). Open it once that one is gone.
         onEdit={tx => {
           setSelectedTx(tx)
-          setEditVisible(true)
+          setTimeout(() => setEditVisible(true), SHEET_SWAP_DELAY_MS)
         }}
         onSplit={tx => {
           setSelectedTx(tx)
-          setSplitVisible(true)
+          setTimeout(() => setSplitVisible(true), SHEET_SWAP_DELAY_MS)
         }}
         onDelete={handleDeleteTx}
         pinState={selectedTx ? pinStateOf(selectedTx, pinnedCategories) : 'none'}

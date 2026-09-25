@@ -23,6 +23,7 @@ export interface Transaction {
   merchant_name?: string | null
   merchant_city?: string | null
   is_transfer?: boolean
+  count_as_income?: boolean
 }
 
 export interface ListTransactionsParams {
@@ -231,6 +232,29 @@ export async function updateTransaction(id: string, payload: Partial<Transaction
     if (error) throw error
   }
   invalidateSumByCardCache()
+}
+
+/**
+ * Marks `refund` (an income) as the refund of `expense`, like the web app: the refund leaves the
+ * stats and the backend recomputes the expense's amount_stat (amount + its refunds).
+ */
+export async function linkRefund(expenseId: string, refundId: string): Promise<void> {
+  await updateTransaction(refundId, {
+    refund_for: expenseId,
+    exclude_from_stats: true,
+    count_as_income: false,
+    category: 'ПОВЕРНЕННЯ',
+  })
+}
+
+/** Turns a refund back into regular income (the backend recomputes the old expense). */
+export async function unlinkRefund(refundId: string): Promise<void> {
+  await updateTransaction(refundId, {
+    refund_for: null,
+    exclude_from_stats: false,
+    count_as_income: true,
+    category: null as unknown as string,
+  })
 }
 
 export async function deleteTransaction(id: string): Promise<void> {
