@@ -216,12 +216,44 @@ async function listBankItems(client) {
   return items
 }
 
+/**
+ * The user's bank record (banks table) for a connected bank, so its cards are grouped under it
+ * on the cards page like a manually added bank. Found by name, created if missing.
+ */
+async function ensureBankRow(supabase, userId, name) {
+  const { data: existing } = await supabase
+    .from('banks')
+    .select('id')
+    .eq('user_id', userId)
+    .ilike('name', name)
+    .limit(1)
+    .maybeSingle()
+  if (existing) return existing.id
+  const { data, error } = await supabase
+    .from('banks')
+    .insert([{ user_id: userId, name }])
+    .select('id')
+    .single()
+  if (error) {
+    console.warn(`[Banks] Could not create bank record for ${name}:`, error.message)
+    return null // cards still work without a bank record
+  }
+  return data.id
+}
+
 /** App card for a bank account: the linked one, a matching existing card, or a new card. */
 async function ensureCardForItem(supabase, userId, conn, item, links) {
   const link = links.find(l => l.account_id === item.account_id)
   if (link?.card_id) {
-    const { data: card } = await supabase.from('cards').select('id').eq('id', link.card_id).maybeSingle()
-    if (card) return { cardId: card.id }
+    const { data: card } = await supabase.from('cards').select('id, bank_id').eq('id', link.card_id).maybeSingle()
+    if (card) {
+      // Cards created before bank records were linked: attach them to the bank now
+      if (!card.bank_id) {
+        const bankId = await ensureBankRow(supabase, userId, conn.provider_name)
+        if (bankId) await supabase.from('cards').update({ bank_id: bankId }).eq('id', card.id)
+      }
+      return { cardId: card.id }
+    }
   }
 
   // Reuse an existing card of this bank in the same currency that isn't linked yet
@@ -235,6 +267,7 @@ async function ensureCardForItem(supabase, userId, conn, item, links) {
   let cardId = (candidates || []).map(c => c.id).find(id => !linkedCardIds.includes(id))
 
   if (!cardId) {
+    const bankId = await ensureBankRow(supabase, userId, conn.provider_name)
     const baseName = item.kind === 'card'
       ? `${conn.provider_name} ${item.display_name || 'Card'}`
       : `${conn.provider_name} ${item.currency}`
@@ -242,7 +275,7 @@ async function ensureCardForItem(supabase, userId, conn, item, links) {
       const name = attempt === 0 ? baseName : `${baseName} ${attempt + 1}`
       const { data, error } = await supabase
         .from('cards')
-        .insert([{ user_id: userId, name, bank: conn.provider_name, currency: item.currency, initial_balance: 0 }])
+        .insert([{ user_id: userId, name, bank: conn.provider_name, bank_id: bankId, currency: item.currency, initial_balance: 0 }])
         .select('id')
         .single()
       if (!error) cardId = data.id

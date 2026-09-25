@@ -7,7 +7,6 @@ import { getUserAPIs, getApiKey, generateApiKey, updatePreferencesSection, inval
 import { getApiUrl, apiFetch } from '../utils.jsx'
 import { useSettingsStore } from '../store/useSettingsStore'
 import ConfirmModal from '../components/ConfirmModal'
-import BankConnections from '../components/BankConnections'
 
 export default function ProfilePage() {
   const [user, setUser] = useState(null)
@@ -608,9 +607,6 @@ export default function ProfilePage() {
             </p>
           </div>
         </div>
-
-        {/* Banks connected through TrueLayer (any bank) */}
-        <BankConnections />
 
         {/* Dashboard Settings Section */}
         <div className="pt-6 border-t border-gray-200">

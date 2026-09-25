@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Landmark, Plus, RefreshCw, Search, Unplug, AlertTriangle } from 'lucide-react'
+import { Landmark, RefreshCw, Search, Unplug, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
-import BaseModal from './BaseModal'
 import ConfirmModal from './ConfirmModal'
 import {
   disconnectBankConnection,
@@ -43,9 +42,10 @@ function timeAgo(iso) {
   return new Date(iso).toLocaleDateString('uk-UA', { day: 'numeric', month: 'short' })
 }
 
-// Where the backend sends the user back after the bank login (hash-routed profile page)
-function profileReturnUrl() {
-  return window.location.href.split('#')[0] + '#/profile'
+// Where the backend sends the user back after the bank login: the current (hash-routed) page
+export function returnUrlHere() {
+  const [base, hash = '#/'] = window.location.href.split('#')
+  return `${base}#${hash.split('?')[0]}`
 }
 
 function BankLogo({ src, name, size = 40 }) {
@@ -64,7 +64,8 @@ function BankLogo({ src, name, size = 40 }) {
   )
 }
 
-function AddBankModal({ open, onClose, connectedIds, defaultCountry }) {
+/** Bank catalog (TrueLayer): country tabs, search, logos. Tapping a bank starts the connection. */
+export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCountry }) {
   const [providers, setProviders] = useState(null)
   const [error, setError] = useState(false)
   const [country, setCountry] = useState(defaultCountry || 'fr')
@@ -72,10 +73,10 @@ function AddBankModal({ open, onClose, connectedIds, defaultCountry }) {
   const [connectingId, setConnectingId] = useState(null)
 
   useEffect(() => {
-    if (!open || providers) return
+    if (!active || providers) return
     setError(false)
     listBankProviders().then(setProviders).catch(() => setError(true))
-  }, [open, providers])
+  }, [active, providers])
 
   const countries = useMemo(() => {
     const present = new Set((providers || []).map(p => p.country))
@@ -92,7 +93,7 @@ function AddBankModal({ open, onClose, connectedIds, defaultCountry }) {
     setConnectingId(p.provider_id)
     try {
       // Leaves the page for the bank login; the backend returns the user to the profile page
-      window.location.href = await startBankConnection(p.provider_id, profileReturnUrl())
+      window.location.href = await startBankConnection(p.provider_id, returnUrlHere())
     } catch (e) {
       toast.error(`Не вдалося підключити ${p.name}: ${e.message}`)
       setConnectingId(null)
@@ -100,7 +101,6 @@ function AddBankModal({ open, onClose, connectedIds, defaultCountry }) {
   }
 
   return (
-    <BaseModal open={open} onClose={onClose} title="Додати банк" maxWidth="lg">
       <div className="grid gap-3">
         <div className="relative">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -179,14 +179,16 @@ function AddBankModal({ open, onClose, connectedIds, defaultCountry }) {
           пароль. Доступ лише на читання, діє 90 днів.
         </p>
       </div>
-    </BaseModal>
   )
 }
 
-/** Profile section: banks connected through TrueLayer. */
-export default function BankConnections() {
+/**
+ * Cards page block: banks connected through TrueLayer (status, sync, reconnect, disconnect).
+ * Also finishes a connection when the user comes back from the bank login.
+ * `onChanged` is called when cards/transactions may have changed (to reload the cards list).
+ */
+export default function BankConnections({ onChanged }) {
   const [connections, setConnections] = useState(null)
-  const [addOpen, setAddOpen] = useState(false)
   const [busyId, setBusyId] = useState(null)
   const [toDisconnect, setToDisconnect] = useState(null)
 
@@ -206,13 +208,14 @@ export default function BankConnections() {
       const failed = results.find(r => r.error)
       if (failed) throw new Error(failed.error === 'consent_expired' ? 'термін доступу сплив' : failed.error)
       toast.success(added > 0 ? `${c.provider_name}: додано ${added} транзакцій` : `${c.provider_name}: нових транзакцій немає`)
+      if (added > 0) onChanged?.()
     } catch (e) {
       toast.error(`${c.provider_name}: ${e.message}`)
     } finally {
       setBusyId(null)
       load()
     }
-  }, [load])
+  }, [load, onChanged])
 
   // Back from the bank login: ?bank_status=… in the hash query
   useEffect(() => {
@@ -242,7 +245,10 @@ export default function BankConnections() {
         syncBankConnections()
           .then(({ added }) => toast.success(added > 0 ? `Додано ${added} транзакцій` : 'Нових транзакцій немає'))
           .catch(e => toast.error(`Синхронізація: ${e.message}`))
-          .finally(load)
+          .finally(() => {
+            load()
+            onChanged?.() // new cards appear on the cards page
+          })
       )
     } else {
       const msg = new URLSearchParams(query).get('bank_message') || ''
@@ -254,7 +260,7 @@ export default function BankConnections() {
   const reconnect = async (c) => {
     setBusyId(c.id)
     try {
-      window.location.href = await startBankConnection(c.provider_id, profileReturnUrl())
+      window.location.href = await startBankConnection(c.provider_id, returnUrlHere())
     } catch (e) {
       toast.error(`Не вдалося підключити ${c.provider_name}: ${e.message}`)
       setBusyId(null)
@@ -269,6 +275,7 @@ export default function BankConnections() {
       await disconnectBankConnection(c.id)
       toast.success(`${c.provider_name} відключено`)
       await load()
+      onChanged?.()
     } catch (e) {
       toast.error(`Не вдалося відключити: ${e.message}`)
     } finally {
@@ -276,34 +283,20 @@ export default function BankConnections() {
     }
   }
 
+  // Hidden while loading and when nothing is connected (connecting starts from "Додати банк"),
+  // so the cards page doesn't jump for users without connected banks
+  if (!connections || connections.length === 0) return null
+
   return (
-    <div className="pt-6 border-t border-gray-200">
-      <div className="flex items-center justify-between gap-2 mb-4">
-        <div className="flex items-center gap-2">
-          <Landmark size={20} className="text-orange-500" />
-          <h3 className="text-lg font-semibold text-gray-900">Банки</h3>
-        </div>
-        <button
-          type="button"
-          onClick={() => setAddOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-lg transition-colors"
-        >
-          <Plus size={16} />
-          Додати банк
-        </button>
+    <div className="mb-5">
+      <div className="flex items-center gap-2 mb-2">
+        <Landmark size={18} className="text-orange-500" />
+        <h3 className="text-sm font-semibold text-gray-900">Підключені банки</h3>
+        <span className="text-xs text-gray-400">· синхронізація через Open Banking</span>
       </div>
 
       <div className="bg-gray-50 rounded-lg p-2">
-        {connections === null ? (
-          <div className="py-6 flex justify-center">
-            <RefreshCw size={18} className="animate-spin text-orange-500" />
-          </div>
-        ) : connections.length === 0 ? (
-          <p className="text-sm text-gray-600 px-2 py-4">
-            Підключіть банк через TrueLayer — нові транзакції підтягуватимуться автоматично. Доступні Revolut, Wise,
-            BNP Paribas, Société Générale, Monzo та інші.
-          </p>
-        ) : (
+        {(
           connections.map(c => {
             const expired = c.status === 'expired'
             return (
@@ -355,13 +348,6 @@ export default function BankConnections() {
           })
         )}
       </div>
-
-      <AddBankModal
-        open={addOpen}
-        onClose={() => setAddOpen(false)}
-        connectedIds={(connections || []).filter(c => c.status === 'active').map(c => c.provider_id)}
-        defaultCountry={connections?.[0]?.country || 'fr'}
-      />
 
       <ConfirmModal
         open={!!toDisconnect}
