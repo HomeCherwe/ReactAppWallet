@@ -297,12 +297,31 @@ app.delete('/api/banks/:id', getUserFromToken, async (req, res) => {
   }
 })
 
+// Cards excluded from statistics: the card's own switch (cards.exclude_from_stats)
+// or its whole bank (banks.exclude_from_stats, set in the bank settings)
+async function getExcludedCardIds(userId) {
+  const { data, error } = await supabase
+    .from('cards')
+    .select('id, exclude_from_stats, banks(exclude_from_stats)')
+    .eq('user_id', userId)
+  if (error) {
+    console.warn('Could not load excluded cards:', error.message)
+    return new Set()
+  }
+  return new Set(
+    (data || []).filter(c => c.exclude_from_stats || c.banks?.exclude_from_stats).map(c => c.id)
+  )
+}
+
+// Service categories written by balance sync ("Binance Sync", "MonoBank Sync", "Revolut Sync")
+const isSyncCategory = (category) => /\bsync$/i.test(String(category || '').trim())
+
 // Cards API
 app.get('/api/cards', getUserFromToken, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('cards')
-      .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, banks(name, iban, bic, beneficiary, exclude_from_stats)')
+      .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, exclude_from_stats, banks(name, iban, bic, beneficiary, exclude_from_stats)')
       .eq('user_id', req.user_id)
       .order('created_at', { ascending: false })
 
@@ -327,7 +346,7 @@ app.get('/api/cards', getUserFromToken, async (req, res) => {
 
 app.post('/api/cards', getUserFromToken, async (req, res) => {
   try {
-    const { bank_id, name, currency, bg_url } = req.body
+    const { bank_id, name, currency, bg_url, exclude_from_stats = false } = req.body
 
     // Отримуємо назву банку, якщо bank_id вказано
     let bankName = null
@@ -356,13 +375,14 @@ app.post('/api/cards', getUserFromToken, async (req, res) => {
       bg_url,
       expiry_date: null,
       cvv: null,
+      exclude_from_stats: !!exclude_from_stats,
       user_id: req.user_id
     }
 
     const { data, error } = await supabase
       .from('cards')
       .insert([payload])
-      .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, banks(name, iban, bic, beneficiary, exclude_from_stats)')
+      .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, exclude_from_stats, banks(name, iban, bic, beneficiary, exclude_from_stats)')
       .single()
 
     if (error) {
@@ -399,6 +419,12 @@ app.put('/api/cards/:id', getUserFromToken, async (req, res) => {
     const patch = { ...req.body }
     delete patch.id // Не дозволяємо змінювати id
     delete patch.user_id // Не дозволяємо змінювати user_id
+    // Обчислювані поля з GET — не колонки таблиці
+    delete patch.banks
+    delete patch.bank_exclude_from_stats
+    if (patch.exclude_from_stats !== undefined) {
+      patch.exclude_from_stats = !!patch.exclude_from_stats
+    }
 
     // Якщо змінюється bank_id, потрібно оновити bank
     if (patch.bank_id !== undefined) {
@@ -429,7 +455,7 @@ app.put('/api/cards/:id', getUserFromToken, async (req, res) => {
       .update(patch)
       .eq('id', id)
       .eq('user_id', req.user_id) // Тільки свої картки
-      .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, banks(name, iban, bic, beneficiary, exclude_from_stats)')
+      .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, exclude_from_stats, banks(name, iban, bic, beneficiary, exclude_from_stats)')
       .single()
 
     if (error) {
@@ -500,6 +526,7 @@ app.get('/api/transactions/categories', getUserFromToken, async (req, res) => {
     if (error) throw error
 
     const categories = [...new Set((data || []).map(t => t.category).filter(Boolean))]
+      .filter(c => !isSyncCategory(c))
     res.json(categories)
   } catch (error) {
     console.error('GET /api/transactions/categories error:', error)
@@ -601,9 +628,13 @@ app.get('/api/balance/history', getUserFromToken, async (req, res) => {
     // Fetch cards to determine bucket and currency membership
     const { data: cards, error: cardsError } = await supabase
       .from('cards')
-      .select('id, name, bank, currency, bank_id')
+      .select('id, name, bank, currency, bank_id, exclude_from_stats')
       .eq('user_id', userId)
     if (cardsError) throw cardsError
+
+    // A card is left out if it's excluded itself or its whole bank is
+    const isCardExcluded = (card) =>
+      !!card && (card.exclude_from_stats || (card.bank_id && excludedBankIds.has(card.bank_id)))
 
     const getBucket = (card) => {
       if (!card) return 'cash'
@@ -617,7 +648,7 @@ app.get('/api/balance/history', getUserFromToken, async (req, res) => {
 
     // Restrict cards to bucket if not 'all'
     const filteredCards = (cards || []).filter(c => {
-      if (c.bank_id && excludedBankIds.has(c.bank_id)) return false // exclude cards in excluded banks
+      if (isCardExcluded(c)) return false // excluded card or excluded bank
       if (bucket !== 'all' && getBucket(c) !== bucket) return false
       return true
     })
@@ -708,8 +739,8 @@ app.get('/api/balance/history', getUserFromToken, async (req, res) => {
     for (const tx of (txs || [])) {
       if (!tx.created_at) continue
       const card = tx.card_id ? cardMap.get(tx.card_id) : null
-      if (card && card.bank_id && excludedBankIds.has(card.bank_id)) {
-        continue // skip excluded banks
+      if (isCardExcluded(card)) {
+        continue // skip excluded cards / banks
       }
       const cardCurrency = card ? (card.currency || 'UAH').toUpperCase() : 'UAH'
       
@@ -1121,6 +1152,16 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
             data = data.slice(0, Number(limit))
           }
         }
+      }
+    }
+
+    // Mark transactions of cards excluded from statistics; clients skip them in stats
+    if (Array.isArray(data) && data.some(t => t.card_id)) {
+      const excludedCards = await getExcludedCardIds(req.user_id)
+      if (excludedCards.size > 0) {
+        data = data.map(t =>
+          t.card_id && excludedCards.has(t.card_id) ? { ...t, card_excluded_from_stats: true } : t
+        )
       }
     }
 

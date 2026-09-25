@@ -290,6 +290,8 @@ export default function CategoryPieChart() {
 
           // Exclude from any stats
           if (tx.exclude_from_stats === true || tx.exclude_from_stats === 'true' || tx.exclude_from_stats === 1) return false
+          // Card switched off in its settings (flag computed by the backend)
+          if (tx.card_excluded_from_stats) return false
           // Safety/backward-compat: linked refunds are not counted directly
           if (tx.refund_for) return false
           if (String(tx.note || '').includes('[refund_for:')) return false

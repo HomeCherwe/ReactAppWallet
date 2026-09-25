@@ -238,6 +238,8 @@ function getIncludedTxIds(txsArg = [], modeArg = 'earning', currencyArg) {
   const isExcludedFromStats = (t) => {
     if (!t) return false
     if (t.exclude_from_stats === true || t.exclude_from_stats === 'true' || t.exclude_from_stats === 1) return true
+    // Card switched off in its settings (flag computed by the backend)
+    if (t.card_excluded_from_stats) return true
     if (t.refund_for) return true
     const note = String(t.note || '')
     return note.includes('[refund_for:')
@@ -791,6 +793,8 @@ export default function EarningsChart(){
     for (const t of txsArg || []) {
       // skip refunds
       if (t.exclude_from_stats === true || t.exclude_from_stats === 'true' || t.exclude_from_stats === 1 || t.refund_for || String(t.note || '').includes('[refund_for:')) continue
+      // skip cards excluded from statistics (flag computed by the backend)
+      if (t.card_excluded_from_stats) continue
       // skip transfer-internal transactions and savings (they shouldn't affect earnings chart)
       if (t.is_transfer) continue
       if (t.is_savings) continue

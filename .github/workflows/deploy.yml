@@ -5,6 +5,10 @@ on:
     branches:
       - main
       - master
+    # Only redeploy the web app when the web app changes (not on mobile/ or backend/ edits)
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
 permissions:
@@ -42,7 +46,6 @@ jobs:
         run: npm run build
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
-          VITE_MONO_TOKEN: ${{ secrets.VITE_MONO_TOKEN }}
           VITE_EXCHANGE_RATE_API: ${{ secrets.VITE_EXCHANGE_RATE_API }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}

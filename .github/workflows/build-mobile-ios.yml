@@ -1,0 +1,120 @@
+name: Build Mobile iOS IPA (Expo)
+
+# Builds the React Native / Expo app from mobile/ into an unsigned .ipa for Sideloadly.
+# Runs only when something in mobile/ changes (or manually from the Actions tab).
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: 'Release notes'
+        required: false
+        default: 'Manual build'
+  push:
+    branches:
+      - main
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/build-mobile-ios.yml'
+
+concurrency:
+  group: build-mobile-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ios:
+    name: Build iOS App
+    # Liquid Glass (expo-glass-effect, @expo/ui) needs the iOS 26 SDK, i.e. Xcode 26
+    runs-on: macos-26
+
+    defaults:
+      run:
+        working-directory: mobile
+
+    env:
+      EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+      EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select latest Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Check required secrets
+        run: |
+          missing=0
+          for name in EXPO_PUBLIC_SUPABASE_URL EXPO_PUBLIC_SUPABASE_ANON_KEY EXPO_PUBLIC_API_URL; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Secret $name is not set (Settings → Secrets and variables → Actions)"
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Metro reads EXPO_PUBLIC_* at bundle time; the env above covers it, the file is a fallback
+      - name: Create .env file
+        run: |
+          {
+            echo "EXPO_PUBLIC_SUPABASE_URL=$EXPO_PUBLIC_SUPABASE_URL"
+            echo "EXPO_PUBLIC_SUPABASE_ANON_KEY=$EXPO_PUBLIC_SUPABASE_ANON_KEY"
+            echo "EXPO_PUBLIC_API_URL=$EXPO_PUBLIC_API_URL"
+          } > .env
+
+      # Generates the native ios/ project from app.json (also runs pod install)
+      - name: Expo prebuild (iOS)
+        run: npx expo prebuild --platform ios --clean --no-install && cd ios && pod install
+
+      - name: Find workspace and scheme
+        id: xcode
+        run: |
+          WORKSPACE=$(ls -d ios/*.xcworkspace | head -n 1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          echo "workspace=$WORKSPACE" >> "$GITHUB_OUTPUT"
+          echo "scheme=$SCHEME" >> "$GITHUB_OUTPUT"
+          echo "Workspace: $WORKSPACE, scheme: $SCHEME"
+
+      - name: Build unsigned archive (for Sideloadly)
+        run: |
+          xcodebuild \
+            -workspace "${{ steps.xcode.outputs.workspace }}" \
+            -scheme "${{ steps.xcode.outputs.scheme }}" \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$RUNNER_TEMP/WalletMobile.xcarchive" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            archive
+
+      - name: Package IPA from archive
+        run: |
+          APP=$(ls -d "$RUNNER_TEMP/WalletMobile.xcarchive/Products/Applications/"*.app | head -n 1)
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -r "$APP" "$RUNNER_TEMP/Payload/"
+          cd "$RUNNER_TEMP"
+          zip -qr WalletMobile.ipa Payload/
+          ls -lh WalletMobile.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WalletMobile-iOS-${{ github.run_number }}
+          path: ${{ runner.temp }}/WalletMobile.ipa
+          retention-days: 30
