@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native'
 import Toast from 'react-native-toast-message'
 import { Colors } from '../constants/theme'
@@ -11,8 +11,13 @@ import {
 } from '../api/bankConnections'
 import { syncBanks } from '../store/useBankSyncStore'
 import { txBus } from '../utils/txBus'
-import { triggerErrorHaptic, triggerLightHaptic, triggerSuccessHaptic } from '../utils/haptics'
+import { triggerErrorHaptic, triggerLightHaptic, triggerMediumHaptic, triggerSuccessHaptic } from '../utils/haptics'
+import { Card } from '../api/cards'
 import BankLogo from './BankLogo'
+import BankAccountsSheet from './BankAccountsSheet'
+
+// Time for a sheet to finish closing before the next thing is presented (iOS)
+const SHEET_SWAP_DELAY_MS = 380
 
 function timeAgo(iso: string): string {
   const min = Math.round((Date.now() - new Date(iso).getTime()) / 60000)
@@ -52,12 +57,23 @@ export default function ConnectedBanks({
   reloadKey = 0,
   onChanged,
   onReconnectToken,
+  cards = [],
+  balances = {},
+  onOpenCard,
 }: {
   reloadKey?: number
   onChanged?: () => void
   /** Token banks (Monobank) reconnect with a new token in the add-bank sheet */
   onReconnectToken?: (c: BankConnection) => void
+  /** The user's cards and balances, to show which cards each bank fills */
+  cards?: Card[]
+  balances?: Record<string, number>
+  /** Tap on an account in the bank's sheet */
+  onOpenCard?: (card: Card) => void
 }) {
+  // Tap on a bank: its accounts; long press: quick actions
+  const [openId, setOpenId] = useState<string | null>(null)
+  const cardsById = useMemo(() => Object.fromEntries(cards.map(c => [c.id, c])), [cards])
   const [connections, setConnections] = useState<BankConnection[] | null>(null)
   const [error, setError] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -97,6 +113,12 @@ export default function ConnectedBanks({
   }
 
   const reconnect = async (c: BankConnection) => {
+    if (openId) {
+      // Close the bank sheet first: nothing can be presented over a closing sheet
+      setOpenId(null)
+      setTimeout(() => reconnect(c), SHEET_SWAP_DELAY_MS)
+      return
+    }
     if (c.auth === 'token') {
       onReconnectToken?.(c)
       return
@@ -132,6 +154,9 @@ export default function ConnectedBanks({
             setBusyId(c.id)
             try {
               await disconnectBank(c.id)
+              setOpenId(null)
+              triggerSuccessHaptic()
+              Toast.show({ type: 'success', text1: `${c.provider_name} відключено`, text2: 'Картки й транзакції залишились' })
               await load()
               onChanged?.()
             } catch (e: any) {
@@ -146,7 +171,7 @@ export default function ConnectedBanks({
   }
 
   const openActions = (c: BankConnection) => {
-    triggerLightHaptic()
+    triggerMediumHaptic()
     Alert.alert(c.provider_name, statusLine(c).text, [
       c.status === 'expired'
         ? { text: 'Підключити знову', onPress: () => reconnect(c) }
@@ -155,6 +180,8 @@ export default function ConnectedBanks({
       { text: 'Закрити', style: 'cancel' },
     ])
   }
+
+  const opened = connections?.find(c => c.id === openId) ?? null
 
   // Hidden while loading and when nothing is connected (connecting starts from "＋ Додати")
   if (!connections || connections.length === 0) return null
@@ -168,7 +195,12 @@ export default function ConnectedBanks({
           return (
             <Pressable
               key={c.id}
-              onPress={() => openActions(c)}
+              onPress={() => {
+                triggerLightHaptic()
+                setOpenId(c.id)
+              }}
+              onLongPress={() => openActions(c)}
+              delayLongPress={380}
               style={({ pressed }) => [styles.row, i > 0 && styles.rowBorder, pressed && styles.rowPressed]}
             >
               <BankLogo uri={c.provider_logo} name={c.provider_name} size={38} />
@@ -179,12 +211,36 @@ export default function ConnectedBanks({
               {busyId === c.id ? (
                 <ActivityIndicator color={Colors.orange} />
               ) : (
-                <View style={[styles.dot, { backgroundColor: c.status === 'active' && !c.last_error ? Colors.green : Colors.orange }]} />
+                <View style={styles.trail}>
+                  <View style={[styles.dot, { backgroundColor: c.status === 'active' && !c.last_error ? Colors.green : Colors.orange }]} />
+                  <Text style={styles.chevron}>›</Text>
+                </View>
               )}
             </Pressable>
           )
         })}
       </View>
+      <Text style={styles.hint}>Натисніть — рахунки банку · утримуйте — дії</Text>
+
+      <BankAccountsSheet
+        connection={opened}
+        status={opened ? statusLine(opened) : null}
+        cardsById={cardsById}
+        balances={balances}
+        busy={!!opened && busyId === opened.id}
+        onClose={() => setOpenId(null)}
+        onSync={syncOne}
+        onReconnect={reconnect}
+        onDisconnect={disconnect}
+        onOpenCard={
+          onOpenCard
+            ? card => {
+                setOpenId(null)
+                setTimeout(() => onOpenCard(card), SHEET_SWAP_DELAY_MS)
+              }
+            : undefined
+        }
+      />
     </View>
   )
 }
@@ -231,6 +287,21 @@ const styles = StyleSheet.create({
   status: {
     fontSize: 12,
     marginTop: 2,
+  },
+  trail: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  chevron: {
+    fontSize: 20,
+    color: Colors.textMuted,
+  },
+  hint: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    marginTop: 8,
   },
   dot: {
     width: 8,
