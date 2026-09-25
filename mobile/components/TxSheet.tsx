@@ -1,5 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, Animated, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import {
+  ActivityIndicator,
+  Animated,
+  LayoutAnimation,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native'
 import Toast from 'react-native-toast-message'
 import { Colors } from '../constants/theme'
 import { Transaction, getTransactionCategories, updateTransaction } from '../api/transactions'
@@ -88,10 +98,21 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
 
   // Category chips: typed text filters; a new name can be used as is
   const q = catQuery.trim().toLowerCase()
+  // The selected category is always first (even a new one not saved yet)
   const catOptions = useMemo(() => {
     const list = categories.filter(c => !isSyncCategory(c))
-    return (q ? list.filter(c => c.toLowerCase().includes(q)) : list).slice(0, q ? 20 : 14)
-  }, [categories, q])
+    const found = (q ? list.filter(c => c.toLowerCase().includes(q)) : list).slice(0, q ? 20 : 14)
+    const sel = category.trim()
+    if (!sel || q) return found
+    return [sel, ...found.filter(c => c !== sel)]
+  }, [categories, q, category])
+  const orderedCards = useMemo(() => {
+    const sel = cards.find(c => c.id === cardId)
+    return sel ? [sel, ...cards.filter(c => c.id !== cardId)] : cards
+  }, [cards, cardId])
+  const cardScroll = useRef<ScrollView>(null)
+  const moveToFront = () =>
+    LayoutAnimation.configureNext(LayoutAnimation.create(220, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity))
   const canCreate = !!q && !categories.some(c => c.toLowerCase() === q)
 
   if (!t) return null
@@ -222,6 +243,7 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
               <Pressable
                 onPress={() => {
                   triggerLightHaptic()
+                  moveToFront()
                   setCategory(catQuery.trim())
                   setCatQuery('')
                 }}
@@ -237,8 +259,10 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
                 <Pressable
                   key={c}
                   onPress={() => {
+                    if (active) return
                     triggerLightHaptic()
-                    setCategory(active ? original?.category ?? '' : c)
+                    moveToFront()
+                    setCategory(c)
                     setCatQuery('')
                   }}
                   style={[styles.chip, active && styles.chipActive]}
@@ -256,15 +280,18 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
             <View style={styles.sectionHead}>
               <Text style={styles.sectionLabel}>Рахунок</Text>
             </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cardsRow}>
-              {cards.map(c => {
+            <ScrollView ref={cardScroll} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cardsRow}>
+              {orderedCards.map(c => {
                 const active = c.id === cardId
                 return (
                   <Pressable
                     key={c.id}
                     onPress={() => {
+                      if (active) return
                       triggerLightHaptic()
+                      moveToFront()
                       setCardId(c.id)
+                      cardScroll.current?.scrollTo({ x: 0, animated: true })
                     }}
                     style={[styles.cardPill, active && styles.cardPillActive]}
                   >

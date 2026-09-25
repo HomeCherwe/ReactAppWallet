@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Platform,
   Keyboard,
   ActivityIndicator,
+  LayoutAnimation,
 } from 'react-native'
 import { Colors, Radius } from '../constants/theme'
 import { Card } from '../api/cards'
@@ -108,6 +109,7 @@ export default function AddTransactionModal({
 
   const pickCategory = (cat: string) => {
     if (!categories.includes(cat)) setCustomCategory(cat)
+    LayoutAnimation.configureNext(LayoutAnimation.create(220, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity))
     setSelectedCategory(cat)
     setCatQuery('')
     Keyboard.dismiss()
@@ -144,6 +146,32 @@ export default function AddTransactionModal({
     setSelectedCardId(orderedCards[0]?.id ?? '')
     setSelectedCategory(categories[0] ?? '')
   }, [usage])
+
+  // The selected card / category is always shown first (it slides to the front when picked)
+  const displayCards = useMemo(() => {
+    const sel = orderedCards.find(c => c.id === selectedCardId)
+    return sel ? [sel, ...orderedCards.filter(c => c.id !== selectedCardId)] : orderedCards
+  }, [orderedCards, selectedCardId])
+  const displayCategories = useMemo(
+    () => (categories.includes(selectedCategory) ? [selectedCategory, ...categories.filter(c => c !== selectedCategory)] : categories),
+    [categories, selectedCategory]
+  )
+  const cardScroll = useRef<ScrollView>(null)
+  const catScroll = useRef<ScrollView>(null)
+  const moveToFront = () =>
+    LayoutAnimation.configureNext(LayoutAnimation.create(220, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity))
+  const chooseCard = (id: string) => {
+    if (id === selectedCardId) return
+    moveToFront()
+    setSelectedCardId(id)
+    cardScroll.current?.scrollTo({ x: 0, animated: true })
+  }
+  const chooseCategory = (cat: string) => {
+    if (cat === selectedCategory) return
+    moveToFront()
+    setSelectedCategory(cat)
+    catScroll.current?.scrollTo({ x: 0, animated: true })
+  }
 
   const selectedCard = orderedCards.find(c => c.id === selectedCardId)
   const currency = selectedCard?.currency || primaryCurrency
@@ -194,9 +222,9 @@ export default function AddTransactionModal({
   // Two rows of category chips, scrolled horizontally together
   const categoryRows = useMemo(() => {
     const rows: string[][] = [[], []]
-    categories.forEach((c, i) => rows[i % 2].push(c))
+    displayCategories.forEach((c, i) => rows[i % 2].push(c))
     return rows
-  }, [categories])
+  }, [displayCategories])
 
   return (
     <SheetModal visible={visible} onClose={onClose} sheetStyle={styles.sheet}>
@@ -259,18 +287,19 @@ export default function AddTransactionModal({
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>РАХУНОК / КАРТКА</Text>
             <ScrollView
+              ref={cardScroll}
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.chipsRow}
               keyboardShouldPersistTaps="handled"
             >
-              {orderedCards.map(c => {
+              {displayCards.map(c => {
                 const active = c.id === selectedCardId
                 return (
                   <Pressable
                     key={c.id}
                     style={[styles.cardChip, active && styles.chipActive]}
-                    onPress={() => setSelectedCardId(c.id)}
+                    onPress={() => chooseCard(c.id)}
                   >
                     <Text style={styles.cardChipBank} numberOfLines={1}>
                       {(c.bank || 'Картка').toUpperCase()} · {c.currency}
@@ -341,6 +370,7 @@ export default function AddTransactionModal({
             </ScrollView>
           ) : (
             <ScrollView
+              ref={catScroll}
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.catRows}
@@ -354,7 +384,7 @@ export default function AddTransactionModal({
                       <Pressable
                         key={cat}
                         style={[styles.catChip, active && styles.chipActive]}
-                        onPress={() => setSelectedCategory(cat)}
+                        onPress={() => chooseCategory(cat)}
                       >
                         <Text style={styles.catIcon}>
                           {getCategoryIcon(cat, type === 'income' ? 1 : -1)}
