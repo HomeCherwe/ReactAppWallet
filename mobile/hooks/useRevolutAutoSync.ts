@@ -1,15 +1,15 @@
 import { useEffect, useRef } from 'react'
 import { AppState } from 'react-native'
-import Toast from 'react-native-toast-message'
-import { getRevolutStatus, isRevolutConnectedCached, syncRevolut } from '../api/revolut'
-import { txBus } from '../utils/txBus'
+import { getRevolutStatus, isRevolutConnectedCached } from '../api/revolut'
+import { syncBanks, useBankSyncStore } from '../store/useBankSyncStore'
 
 // Opening the app again within this window doesn't re-sync
 const MIN_INTERVAL_MS = 2 * 60 * 1000
 
 /**
  * Syncs Revolut (TrueLayer) every time the app is opened or brought back to the foreground,
- * at most once per MIN_INTERVAL_MS. Silent unless new transactions arrive.
+ * at most once per MIN_INTERVAL_MS. Progress/result is shown by the sync indicator
+ * on the transactions block (see useBankSyncStore).
  */
 export function useRevolutAutoSync(enabled: boolean) {
   const running = useRef(false)
@@ -17,6 +17,7 @@ export function useRevolutAutoSync(enabled: boolean) {
 
   useEffect(() => {
     if (!enabled) return
+    useBankSyncStore.getState().hydrate()
 
     const run = async () => {
       if (running.current || Date.now() - lastRun.current < MIN_INTERVAL_MS) return
@@ -28,11 +29,7 @@ export function useRevolutAutoSync(enabled: boolean) {
         if (connected === null) connected = (await getRevolutStatus()) === 'connected'
         if (!connected) return
 
-        const added = await syncRevolut()
-        if (added > 0) {
-          txBus.emit({ type: 'SYNCED', source: 'revolut', count: added })
-          Toast.show({ type: 'success', text1: `Revolut: +${added} нових транзакцій` })
-        }
+        await syncBanks()
       } catch (e) {
         // Background sync: log only; the settings screen shows the connection state
         console.warn('[Revolut] auto-sync failed:', e)

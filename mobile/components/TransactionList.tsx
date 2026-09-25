@@ -7,6 +7,7 @@ import { TxFilter } from '../hooks/useTransactionFeed'
 import { triggerLightHaptic } from '../utils/haptics'
 import { getCategoryIcon } from '../utils/categoryIcon'
 import { TransactionRowsSkeleton } from './Skeleton'
+import BankSyncIndicator from './BankSyncIndicator'
 
 const CURRENCY_SYMBOLS: Record<string, string> = { UAH: '₴', USD: '$', EUR: '€', GBP: '£', PLN: 'zł' }
 
@@ -110,6 +111,7 @@ function TransactionList({
     <View style={styles.card}>
       <View style={styles.header}>
         <Text style={styles.title}>Транзакції</Text>
+        <BankSyncIndicator />
       </View>
 
       {onFilterChange && (
@@ -235,6 +237,10 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
     paddingHorizontal: 20,
     paddingTop: 18,
     paddingBottom: 12,

@@ -8,9 +8,8 @@ import {
   getLastRevolutSync,
   getRevolutStatus,
   RevolutStatus,
-  syncRevolut,
 } from '../api/revolut'
-import { txBus } from '../utils/txBus'
+import { syncBanks } from '../store/useBankSyncStore'
 import { triggerErrorHaptic, triggerSuccessHaptic } from '../utils/haptics'
 import { GlassPressable } from './LiquidGlass'
 
@@ -52,10 +51,9 @@ export default function RevolutConnectSection({ visible }: { visible: boolean })
   const handleSync = async () => {
     setBusy('sync')
     try {
-      const added = await syncRevolut()
+      const added = await syncBanks()
       setLastSync(new Date())
       triggerSuccessHaptic()
-      if (added > 0) txBus.emit({ type: 'SYNCED', source: 'revolut', count: added })
       Toast.show({ type: 'success', text1: added > 0 ? `Додано ${added} транзакцій` : 'Нових транзакцій немає' })
     } catch (e: any) {
       triggerErrorHaptic()
