@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { getLastRevolutSync, syncRevolut } from '../api/revolut'
+import { getLastBankSync, syncConnectedBanks } from '../api/bankConnections'
 import { txBus } from '../utils/txBus'
 
 // How long "+N транзакцій" stays before switching to the last-sync time
@@ -21,7 +21,7 @@ export const useBankSyncStore = create<BankSyncState>((set, get) => ({
   added: 0,
   lastSyncAt: null,
   hydrate: async () => {
-    const last = await getLastRevolutSync()
+    const last = await getLastBankSync()
     // Don't overwrite a newer time from a sync that finished while this was loading
     if (last && (get().lastSyncAt ?? 0) < last.getTime()) set({ lastSyncAt: last.getTime() })
   },
@@ -31,7 +31,7 @@ let resultTimer: ReturnType<typeof setTimeout> | null = null
 let inFlight: Promise<number> | null = null
 
 /**
- * Syncs connected banks (Revolut via TrueLayer for now), drives the sync indicator and
+ * Syncs every connected bank (TrueLayer), drives the sync indicator and
  * notifies screens when transactions were added. Concurrent calls share one request.
  * Returns the number of transactions added.
  */
@@ -41,11 +41,11 @@ export function syncBanks(): Promise<number> {
   if (resultTimer) clearTimeout(resultTimer)
   useBankSyncStore.setState({ phase: 'syncing' })
 
-  inFlight = syncRevolut()
-    .then(added => {
+  inFlight = syncConnectedBanks()
+    .then(({ added }) => {
       useBankSyncStore.setState({ phase: added > 0 ? 'result' : 'idle', added, lastSyncAt: Date.now() })
       if (added > 0) {
-        txBus.emit({ type: 'SYNCED', source: 'revolut', count: added })
+        txBus.emit({ type: 'SYNCED', source: 'banks', count: added })
         resultTimer = setTimeout(() => useBankSyncStore.setState({ phase: 'idle' }), RESULT_VISIBLE_MS)
       }
       return added

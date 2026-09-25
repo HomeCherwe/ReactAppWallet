@@ -13,7 +13,7 @@ import Toast from "react-native-toast-message"
 import { triggerLightHaptic } from "./utils/haptics"
 import { GlassSurface } from "./components/LiquidGlass"
 import { useSettingsStore } from "./store/useSettingsStore"
-import { useRevolutAutoSync } from "./hooks/useRevolutAutoSync"
+import { useBankAutoSync } from "./hooks/useBankAutoSync"
 
 // Screens
 import AuthScreen from "./screens/AuthScreen"
@@ -72,8 +72,8 @@ export default function App() {
     return () => subscription.unsubscribe()
   }, [])
 
-  // Pull new Revolut transactions whenever the app is opened (signed in only)
-  useRevolutAutoSync(!!session)
+  // Pull new bank transactions whenever the app is opened (signed in only)
+  useBankAutoSync(!!session)
 
   const handleTabPress = (tab: TabId) => {
     if (activeTab !== tab) triggerLightHaptic()
