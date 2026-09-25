@@ -5,7 +5,7 @@ import { Transaction } from '../api/transactions'
 import { Card } from '../api/cards'
 import { getCategoryIcon } from '../utils/categoryIcon'
 import { txDisplayTitle } from '../utils/pinned'
-import { triggerLightHaptic } from '../utils/haptics'
+import { triggerLightHaptic, triggerMediumHaptic, triggerSelectionHaptic } from '../utils/haptics'
 import Icon from './Icon'
 import { menuDragHandlers, useMenuOverlay } from '../store/useMenuOverlay'
 
@@ -89,6 +89,8 @@ function TxRow({
   const actionsW = actionCount * SLOT_W + 6
   const actionsWRef = useRef(actionsW)
   actionsWRef.current = actionsW
+  // Past the "open" point during the drag (for the haptic tick when crossing it)
+  const pastRef = useRef(false)
 
   const canSwipe = swipeEnabled && mode === 'normal' && actionCount > 0
   const canSwipeRef = useRef(canSwipe)
@@ -133,6 +135,7 @@ function TxRow({
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: () => {
         x.stopAnimation()
+        pastRef.current = openRef.current
       },
       onPanResponderMove: (_, g) => {
         const w = actionsWRef.current
@@ -142,13 +145,18 @@ function TxRow({
         // Rubber band past the buttons
         if (next < -w) next = -w + (next + w) * 0.3
         x.setValue(next)
+        // Tick each time the drag crosses the point where the buttons stay open
+        const past = next < -w / 2
+        if (past !== pastRef.current) {
+          pastRef.current = past
+          triggerSelectionHaptic()
+        }
       },
       onPanResponderRelease: (_, g) => {
         const w = actionsWRef.current
         const base = openRef.current ? -w : 0
         const pos = base + g.dx
         const open = g.vx < -0.4 || (pos < -w / 2 && g.vx < 0.4)
-        if (open && !openRef.current) triggerLightHaptic()
         animateTo(open ? -w : 0)
       },
       onPanResponderTerminate: () => animateTo(openRef.current ? -actionsWRef.current : 0),
@@ -205,6 +213,7 @@ function TxRow({
               <Pressable
                 accessibilityLabel={isRefund ? 'Скасувати повернення' : 'Повернення'}
                 onPress={() => {
+                  triggerLightHaptic()
                   close()
                   onRefund?.(tx)
                 }}
@@ -219,6 +228,7 @@ function TxRow({
               <Pressable
                 accessibilityLabel="Видалити"
                 onPress={() => {
+                  triggerLightHaptic()
                   close()
                   onDelete(tx)
                 }}
@@ -236,7 +246,10 @@ function TxRow({
           onPress={handlePress}
           onLongPress={
             mode === 'normal' && onLongPress
-              ? () => rowRef.current?.measureInWindow((fx, fy, w, h) => onLongPress(tx, { x: fx, y: fy, w, h }))
+              ? () => {
+                  triggerMediumHaptic() // right as the long press registers
+                  rowRef.current?.measureInWindow((fx, fy, w, h) => onLongPress(tx, { x: fx, y: fy, w, h }))
+                }
               : undefined
           }
           delayLongPress={350}

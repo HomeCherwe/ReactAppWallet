@@ -1,6 +1,7 @@
 import React, { useRef } from 'react'
 import { Pressable, StyleProp, StyleSheet, View, ViewStyle } from 'react-native'
 import { MenuAction, MenuFrame, menuDragHandlers, openMenu } from '../store/useMenuOverlay'
+import { triggerMediumHaptic } from '../utils/haptics'
 
 export type { MenuAction, MenuFrame }
 
@@ -26,11 +27,12 @@ export default function GlassContextMenu({ actions, title, subtitle, onPress, st
     <Pressable
       ref={ref}
       onPress={onPress}
-      onLongPress={() =>
+      onLongPress={() => {
+        triggerMediumHaptic() // right as the long press registers
         ref.current?.measureInWindow((x, y, w, h) =>
           openMenu({ frame: { x, y, w, h }, actions, title, subtitle, preview: children, previewStyle: style })
         )
-      }
+      }}
       delayLongPress={320}
       style={({ pressed }) => [style, pressed && styles.pressed]}
       {...menuDragHandlers}

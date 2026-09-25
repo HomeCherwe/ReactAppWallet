@@ -52,7 +52,6 @@ export default function MenuOverlayHost() {
 
   useEffect(() => {
     if (menu) {
-      triggerMediumHaptic()
       setShown(menu)
       anim.setValue(0)
       Animated.spring(anim, { toValue: 1, useNativeDriver: true, speed: 18, bounciness: 6 }).start()

@@ -16,6 +16,7 @@ import { Colors, Radius, Typography } from '../constants/theme'
 import { Card } from '../api/cards'
 import { formatMoney, convertCurrency, RatesMap } from '../utils/currency'
 import { CardSkeleton } from './Skeleton'
+import { triggerSelectionHaptic } from '../utils/haptics'
 
 const { width } = Dimensions.get('window')
 // The carousel bleeds to the screen edges; SIDE must match HomeScreen's horizontal padding
@@ -198,6 +199,8 @@ function CardCarousel({
   excludedCardIds = [],
 }: CardCarouselProps) {
   const scrollX = useRef(new Animated.Value(0)).current
+  // Current card (for the haptic tick as the carousel snaps)
+  const pageRef = useRef(0)
 
   if (loading) {
     return (
@@ -235,7 +238,16 @@ function CardCarousel({
         contentContainerStyle={styles.scroll}
         onScroll={Animated.event(
           [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-          { useNativeDriver: false }
+          {
+            useNativeDriver: false,
+            listener: (e: any) => {
+              const i = Math.round(e.nativeEvent.contentOffset.x / SNAP)
+              if (i !== pageRef.current) {
+                pageRef.current = i
+                triggerSelectionHaptic()
+              }
+            },
+          }
         )}
         scrollEventThrottle={16}
       >

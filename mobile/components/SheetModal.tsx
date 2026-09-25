@@ -16,6 +16,7 @@ import {
 } from 'react-native'
 import { initialWindowMetrics } from 'react-native-safe-area-context'
 import { InsideGlassContext } from './LiquidGlass'
+import { triggerSelectionHaptic } from '../utils/haptics'
 
 interface SheetModalProps {
   visible: boolean
@@ -68,6 +69,7 @@ export default function SheetModal({
   // Dismissed from inside (drag / backdrop): the sheet slides away first, and only then the
   // parent is told — its re-render no longer lands in the middle of the animation (the micro-lag)
   const closingRef = useRef(false)
+  const pastDismissRef = useRef(false)
   const heightRef = useRef(height)
   heightRef.current = height
 
@@ -101,8 +103,18 @@ export default function SheetModal({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: () => Keyboard.dismiss(),
-      onPanResponderMove: (_, g) => dragY.setValue(Math.max(0, g.dy)),
+      onPanResponderGrant: () => {
+        Keyboard.dismiss()
+        pastDismissRef.current = false
+      },
+      onPanResponderMove: (_, g) => {
+        dragY.setValue(Math.max(0, g.dy))
+        const past = g.dy > DISMISS_DISTANCE
+        if (past !== pastDismissRef.current) {
+          pastDismissRef.current = past
+          triggerSelectionHaptic()
+        }
+      },
       onPanResponderRelease: (_, g) => {
         if (g.dy > DISMISS_DISTANCE || g.vy > DISMISS_VELOCITY) {
           dismissRef.current()
