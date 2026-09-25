@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { apiFetch } from '../utils.jsx'
 import { syncBankConnections } from '../api/bankConnections'
 import { txBus } from '../utils/txBus'
 
@@ -27,7 +26,7 @@ let inFlight = null
 let resultTimer = null
 
 /**
- * Syncs every bank: those connected through TrueLayer and Monobank (if configured).
+ * Syncs every connected bank (TrueLayer banks and Monobank).
  * Concurrent calls share one run. Resolves with the number of transactions added.
  */
 export function syncBanks() {
@@ -36,11 +35,8 @@ export function syncBanks() {
   if (resultTimer) clearTimeout(resultTimer)
   useBankSyncStore.setState({ phase: 'syncing' })
 
-  inFlight = Promise.allSettled([
-    syncBankConnections().then(r => r.added),
-    // Fails when Monobank isn't set up for the user — that's fine, the other banks still count
-    apiFetch('/api/syncMonoBank', { method: 'POST', body: JSON.stringify({}) }).then(r => Number(r?.count || 0)),
-  ])
+  // Every bank (TrueLayer ones and Monobank) is synced by the bank-connections endpoint
+  inFlight = Promise.allSettled([syncBankConnections().then(r => r.added)])
     .then(results => {
       const ok = results.filter(r => r.status === 'fulfilled')
       results

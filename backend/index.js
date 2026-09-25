@@ -3484,6 +3484,22 @@ app.get('/api/api-key', getUserFromToken, async function (req, res) {
 app.post('/api/syncMonoBank', getUserFromTokenOrApiKey, async function (req, res) {
   if (!req.body) return res.status(400).json({ success: false, error: 'Bad request: No body provided' })
 
+  // Monobank connected on the cards page (bank_connections): sync through it
+  const { data: monoConn } = await supabase
+    .from('bank_connections')
+    .select('id')
+    .eq('user_id', req.user_id)
+    .eq('provider_id', 'monobank')
+    .maybeSingle()
+  if (monoConn) {
+    try {
+      const { added } = await syncAllBankConnections(supabase, req.user_id, psuHeadersFrom(req))
+      return res.status(200).json({ success: true, count: added, message: `Sync transactions - ${added}`, transactions: [] })
+    } catch (e) {
+      return res.status(500).json({ success: false, error: e.message })
+    }
+  }
+
   // Get API keys from database instead of .env
   const { data: prefs, error: prefsError } = await supabase
     .from('user_preferences')

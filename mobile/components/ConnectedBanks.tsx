@@ -32,7 +32,12 @@ function accountsLabel(n: number): string {
 }
 
 function statusLine(c: BankConnection): { text: string; color: string } {
-  if (c.status === 'expired') return { text: 'Термін доступу сплив — підключіть знову', color: Colors.orange }
+  if (c.status === 'expired') {
+    return {
+      text: c.auth === 'token' ? 'Токен відкликано — підключіть знову' : 'Термін доступу сплив — підключіть знову',
+      color: Colors.orange,
+    }
+  }
   if (c.last_error) return { text: 'Помилка останньої синхронізації', color: Colors.red }
   const parts = [c.last_sync_at ? `Синхронізовано ${timeAgo(c.last_sync_at)}` : 'Ще не синхронізовано', accountsLabel(c.accounts.length)]
   return { text: parts.filter(Boolean).join(' · '), color: Colors.textSub }
@@ -43,7 +48,16 @@ function statusLine(c: BankConnection): { text: string; color: string } {
  * sync now / reconnect / disconnect. Hidden until loaded and when nothing is connected.
  * Reloads whenever `reloadKey` changes.
  */
-export default function ConnectedBanks({ reloadKey = 0, onChanged }: { reloadKey?: number; onChanged?: () => void }) {
+export default function ConnectedBanks({
+  reloadKey = 0,
+  onChanged,
+  onReconnectToken,
+}: {
+  reloadKey?: number
+  onChanged?: () => void
+  /** Token banks (Monobank) reconnect with a new token in the add-bank sheet */
+  onReconnectToken?: (c: BankConnection) => void
+}) {
   const [connections, setConnections] = useState<BankConnection[] | null>(null)
   const [error, setError] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -83,6 +97,10 @@ export default function ConnectedBanks({ reloadKey = 0, onChanged }: { reloadKey
   }
 
   const reconnect = async (c: BankConnection) => {
+    if (c.auth === 'token') {
+      onReconnectToken?.(c)
+      return
+    }
     setBusyId(c.id)
     try {
       const result = await connectBank(c.provider_id)

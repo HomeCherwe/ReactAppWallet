@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Landmark, RefreshCw, Search, Unplug, AlertTriangle } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ExternalLink, Eye, EyeOff, Landmark, RefreshCw, Search, ShieldCheck, Unplug } from 'lucide-react'
 import toast from 'react-hot-toast'
+import BaseModal from './BaseModal'
 import ConfirmModal from './ConfirmModal'
 import {
+  connectBankWithToken,
   disconnectBankConnection,
   listBankConnections,
   listBankProviders,
@@ -12,6 +14,7 @@ import {
 
 const COUNTRIES = {
   fr: '🇫🇷 Франція',
+  ua: '🇺🇦 Україна',
   uk: '🇬🇧 Велика Британія',
   de: '🇩🇪 Німеччина',
   es: '🇪🇸 Іспанія',
@@ -64,13 +67,125 @@ function BankLogo({ src, name, size = 40 }) {
   )
 }
 
-/** Bank catalog (TrueLayer): country tabs, search, logos. Tapping a bank starts the connection. */
-export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCountry }) {
+// Fired after a bank was connected without leaving the page (token banks like Monobank)
+export const BANK_CONNECTED_EVENT = 'bank-connected'
+
+/** Monobank: connected with a personal token from api.monobank.ua (read-only: balance and statement). */
+function TokenConnectForm({ provider, onBack, onDone }) {
+  const [token, setToken] = useState('')
+  const [show, setShow] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const submit = async (e) => {
+    e.preventDefault()
+    if (!token.trim()) return
+    setBusy(true)
+    try {
+      const res = await connectBankWithToken(provider.provider_id, token.trim())
+      setToken('')
+      onDone(res?.bank_name || provider.name)
+    } catch (err) {
+      toast.error(`Не вдалося підключити ${provider.name}: ${err.message}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const steps = [
+    <>
+      Відкрийте{' '}
+      <a
+        href="https://api.monobank.ua/"
+        target="_blank"
+        rel="noreferrer"
+        className="text-orange-600 font-medium inline-flex items-center gap-0.5 hover:underline"
+      >
+        api.monobank.ua <ExternalLink size={12} />
+      </a>
+    </>,
+    'Відскануйте QR-код у застосунку Monobank і підтвердьте вхід',
+    'Скопіюйте токен і вставте його нижче',
+  ]
+
+  return (
+    <form onSubmit={submit} className="grid gap-4">
+      <button
+        type="button"
+        onClick={onBack}
+        className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 w-fit"
+      >
+        <ArrowLeft size={15} /> Назад
+      </button>
+
+      <div className="flex items-center gap-3">
+        <BankLogo src={provider.logo} name={provider.name} size={48} />
+        <div>
+          <div className="font-semibold text-gray-900">{provider.name}</div>
+          <div className="text-xs text-gray-500">🇺🇦 Підключення через персональний токен</div>
+        </div>
+      </div>
+
+      <ol className="grid gap-2 text-sm text-gray-700">
+        {steps.map((text, i) => (
+          <li key={i} className="flex gap-2.5">
+            <span className="w-5 h-5 rounded-full bg-orange-100 text-orange-700 text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
+              {i + 1}
+            </span>
+            <span>{text}</span>
+          </li>
+        ))}
+      </ol>
+
+      <div className="relative">
+        <input
+          type={show ? 'text' : 'password'}
+          autoComplete="off"
+          spellCheck={false}
+          className="w-full border border-gray-300 rounded-xl px-3 py-2.5 pr-10 font-mono text-sm focus:ring-2 focus:ring-orange-400 outline-none"
+          placeholder="Токен Monobank"
+          value={token}
+          onChange={e => setToken(e.target.value)}
+        />
+        <button
+          type="button"
+          onClick={() => setShow(v => !v)}
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+          title={show ? 'Сховати' : 'Показати'}
+        >
+          {show ? <EyeOff size={16} /> : <Eye size={16} />}
+        </button>
+      </div>
+
+      <button
+        type="submit"
+        disabled={busy || !token.trim()}
+        className="w-full py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 text-white font-semibold shadow-sm hover:from-orange-600 hover:to-orange-700 disabled:opacity-50 flex items-center justify-center gap-2"
+      >
+        {busy && <RefreshCw size={16} className="animate-spin" />}
+        {busy ? 'Підключаємо…' : `Підключити ${provider.name}`}
+      </button>
+
+      <p className="text-xs text-gray-400 flex gap-1.5">
+        <ShieldCheck size={14} className="flex-shrink-0 mt-px" />
+        Токен дає доступ лише на читання — баланс і виписка, жодних платежів. Зберігається зашифрованим; відкликати
+        можна будь-коли на api.monobank.ua.
+      </p>
+    </form>
+  )
+}
+
+/** Bank catalog (TrueLayer + Monobank): country tabs, search, logos. Tapping a bank starts the connection. */
+export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCountry, onConnected }) {
   const [providers, setProviders] = useState(null)
   const [error, setError] = useState(false)
   const [country, setCountry] = useState(defaultCountry || 'fr')
   const [query, setQuery] = useState('')
   const [connectingId, setConnectingId] = useState(null)
+  const [tokenProvider, setTokenProvider] = useState(null)
+
+  useEffect(() => {
+    if (!active) setTokenProvider(null)
+  }, [active])
 
   useEffect(() => {
     if (!active || providers) return
@@ -90,6 +205,10 @@ export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCo
   }, [providers, country, query])
 
   const connect = async (p) => {
+    if (p.auth === 'token') {
+      setTokenProvider(p)
+      return
+    }
     setConnectingId(p.provider_id)
     try {
       // Leaves the page for the bank login; the backend returns the user to the profile page
@@ -98,6 +217,20 @@ export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCo
       toast.error(`Не вдалося підключити ${p.name}: ${e.message}`)
       setConnectingId(null)
     }
+  }
+
+  if (tokenProvider) {
+    return (
+      <TokenConnectForm
+        provider={tokenProvider}
+        onBack={() => setTokenProvider(null)}
+        onDone={(name) => {
+          setTokenProvider(null)
+          window.dispatchEvent(new CustomEvent(BANK_CONNECTED_EVENT, { detail: { name } }))
+          onConnected?.(name)
+        }}
+      />
+    )
   }
 
   return (
@@ -159,7 +292,13 @@ export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCo
                   <BankLogo src={p.logo} name={p.name} />
                   <div className="flex-1 min-w-0">
                     <div className="font-medium text-gray-900 truncate">{p.name}</div>
-                    {query && <div className="text-xs text-gray-500">{COUNTRIES[p.country] || p.country.toUpperCase()}</div>}
+                    {(query || p.auth === 'token') && (
+                      <div className="text-xs text-gray-500">
+                        {[query && (COUNTRIES[p.country] || p.country.toUpperCase()), p.auth === 'token' && 'через токен api.monobank.ua']
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </div>
+                    )}
                   </div>
                   {connectingId === p.provider_id ? (
                     <RefreshCw size={16} className="animate-spin text-orange-500" />
@@ -175,8 +314,9 @@ export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCo
         </div>
 
         <p className="text-xs text-gray-400">
-          Підключення через TrueLayer (Open Banking). Ви входите у свій банк напряму — застосунок не бачить ваш
-          пароль. Доступ лише на читання, діє 90 днів.
+          {country === 'ua' && !query
+            ? 'Monobank підключається через персональний токен — лише читання, без терміну дії.'
+            : 'Підключення через TrueLayer (Open Banking). Ви входите у свій банк напряму — застосунок не бачить ваш пароль. Доступ лише на читання, діє 90 днів.'}
         </p>
       </div>
   )
@@ -191,6 +331,7 @@ export default function BankConnections({ onChanged }) {
   const [connections, setConnections] = useState(null)
   const [busyId, setBusyId] = useState(null)
   const [toDisconnect, setToDisconnect] = useState(null)
+  const [reconnectToken, setReconnectToken] = useState(null)
 
   const load = useCallback(async () => {
     try {
@@ -217,6 +358,27 @@ export default function BankConnections({ onChanged }) {
     }
   }, [load, onChanged])
 
+  // Just connected: first sync right away (pulls the history), then refresh the lists
+  const afterConnected = useCallback((name) => {
+    toast.success(`${name} підключено! Завантажуємо транзакції…`)
+    load().then(() =>
+      syncBankConnections()
+        .then(({ added }) => toast.success(added > 0 ? `Додано ${added} транзакцій` : 'Нових транзакцій немає'))
+        .catch(e => toast.error(`Синхронізація: ${e.message}`))
+        .finally(() => {
+          load()
+          onChanged?.() // new cards appear on the cards page
+        })
+    )
+  }, [load, onChanged])
+
+  // Token banks (Monobank) connect inside the catalog modal, without leaving the page
+  useEffect(() => {
+    const onConnected = (e) => afterConnected(e.detail?.name || 'Банк')
+    window.addEventListener(BANK_CONNECTED_EVENT, onConnected)
+    return () => window.removeEventListener(BANK_CONNECTED_EVENT, onConnected)
+  }, [afterConnected])
+
   // Back from the bank login: ?bank_status=… in the hash query
   useEffect(() => {
     const [path, query] = window.location.hash.split('?')
@@ -238,18 +400,7 @@ export default function BankConnections({ onChanged }) {
     window.history.replaceState({}, document.title, window.location.href.split('#')[0] + path + (rest ? `?${rest}` : ''))
 
     if (status === 'ok') {
-      const name = new URLSearchParams(query).get('bank_name') || 'Банк'
-      toast.success(`${name} підключено! Завантажуємо транзакції…`)
-      // First sync right away (pulls ~90 days of history)
-      load().then(() =>
-        syncBankConnections()
-          .then(({ added }) => toast.success(added > 0 ? `Додано ${added} транзакцій` : 'Нових транзакцій немає'))
-          .catch(e => toast.error(`Синхронізація: ${e.message}`))
-          .finally(() => {
-            load()
-            onChanged?.() // new cards appear on the cards page
-          })
-      )
+      afterConnected(new URLSearchParams(query).get('bank_name') || 'Банк')
     } else {
       const msg = new URLSearchParams(query).get('bank_message') || ''
       toast.error(`Не вдалося підключити банк${msg ? `: ${CONNECT_ERRORS[msg] || msg}` : ''}`)
@@ -258,6 +409,10 @@ export default function BankConnections({ onChanged }) {
   }, [load])
 
   const reconnect = async (c) => {
+    if (c.auth === 'token') {
+      setReconnectToken(c) // a new token instead of a bank login
+      return
+    }
     setBusyId(c.id)
     try {
       window.location.href = await startBankConnection(c.provider_id, returnUrlHere())
@@ -340,7 +495,7 @@ export default function BankConnections({ onChanged }) {
                 <div className="text-sm font-semibold text-gray-900 truncate">{c.provider_name}</div>
                 <div className={`text-xs truncate ${expired ? 'text-amber-700' : hasError ? 'text-red-600' : 'text-gray-500'}`}>
                   {expired
-                    ? 'Доступ (90 днів) сплив'
+                    ? c.auth === 'token' ? 'Токен відкликано' : 'Доступ (90 днів) сплив'
                     : hasError
                     ? 'Помилка синхронізації'
                     : [c.last_sync_at ? `Синхр. ${timeAgo(c.last_sync_at)}` : 'Ще не синхронізовано',
@@ -383,6 +538,25 @@ export default function BankConnections({ onChanged }) {
           )
         })}
       </div>
+
+      <BaseModal
+        open={!!reconnectToken}
+        onClose={() => setReconnectToken(null)}
+        title={reconnectToken ? `Підключити ${reconnectToken.provider_name} знову` : ''}
+        maxWidth="lg"
+        zIndex={100}
+      >
+        {reconnectToken && (
+          <TokenConnectForm
+            provider={{ provider_id: reconnectToken.provider_id, name: reconnectToken.provider_name, logo: reconnectToken.provider_logo }}
+            onBack={() => setReconnectToken(null)}
+            onDone={(name) => {
+              setReconnectToken(null)
+              afterConnected(name)
+            }}
+          />
+        )}
+      </BaseModal>
 
       <ConfirmModal
         open={!!toDisconnect}

@@ -36,3 +36,11 @@ export async function syncBankConnections(connectionId) {
 export async function disconnectBankConnection(connectionId) {
   return apiFetch(`/api/bank-connections/${connectionId}`, { method: 'DELETE' })
 }
+
+/** Banks connected with a personal token (Monobank). Returns { bank_name, accounts }. */
+export async function connectBankWithToken(providerId, token) {
+  return apiFetch('/api/bank-connections/token', {
+    method: 'POST',
+    body: JSON.stringify({ provider_id: providerId, token }),
+  })
+}

@@ -10,6 +10,8 @@ export interface BankProvider {
   name: string
   logo: string | null
   country: string
+  /** 'token': connected with a personal token (Monobank) instead of a bank login */
+  auth?: 'token'
 }
 
 export interface BankConnection {
@@ -18,6 +20,7 @@ export interface BankConnection {
   provider_name: string
   provider_logo: string | null
   country: string | null
+  auth?: 'token' | 'redirect'
   status: 'active' | 'expired' | 'error'
   consent_expires_at: string | null
   last_sync_at: string | null
@@ -81,6 +84,19 @@ export async function connectBank(providerId: string): Promise<ConnectResult> {
     return { status: 'ok', bankName: params.get('bank_name') || '' }
   }
   return { status: 'error', message: params.get('bank_message') || 'unknown_error' }
+}
+
+/** Banks connected with a personal token (Monobank: api.monobank.ua). */
+export async function connectBankWithToken(
+  providerId: string,
+  token: string
+): Promise<{ bank_name: string; accounts: number }> {
+  const res = await apiFetch<{ bank_name: string; accounts: number }>('/api/bank-connections/token', {
+    method: 'POST',
+    body: JSON.stringify({ provider_id: providerId, token }),
+  })
+  await AsyncStorage.setItem(HAS_BANKS_KEY, '1')
+  return res
 }
 
 export async function disconnectBank(connectionId: string): Promise<void> {

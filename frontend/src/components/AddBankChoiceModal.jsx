@@ -52,7 +52,7 @@ export default function AddBankChoiceModal({ open, onClose, onManual }) {
                   </span>
                 </div>
                 <p className="text-sm text-gray-600 mt-1">
-                  Транзакції й баланс підтягуються автоматично. Revolut, Wise, BNP Paribas, Monzo та ще 80+ банків.
+                  Транзакції й баланс підтягуються автоматично. Monobank, Revolut, Wise, BNP Paribas, Monzo та ще 80+ банків.
                 </p>
                 <p className="text-xs text-gray-400 mt-2 flex items-center gap-1">
                   <ShieldCheck size={13} /> Open Banking · лише читання · без доступу до пароля
@@ -88,7 +88,12 @@ export default function AddBankChoiceModal({ open, onClose, onManual }) {
           >
             <ArrowLeft size={15} /> Назад
           </button>
-          <ConnectBankCatalog active={open} connectedIds={connectedIds} defaultCountry={defaultCountry} />
+          <ConnectBankCatalog
+            active={open}
+            connectedIds={connectedIds}
+            defaultCountry={defaultCountry}
+            onConnected={onClose}
+          />
         </div>
       )}
     </BaseModal>

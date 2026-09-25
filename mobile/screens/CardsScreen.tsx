@@ -10,7 +10,7 @@ import { fmtAmount } from '../utils/format'
 import AddCardModal from '../components/AddCardModal'
 import AddAccountModal from '../components/AddAccountModal'
 import ConnectedBanks from '../components/ConnectedBanks'
-import { listBankConnections } from '../api/bankConnections'
+import { BankProvider, listBankConnections } from '../api/bankConnections'
 import { syncBanks } from '../store/useBankSyncStore'
 import { txBus } from '../utils/txBus'
 import GlassButton from '../components/GlassButton'
@@ -28,6 +28,8 @@ export default function CardsScreen() {
   const [banksReloadKey, setBanksReloadKey] = useState(0)
   const [connectedIds, setConnectedIds] = useState<string[]>([])
   const [bankCountry, setBankCountry] = useState('fr')
+  // Reconnecting a token bank (Monobank): the add sheet opens straight on its token form
+  const [tokenReconnect, setTokenReconnect] = useState<BankProvider | null>(null)
 
   const loadData = useCallback(async () => {
     try {
@@ -65,6 +67,7 @@ export default function CardsScreen() {
   }, [loadData])
 
   const openAddAccount = () => {
+    setTokenReconnect(null)
     setAddAccountVisible(true)
     // Mark already connected banks in the catalog and start it on the user's country
     listBankConnections()
@@ -173,7 +176,16 @@ export default function CardsScreen() {
               tintColor={Colors.orange}
             />
           }
-          ListHeaderComponent={<ConnectedBanks reloadKey={banksReloadKey} onChanged={loadData} />}
+          ListHeaderComponent={
+            <ConnectedBanks
+              reloadKey={banksReloadKey}
+              onChanged={loadData}
+              onReconnectToken={c => {
+                setTokenReconnect({ provider_id: c.provider_id, name: c.provider_name, logo: c.provider_logo, country: c.country ?? 'ua', auth: 'token' })
+                setAddAccountVisible(true)
+              }}
+            />
+          }
           ListEmptyComponent={
             cards.length === 0 ? (
               <View style={styles.emptyWrap}>
@@ -210,7 +222,11 @@ export default function CardsScreen() {
 
       <AddAccountModal
         visible={addAccountVisible}
-        onClose={() => setAddAccountVisible(false)}
+        onClose={() => {
+          setAddAccountVisible(false)
+          setTokenReconnect(null)
+        }}
+        initialProvider={tokenReconnect}
         connectedProviderIds={connectedIds}
         defaultCountry={bankCountry}
         onManual={() => {
