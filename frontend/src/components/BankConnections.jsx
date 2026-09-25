@@ -287,66 +287,101 @@ export default function BankConnections({ onChanged }) {
   // so the cards page doesn't jump for users without connected banks
   if (!connections || connections.length === 0) return null
 
+  const banksLabel = (n) => {
+    const mod10 = n % 10
+    const mod100 = n % 100
+    if (mod10 === 1 && mod100 !== 11) return `${n} банк`
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} банки`
+    return `${n} банків`
+  }
+
   return (
-    <div className="mb-5">
-      <div className="flex items-center gap-2 mb-2">
-        <Landmark size={18} className="text-orange-500" />
-        <h3 className="text-sm font-semibold text-gray-900">Підключені банки</h3>
-        <span className="text-xs text-gray-400">· синхронізація через Open Banking</span>
+    // Same card look as the other blocks on the cards page (white, rounded, soft shadow)
+    <div className="bg-white rounded-2xl shadow-soft p-4 sm:p-5 mb-4">
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-400 to-orange-600 text-white flex items-center justify-center shadow-sm flex-shrink-0">
+            <Landmark size={20} />
+          </div>
+          <div className="min-w-0">
+            <h3 className="font-semibold text-gray-900 leading-tight">Підключені банки</h3>
+            <p className="text-xs text-gray-500">Автоматична синхронізація через Open Banking</p>
+          </div>
+        </div>
+        <span className="text-xs font-semibold text-orange-700 bg-orange-50 border border-orange-200 px-2.5 py-1 rounded-full whitespace-nowrap">
+          {banksLabel(connections.length)}
+        </span>
       </div>
 
-      <div className="bg-gray-50 rounded-lg p-2">
-        {(
-          connections.map(c => {
-            const expired = c.status === 'expired'
-            return (
-              <div key={c.id} className="flex items-center gap-3 bg-white border border-gray-200 rounded-lg p-3 mb-2 last:mb-0">
-                <BankLogo src={c.provider_logo} name={c.provider_name} />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold text-gray-900">{c.provider_name}</div>
-                  <div className={`text-xs ${expired ? 'text-amber-700' : c.last_error ? 'text-red-600' : 'text-gray-500'}`}>
-                    {expired
-                      ? 'Термін доступу (90 днів) сплив — підключіть знову'
-                      : c.last_error
-                      ? 'Помилка останньої синхронізації'
-                      : [c.last_sync_at ? `Синхронізовано ${timeAgo(c.last_sync_at)}` : 'Ще не синхронізовано',
-                          c.accounts?.length ? `рахунків: ${c.accounts.length}` : null].filter(Boolean).join(' · ')}
-                  </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {connections.map(c => {
+          const expired = c.status === 'expired'
+          const hasError = !expired && !!c.last_error
+          const busy = busyId === c.id
+          return (
+            <div
+              key={c.id}
+              className={`relative flex items-center gap-3 rounded-xl border p-3 pl-4 transition-colors ${
+                expired
+                  ? 'border-amber-300 bg-amber-50/60'
+                  : hasError
+                  ? 'border-red-200 bg-red-50/50'
+                  : 'border-gray-200 bg-gray-50/70 hover:border-orange-300 hover:bg-orange-50/40'
+              }`}
+            >
+              {/* Status accent on the left edge */}
+              <span
+                className={`absolute left-0 top-3 bottom-3 w-1 rounded-r ${
+                  expired ? 'bg-amber-400' : hasError ? 'bg-red-400' : 'bg-green-500'
+                }`}
+              />
+              <BankLogo src={c.provider_logo} name={c.provider_name} />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-gray-900 truncate">{c.provider_name}</div>
+                <div className={`text-xs truncate ${expired ? 'text-amber-700' : hasError ? 'text-red-600' : 'text-gray-500'}`}>
+                  {expired
+                    ? 'Доступ (90 днів) сплив'
+                    : hasError
+                    ? 'Помилка синхронізації'
+                    : [c.last_sync_at ? `Синхр. ${timeAgo(c.last_sync_at)}` : 'Ще не синхронізовано',
+                        c.accounts?.length ? `рахунків: ${c.accounts.length}` : null].filter(Boolean).join(' · ')}
                 </div>
-                {expired ? (
-                  <button
-                    type="button"
-                    disabled={busyId === c.id}
-                    onClick={() => reconnect(c)}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold rounded-md"
-                  >
-                    <AlertTriangle size={14} />
-                    Підключити знову
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={busyId === c.id}
-                    onClick={() => syncOne(c)}
-                    title="Синхронізувати"
-                    className="p-2 rounded-md text-gray-600 hover:bg-gray-100 disabled:opacity-50"
-                  >
-                    <RefreshCw size={16} className={busyId === c.id ? 'animate-spin' : ''} />
-                  </button>
-                )}
+              </div>
+
+              {expired ? (
                 <button
                   type="button"
-                  disabled={busyId === c.id}
-                  onClick={() => setToDisconnect(c)}
-                  title="Відключити"
-                  className="p-2 rounded-md text-red-500 hover:bg-red-50 disabled:opacity-50"
+                  disabled={busy}
+                  onClick={() => reconnect(c)}
+                  title="Підключити знову"
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold rounded-lg shadow-sm disabled:opacity-60"
                 >
-                  <Unplug size={16} />
+                  <AlertTriangle size={13} />
+                  Знову
                 </button>
-              </div>
-            )
-          })
-        )}
+              ) : (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => syncOne(c)}
+                  title="Синхронізувати"
+                  className="p-2 rounded-lg text-gray-600 bg-white border border-gray-200 hover:border-orange-300 hover:text-orange-600 disabled:opacity-50 transition-colors"
+                >
+                  <RefreshCw size={15} className={busy ? 'animate-spin' : ''} />
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setToDisconnect(c)}
+                title="Відключити"
+                className="p-2 rounded-lg text-gray-400 bg-white border border-gray-200 hover:border-red-300 hover:text-red-500 disabled:opacity-50 transition-colors"
+              >
+                <Unplug size={15} />
+              </button>
+            </div>
+          )
+        })}
       </div>
 
       <ConfirmModal
