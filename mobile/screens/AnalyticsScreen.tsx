@@ -277,7 +277,7 @@ export default function AnalyticsScreen() {
 
       <View style={{ height: 120 }} />
     </Animated.ScrollView>
-    <PullToRefreshIndicator scrollY={pullY} refreshing={refreshing} />
+    <PullToRefreshIndicator scrollY={pullY} refreshing={refreshing} top={Platform.OS === 'ios' ? 60 : 40} />
     </View>
   )
 }

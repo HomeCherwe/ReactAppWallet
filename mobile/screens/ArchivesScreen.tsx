@@ -32,6 +32,8 @@ export default function ArchivesScreen() {
 
   const [refreshing, setRefreshing] = useState(false)
   const pullY = useRef(new Animated.Value(0)).current
+  // Where the list starts (under the header): the pull indicator comes out from there
+  const [listTop, setListTop] = useState(0)
 
   const fetchArchived = useCallback(async (pulled = false) => {
     if (!pulled) setLoading(true)
@@ -105,6 +107,7 @@ export default function ArchivesScreen() {
         <View style={styles.centered}><ActivityIndicator color={Colors.orange} size="large" /></View>
       ) : (
         <Animated.FlatList
+          onLayout={e => setListTop(e.nativeEvent.layout.y)}
           onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: pullY } } }], { useNativeDriver: true })}
           scrollEventThrottle={16}
           data={rows}
@@ -160,7 +163,7 @@ export default function ArchivesScreen() {
         />
       )}
 
-      <PullToRefreshIndicator scrollY={pullY} refreshing={refreshing} />
+      <PullToRefreshIndicator scrollY={pullY} refreshing={refreshing} top={listTop} />
     </View>
   )
 }

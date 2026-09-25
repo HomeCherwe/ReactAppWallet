@@ -34,6 +34,8 @@ export default function CardsScreen() {
   const [addAccountVisible, setAddAccountVisible] = useState(false)
   const [banksReloadKey, setBanksReloadKey] = useState(0)
   const pullY = useRef(new Animated.Value(0)).current
+  // Where the list starts (under the header): the pull indicator comes out from there
+  const [listTop, setListTop] = useState(0)
   // No scrolling while a long-press menu is open (the finger slides over the menu instead)
   const menuOpen = useMenuOverlay(s => !!s.menu)
   const [cardTxCard, setCardTxCard] = useState<Card | null>(null)
@@ -215,6 +217,7 @@ export default function CardsScreen() {
         </View>
       ) : (
         <Animated.FlatList
+          onLayout={e => setListTop(e.nativeEvent.layout.y)}
           onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: pullY } } }], { useNativeDriver: true })}
           scrollEventThrottle={16}
           scrollEnabled={!menuOpen}
@@ -309,7 +312,7 @@ export default function CardsScreen() {
         onChanged={what => (what === 'bank' ? setBanksReloadKey(k => k + 1) : loadData())}
       />
 
-      <PullToRefreshIndicator scrollY={pullY} refreshing={refreshing} />
+      <PullToRefreshIndicator scrollY={pullY} refreshing={refreshing} top={listTop} />
     </View>
   )
 }

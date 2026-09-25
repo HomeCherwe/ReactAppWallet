@@ -705,7 +705,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
                   )})}
                 </Animated.ScrollView>
 
-      <PullToRefreshIndicator scrollY={scrollY} refreshing={refreshing} />
+      <PullToRefreshIndicator scrollY={scrollY} refreshing={refreshing} top={Platform.OS === 'ios' ? 60 : 40} />
                 <View style={styles.statsDots}>
                   {recentMonthsStats.map((_, i) => {
                     const width_ = statsScrollX.interpolate({

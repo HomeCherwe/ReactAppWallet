@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Animated, Easing, Platform, StyleSheet, Text, View } from 'react-native'
-import { initialWindowMetrics } from 'react-native-safe-area-context'
+import { ActivityIndicator, Animated, Easing, StyleSheet, Text, View } from 'react-native'
 import { Colors } from '../constants/theme'
 import { triggerLightHaptic, triggerSuccessHaptic } from '../utils/haptics'
 import { GlassSurface } from './LiquidGlass'
@@ -8,17 +7,29 @@ import Icon from './Icon'
 
 // Pull further than this (px) and release to refresh (matches iOS RefreshControl)
 const THRESHOLD = 72
-const DONE_VISIBLE_MS = 1100
-const TOP = (Platform.OS === 'ios' ? initialWindowMetrics?.insets.top ?? 47 : 24) + 6
+const DONE_VISIBLE_MS = 700
+const PILL_H = 36
+// Gap between the pill and the content it sits above
+const PILL_GAP = 10
 
 type Phase = 'idle' | 'pull' | 'release' | 'refreshing' | 'done'
 
 /**
- * Pull-to-refresh status pill at the top of the screen (the native spinner is hidden):
- * "Потягніть…" → "Відпустіть…" past the threshold → "Оновлюємо…" → "Оновлено".
- * `scrollY` is the list's contentOffset.y (negative while pulling).
+ * Pull-to-refresh status pill (the native spinner is hidden), like Telegram: it comes out of the
+ * gap that opens above the content and moves with it — "Потягніть…" → "Відпустіть…" past the
+ * threshold → "Оновлюємо…" while the content stays pulled down → hides as it springs back.
+ * `scrollY` is the list's contentOffset.y (negative while pulling); `top` is where the list's
+ * content starts on screen.
  */
-export default function PullToRefreshIndicator({ scrollY, refreshing }: { scrollY: Animated.Value; refreshing: boolean }) {
+export default function PullToRefreshIndicator({
+  scrollY,
+  refreshing,
+  top = 0,
+}: {
+  scrollY: Animated.Value
+  refreshing: boolean
+  top?: number
+}) {
   const [phase, setPhase] = useState<Phase>('idle')
   const phaseRef = useRef<Phase>('idle')
   const status = useRef(new Animated.Value(0)).current // 1 while refreshing / done
@@ -71,25 +82,27 @@ export default function PullToRefreshIndicator({ scrollY, refreshing }: { scroll
     extrapolate: 'clamp',
   })
   const pullOpacity = scrollY.interpolate({ inputRange: [-40, -8, 0], outputRange: [1, 0, 0], extrapolate: 'clamp' })
-  const pullTranslate = scrollY.interpolate({ inputRange: [-THRESHOLD, 0], outputRange: [0, -16], extrapolate: 'clamp' })
-  const pullScale = scrollY.interpolate({ inputRange: [-THRESHOLD - 20, -THRESHOLD, 0], outputRange: [1.05, 1, 0.9], extrapolate: 'clamp' })
+  // Rides the top of the content: sits in the opened gap, just above it
+  const follow = scrollY.interpolate({
+    inputRange: [-400, 0],
+    outputRange: [400 - PILL_H - PILL_GAP, -PILL_H - PILL_GAP],
+    extrapolate: 'clamp',
+  })
+  const pullScale = scrollY.interpolate({ inputRange: [-THRESHOLD - 20, -THRESHOLD, 0], outputRange: [1.05, 1, 0.85], extrapolate: 'clamp' })
 
   const busy = phase === 'refreshing' || phase === 'done'
   if (phase === 'idle') return null
 
   return (
-    <View style={styles.wrap} pointerEvents="none">
+    <View style={[styles.wrap, { top }]} pointerEvents="none">
       <Animated.View
         style={[
           styles.pill,
           phase === 'release' && styles.pillReady,
           phase === 'done' && styles.pillDone,
           busy
-            ? {
-                opacity: status,
-                transform: [{ translateY: status.interpolate({ inputRange: [0, 1], outputRange: [-16, 0] }) }, { scale: 1 }],
-              }
-            : { opacity: pullOpacity, transform: [{ translateY: pullTranslate }, { scale: pullScale }] },
+            ? { opacity: status, transform: [{ translateY: follow }] }
+            : { opacity: pullOpacity, transform: [{ translateY: follow }, { scale: pullScale }] },
         ]}
       >
         <GlassSurface borderRadius={20} />
@@ -117,11 +130,13 @@ export default function PullToRefreshIndicator({ scrollY, refreshing }: { scroll
 }
 
 const styles = StyleSheet.create({
+  // Clips the pill to the list area, so it slides out from under the content's top edge
   wrap: {
     position: 'absolute',
-    top: TOP,
     left: 0,
     right: 0,
+    height: 260,
+    overflow: 'hidden',
     alignItems: 'center',
     zIndex: 50,
   },
@@ -130,7 +145,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     paddingHorizontal: 14,
-    height: 36,
+    height: PILL_H,
     borderRadius: 20,
     overflow: 'hidden',
     backgroundColor: 'rgba(30, 30, 34, 0.75)',
