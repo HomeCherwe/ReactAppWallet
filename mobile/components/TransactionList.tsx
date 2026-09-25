@@ -83,6 +83,9 @@ interface TransactionListProps {
   onUnlinkRefund?: (refund: Transaction) => Promise<void>
   pinned?: Transaction[]
   pinnedCategories?: string[]
+  /** Refund picking is controlled by the screen, which shows the floating hint bar */
+  refundFor: Transaction | null
+  onRefundForChange: (tx: Transaction | null) => void
 }
 
 export default React.memo(TransactionList)
@@ -105,6 +108,8 @@ function TransactionList({
   onUnlinkRefund,
   pinned = [],
   pinnedCategories = [],
+  refundFor,
+  onRefundForChange,
 }: TransactionListProps) {
   // ---- Pinned section: collapsible, remembered between launches ----
   const [pinnedCollapsed, setPinnedCollapsed] = useState(false)
@@ -129,8 +134,27 @@ function TransactionList({
   const chevronRotate = chevron.interpolate({ inputRange: [0, 1], outputRange: ['-90deg', '0deg'] })
 
   // ---- Refund picking (like the web): swipe an expense → "Повернення" → tap the income ----
-  const [refundFor, setRefundFor] = useState<Transaction | null>(null)
+  const setRefundFor = (tx: Transaction | null) => onRefundForChange(tx)
   const [linking, setLinking] = useState(false)
+
+  // Pickable rows jiggle while picking (one shared native-driven value)
+  const wiggle = useRef(new Animated.Value(0)).current
+  useEffect(() => {
+    if (!refundFor) {
+      wiggle.stopAnimation()
+      wiggle.setValue(0)
+      return
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(wiggle, { toValue: 1, duration: 110, useNativeDriver: true }),
+        Animated.timing(wiggle, { toValue: -1, duration: 220, useNativeDriver: true }),
+        Animated.timing(wiggle, { toValue: 0, duration: 110, useNativeDriver: true }),
+      ])
+    )
+    loop.start()
+    return () => loop.stop()
+  }, [refundFor])
 
   const cancelRefundPick = useCallback(() => {
     smoothLayout()
@@ -280,7 +304,6 @@ function TransactionList({
   }, [regular, cardsById])
 
   const mask = (s: string) => (hidden ? '••••' : s)
-  const hasPickable = !!refundFor && transactions.some(canBeRefund)
 
   return (
     <View style={styles.card}>
@@ -288,28 +311,6 @@ function TransactionList({
         <Text style={styles.title}>Транзакції</Text>
         <BankSyncIndicator />
       </View>
-
-      {refundFor && (
-        <View style={styles.pickBanner}>
-          <View style={styles.pickIcon}>
-            <Text style={styles.pickIconText}>↩︎</Text>
-          </View>
-          <View style={styles.pickTextWrap}>
-            <Text style={styles.pickTitle}>Оберіть дохід-повернення</Text>
-            <Text style={styles.pickSub} numberOfLines={2}>
-              для «{txDisplayTitle(refundFor)}» · {mask(`−${fmtMoney(Number(refundFor.amount), refundFor.currency || (refundFor.card_id ? cardsById[refundFor.card_id]?.currency : undefined))}`)}
-              {!hasPickable ? '\nДоходів у списку немає — прокрутіть нижче' : ''}
-            </Text>
-          </View>
-          {linking ? (
-            <ActivityIndicator color={Colors.orange} />
-          ) : (
-            <Pressable onPress={cancelRefundPick} hitSlop={8} style={styles.pickCancel}>
-              <Text style={styles.pickCancelText}>Скасувати</Text>
-            </Pressable>
-          )}
-        </View>
-      )}
 
       {!loading && pinned.length > 0 && (
         <View style={styles.pinnedWrap}>
@@ -338,6 +339,8 @@ function TransactionList({
                 showDate
                 last={i === pinned.length - 1}
                 mode={modeFor(tx)}
+                wiggle={wiggle}
+                wiggleDir={i % 2 ? 1 : -1}
                 onPress={handlePress}
                 onLongPress={onLongPressTx}
                 {...swipeProps}
@@ -408,6 +411,8 @@ function TransactionList({
                   hidden={hidden}
                   last={i === group.items.length - 1}
                   mode={modeFor(tx)}
+                  wiggle={wiggle}
+                  wiggleDir={i % 2 ? 1 : -1}
                   onPress={handlePress}
                   onLongPress={onLongPressTx}
                   {...swipeProps}

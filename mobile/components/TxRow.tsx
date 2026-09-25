@@ -6,6 +6,8 @@ import { Card } from '../api/cards'
 import { getCategoryIcon } from '../utils/categoryIcon'
 import { txDisplayTitle } from '../utils/pinned'
 import { triggerLightHaptic } from '../utils/haptics'
+import { LinearGradient } from 'expo-linear-gradient'
+import Icon from './Icon'
 
 const CURRENCY_SYMBOLS: Record<string, string> = { UAH: '₴', USD: '$', EUR: '€', GBP: '£', PLN: 'zł' }
 
@@ -18,8 +20,9 @@ export function fmtMoney(amount: number, currency?: string): string {
   return `${abs} ${CURRENCY_SYMBOLS[currency] ?? currency}`
 }
 
-const ACTION_W = 78
-const ACTIONS_W = ACTION_W * 2
+const ACTION_W = 72
+const ACTION_GAP = 8
+const ACTIONS_W = ACTION_W * 2 + ACTION_GAP * 3
 
 // Only one row is open at a time: opening another closes the previous one
 let closeOpenRow: (() => void) | null = null
@@ -43,6 +46,10 @@ interface TxRowProps {
   onLongPress?: (tx: Transaction) => void
   onRefund?: (tx: Transaction) => void
   onDelete?: (tx: Transaction) => void
+  /** Refund picking: shared -1…1 driver that makes pickable rows jiggle (like iOS edit mode) */
+  wiggle?: Animated.Value
+  /** Alternate direction per row so the list doesn't sway as one block */
+  wiggleDir?: 1 | -1
 }
 
 /**
@@ -62,6 +69,8 @@ function TxRow({
   onLongPress,
   onRefund,
   onDelete,
+  wiggle,
+  wiggleDir = 1,
 }: TxRowProps) {
   const x = useRef(new Animated.Value(0)).current
   const openRef = useRef(false)
@@ -155,37 +164,61 @@ function TxRow({
     onPress?.(tx)
   }
 
-  // Actions fade in as the row slides
-  const actionsOpacity = x.interpolate({ inputRange: [-ACTIONS_W, -24, 0], outputRange: [1, 0.4, 0], extrapolate: 'clamp' })
+  // Buttons grow in one after another as the row slides
+  const btnAnim = (from: number) => ({
+    opacity: x.interpolate({ inputRange: [-ACTIONS_W, -from, 0], outputRange: [1, 0, 0], extrapolate: 'clamp' }),
+    transform: [{ scale: x.interpolate({ inputRange: [-ACTIONS_W, -from, 0], outputRange: [1, 0.6, 0.6], extrapolate: 'clamp' }) }],
+  })
+
+  const jiggle =
+    mode === 'pickable' && wiggle
+      ? [{ rotate: wiggle.interpolate({ inputRange: [-1, 1], outputRange: wiggleDir === 1 ? ['-0.45deg', '0.45deg'] : ['0.45deg', '-0.45deg'] }) }]
+      : []
 
   return (
     <View style={styles.wrap}>
       {canSwipe && (
-        <Animated.View style={[styles.actions, { opacity: actionsOpacity }]}>
-          <Pressable
-            onPress={() => {
-              close()
-              onRefund?.(tx)
-            }}
-            style={({ pressed }) => [styles.action, styles.actionRefund, pressed && styles.actionPressed]}
-          >
-            <Text style={styles.actionIcon}>{isRefund ? '⤺' : '↩︎'}</Text>
-            <Text style={styles.actionText}>{isRefund ? 'Скасувати' : 'Повернення'}</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => {
-              close()
-              onDelete?.(tx)
-            }}
-            style={({ pressed }) => [styles.action, styles.actionDelete, pressed && styles.actionPressed]}
-          >
-            <Text style={styles.actionIcon}>🗑</Text>
-            <Text style={styles.actionText}>Видалити</Text>
-          </Pressable>
-        </Animated.View>
+        <View style={styles.actions}>
+          <Animated.View style={[styles.actionSlot, btnAnim(ACTION_W * 0.9)]}>
+            <Pressable
+              onPress={() => {
+                close()
+                onRefund?.(tx)
+              }}
+              style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}
+            >
+              <LinearGradient
+                colors={isRefund ? ['#5B5B66', '#3A3A44'] : ['#FF8A2A', '#FF5A00']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={StyleSheet.absoluteFill}
+              />
+              <Icon name={isRefund ? 'close' : 'undo'} size={20} color="#fff" strokeWidth={2.4} />
+              <Text style={styles.actionText}>{isRefund ? 'Скасувати' : 'Повернення'}</Text>
+            </Pressable>
+          </Animated.View>
+          <Animated.View style={[styles.actionSlot, btnAnim(ACTION_W * 0.3)]}>
+            <Pressable
+              onPress={() => {
+                close()
+                onDelete?.(tx)
+              }}
+              style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}
+            >
+              <LinearGradient
+                colors={['#FF5F5F', '#D92D3A']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={StyleSheet.absoluteFill}
+              />
+              <Icon name="trash" size={20} color="#fff" strokeWidth={2.2} />
+              <Text style={styles.actionText}>Видалити</Text>
+            </Pressable>
+          </Animated.View>
+        </View>
       )}
 
-      <Animated.View style={{ transform: [{ translateX: x }] }} {...(canSwipe ? pan.panHandlers : {})}>
+      <Animated.View style={{ transform: [{ translateX: x }, ...jiggle] }} {...(canSwipe ? pan.panHandlers : {})}>
         <Pressable
           onPress={handlePress}
           onLongPress={mode === 'normal' ? () => onLongPress?.(tx) : undefined}
@@ -216,7 +249,18 @@ function TxRow({
               <Text style={[styles.amount, isIncome && styles.amountGreen, tx.exclude_from_stats && styles.amountMuted]}>
                 {hidden ? '••••' : `${isIncome ? '+' : '−'}${fmtMoney(amount, currency)}`}
               </Text>
-              {mode === 'pickable' && <Text style={styles.pickHint}>Обрати</Text>}
+              {mode === 'pickable' && (
+                <View style={styles.pickPill}>
+                  <Icon name="plus" size={12} color="#0B2E17" strokeWidth={3} />
+                  <Text style={styles.pickPillText}>Обрати</Text>
+                </View>
+              )}
+              {mode === 'target' && (
+                <View style={styles.targetPill}>
+                  <Icon name="undo" size={12} color="#fff" strokeWidth={2.6} />
+                  <Text style={styles.targetPillText}>Повертаємо</Text>
+                </View>
+              )}
             </View>
           </View>
         </Pressable>
@@ -239,30 +283,32 @@ const styles = StyleSheet.create({
     right: 0,
     width: ACTIONS_W,
     flexDirection: 'row',
+    alignItems: 'stretch',
+    paddingVertical: 6,
+    paddingHorizontal: ACTION_GAP / 2,
+    gap: ACTION_GAP,
+    paddingRight: ACTION_GAP,
+  },
+  actionSlot: {
+    width: ACTION_W,
   },
   action: {
-    width: ACTION_W,
+    flex: 1,
+    borderRadius: 16,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 3,
-  },
-  actionRefund: {
-    backgroundColor: '#FF7A1A',
-  },
-  actionDelete: {
-    backgroundColor: '#E5484D',
+    gap: 4,
   },
   actionPressed: {
     opacity: 0.8,
-  },
-  actionIcon: {
-    fontSize: 17,
-    color: Colors.white,
+    transform: [{ scale: 0.96 }],
   },
   actionText: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '800',
     color: Colors.white,
+    letterSpacing: 0.1,
   },
   item: {
     flexDirection: 'row',
@@ -275,13 +321,46 @@ const styles = StyleSheet.create({
     backgroundColor: '#1C1C1F',
   },
   itemPickable: {
-    backgroundColor: 'rgba(34, 197, 94, 0.07)',
+    backgroundColor: '#15201A',
   },
   itemTarget: {
-    backgroundColor: 'rgba(255, 107, 0, 0.10)',
+    backgroundColor: '#2A1709',
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.orange,
+    paddingLeft: 13,
   },
   itemDimmed: {
-    opacity: 0.35,
+    opacity: 0.28,
+  },
+  pickPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    marginTop: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 100,
+    backgroundColor: Colors.green,
+  },
+  pickPillText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#0B2E17',
+  },
+  targetPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    marginTop: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 100,
+    backgroundColor: Colors.orange,
+  },
+  targetPillText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: Colors.white,
   },
   iconWrap: {
     width: 40,

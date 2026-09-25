@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native'
 import Toast from 'react-native-toast-message'
 import { Colors } from '../constants/theme'
 import {
@@ -16,7 +16,7 @@ import { triggerErrorHaptic, triggerLightHaptic, triggerMediumHaptic, triggerSuc
 import { Card } from '../api/cards'
 import BankLogo from './BankLogo'
 import BankAccountsSheet from './BankAccountsSheet'
-import NativeContextMenu, { ContextAction } from './NativeContextMenu'
+import GlassContextMenu, { MenuAction } from './GlassContextMenu'
 
 // Time for a sheet to finish closing before the next thing is presented (iOS)
 const SHEET_SWAP_DELAY_MS = 380
@@ -187,24 +187,13 @@ export default function ConnectedBanks({
     )
   }
 
-  const openActions = (c: BankConnection) => {
-    triggerMediumHaptic()
-    Alert.alert(c.provider_name, statusLine(c).text, [
-      c.status === 'expired'
-        ? { text: 'Підключити знову', onPress: () => reconnect(c) }
-        : { text: 'Синхронізувати зараз', onPress: () => syncOne(c) },
-      { text: 'Відключити', style: 'destructive', onPress: () => disconnect(c) },
-      { text: 'Закрити', style: 'cancel' },
-    ])
-  }
-
-  // iOS long press: the system context menu with these actions
-  const menuActions = (c: BankConnection): ContextAction[] => [
-    { label: 'Рахунки банку', systemImage: 'list.bullet', onPress: () => setOpenId(c.id) },
+  // Long press: glass menu with these actions
+  const menuActions = (c: BankConnection): MenuAction[] => [
+    { label: 'Рахунки банку', icon: 'list', onPress: () => setOpenId(c.id) },
     c.status === 'expired'
-      ? { label: 'Підключити знову', systemImage: 'key.fill', onPress: () => reconnect(c) }
-      : { label: 'Синхронізувати зараз', systemImage: 'arrow.triangle.2.circlepath', onPress: () => syncOne(c) },
-    { label: 'Відключити', systemImage: 'bolt.horizontal.circle', destructive: true, onPress: () => disconnect(c) },
+      ? { label: 'Підключити знову', icon: 'key', onPress: () => reconnect(c) }
+      : { label: 'Синхронізувати зараз', icon: 'sync', onPress: () => syncOne(c) },
+    { label: 'Відключити', icon: 'unplug', destructive: true, onPress: () => disconnect(c) },
   ]
 
   const opened = connections?.find(c => c.id === openId) ?? null
@@ -219,16 +208,16 @@ export default function ConnectedBanks({
       {connections.map((c, i) => {
           const status = statusLine(c)
           return (
-            <NativeContextMenu key={c.id} actions={menuActions(c)}>
-            <Pressable
+            <GlassContextMenu
+              key={c.id}
+              actions={menuActions(c)}
+              title={c.provider_name}
+              subtitle={status.text}
               onPress={() => {
                 triggerLightHaptic()
                 setOpenId(c.id)
               }}
-              // Other platforms: the same actions as an alert
-              onLongPress={Platform.OS === 'ios' ? undefined : () => openActions(c)}
-              delayLongPress={380}
-              style={({ pressed }) => [styles.row, i > 0 && styles.rowBorder, pressed && styles.rowPressed]}
+              style={[styles.row, i > 0 && styles.rowBorder]}
             >
               <BankLogo uri={c.provider_logo} name={c.provider_name} size={38} />
               <View style={styles.rowText}>
@@ -243,8 +232,7 @@ export default function ConnectedBanks({
                   <Text style={styles.chevron}>›</Text>
                 </View>
               )}
-            </Pressable>
-            </NativeContextMenu>
+            </GlassContextMenu>
           )
         })}
       </View>

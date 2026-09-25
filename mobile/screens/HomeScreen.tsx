@@ -42,6 +42,7 @@ import GlassButton from '../components/GlassButton'
 import SettingsModal from '../components/SettingsModal'
 import { useSettingsStore } from '../store/useSettingsStore'
 import FloatingActionButton from '../components/FloatingActionButton'
+import RefundPickBar from '../components/RefundPickBar'
 import QuickActionPopup from '../components/QuickActionPopup'
 import AddTransactionModal from '../components/AddTransactionModal'
 import AddAccountFlow from '../components/AddAccountFlow'
@@ -129,6 +130,8 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
   const excludedKey = excludedCardIds.join(',')
   const [settingsCard, setSettingsCard] = useState<Card | null>(null)
   const [cardTxCard, setCardTxCard] = useState<Card | null>(null)
+  // Refund picking (swipe an expense → "Повернення"): the list highlights incomes, the bar explains
+  const [refundFor, setRefundFor] = useState<Transaction | null>(null)
   const [balances, setBalances] = useState<Record<string, number>>({})
   const [totals, setTotals] = useState<TotalsData>({ cash: {}, cards: {}, savings: {} })
   const [rates, setRates] = useState<RatesMap | null>(null)
@@ -413,12 +416,6 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
     [primaryCurrency]
   )
 
-  const headerBgOpacity = scrollY.interpolate({
-    inputRange: [0, 60],
-    outputRange: [0, 1],
-    extrapolate: 'clamp',
-  })
-
   const getBucketLabel = () => {
     switch (bucketTab) {
       case 'all': return 'Загальний баланс'
@@ -483,13 +480,6 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
       <View style={styles.glowTopRight} pointerEvents="none" />
       <View style={styles.glowMidLeft} pointerEvents="none" />
       <View style={styles.glowBottomDock} pointerEvents="none" />
-
-      {/* Floating header blur */}
-      <Animated.View style={[styles.floatingHeader, { opacity: headerBgOpacity }]} pointerEvents="none">
-        <BlurView intensity={75} tint="dark" style={StyleSheet.absoluteFill} />
-        <GlassView style={StyleSheet.absoluteFill} glassEffectStyle="regular" colorScheme="dark" />
-        <View style={styles.floatingHeaderBorder} />
-      </Animated.View>
 
       {/* Scroll */}
       <Animated.ScrollView
@@ -777,6 +767,8 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
             onDeleteTx={handleDeleteTx}
             onLinkRefund={handleLinkRefund}
             onUnlinkRefund={handleUnlinkRefund}
+            refundFor={refundFor}
+            onRefundForChange={setRefundFor}
             pinned={pinned.items}
             pinnedCategories={pinnedCategories}
           />
@@ -785,15 +777,22 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         <View style={{ height: 110 }} />
       </Animated.ScrollView>
 
-      {/* Floating Plus button */}
-      <FloatingActionButton
+      <RefundPickBar
+        expense={refundFor}
+        currency={refundFor ? refundFor.currency || cards.find(c => c.id === refundFor.card_id)?.currency : undefined}
+        hidden={hideBalances}
+        onCancel={() => setRefundFor(null)}
+      />
+
+      {/* Floating Plus button (hidden while picking a refund — the bar takes that spot) */}
+      {!refundFor && <FloatingActionButton
         onPress={() => setAddTxVisible(true)}
         onAddCard={() => setAddCardVisible(true)}
         onTransfer={() => setTransferVisible(true)}
         onAddGoal={() => setAddCardVisible(true)}
         onLongPress={() => setQuickActionPopupVisible(true)}
         onLongPressFallback={() => setQuickActionPopupVisible(true)}
-      />
+      />}
 
       {/* Modals */}
       <QuickActionPopup
@@ -944,14 +943,6 @@ const styles = StyleSheet.create({
   glowBottomDock: {
     position: 'absolute', width: 360, height: 180, borderRadius: 90,
     backgroundColor: 'rgba(255, 107, 0, 0.26)', bottom: -10, alignSelf: 'center',
-  },
-  floatingHeader: {
-    position: 'absolute', top: 0, left: 0, right: 0,
-    height: Platform.OS === 'ios' ? 90 : 70, zIndex: 100, overflow: 'hidden',
-  },
-  floatingHeaderBorder: {
-    position: 'absolute', bottom: 0, left: 0, right: 0, height: 1,
-    backgroundColor: Colors.glassBorder,
   },
   scroll: {
     paddingTop: Platform.OS === 'ios' ? 60 : 44,
