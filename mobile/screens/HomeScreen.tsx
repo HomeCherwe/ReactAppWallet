@@ -25,6 +25,7 @@ import {
   EXCLUDED_CARDS_PATH,
   excludedIdsOf,
   getLegacyExcludedIds,
+  isSyncCategory,
   migrateLegacyExclusions,
   useExcludedCardIds,
 } from '../utils/cardExclusion'
@@ -43,7 +44,8 @@ import { useSettingsStore } from '../store/useSettingsStore'
 import FloatingActionButton from '../components/FloatingActionButton'
 import QuickActionPopup from '../components/QuickActionPopup'
 import AddTransactionModal from '../components/AddTransactionModal'
-import AddCardModal from '../components/AddCardModal'
+import AddAccountFlow from '../components/AddAccountFlow'
+import CardTransactionsSheet from '../components/CardTransactionsSheet'
 import DetailsModal from '../components/DetailsModal'
 import EditTxModal from '../components/EditTxModal'
 import TransferModal from '../components/TransferModal'
@@ -126,6 +128,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
   const excludedCardIds = useExcludedCardIds(cards)
   const excludedKey = excludedCardIds.join(',')
   const [settingsCard, setSettingsCard] = useState<Card | null>(null)
+  const [cardTxCard, setCardTxCard] = useState<Card | null>(null)
   const [balances, setBalances] = useState<Record<string, number>>({})
   const [totals, setTotals] = useState<TotalsData>({ cash: {}, cards: {}, savings: {} })
   const [rates, setRates] = useState<RatesMap | null>(null)
@@ -313,9 +316,10 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
     [cards, showFavoritesOnly, favoriteCardIds]
   )
 
+  // Tap on a card: its transactions (settings are one tap away in that sheet)
   const handlePressCard = useCallback((card: Card) => {
     triggerLightHaptic()
-    setSettingsCard(card)
+    setCardTxCard(card)
   }, [])
 
   // Card settings switch: update the UI immediately, save to cards.exclude_from_stats,
@@ -342,11 +346,20 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
     try {
       const updated = await togglePin(tx)
       if (!updated) {
-        Toast.show({
-          type: 'info',
-          text1: 'Закріплено через категорію',
-          text2: `«${tx.category}» — змінюється в налаштуваннях`,
-        })
+        Toast.show(
+          tx.category && isSyncCategory(tx.category)
+            ? {
+                type: 'info',
+                text1: 'Чекає на категорію',
+                text2: 'Відкрийте транзакцію й оберіть категорію — вона перейде в загальний список',
+                visibilityTime: 4500,
+              }
+            : {
+                type: 'info',
+                text1: 'Закріплено через категорію',
+                text2: `«${tx.category}» — змінюється в налаштуваннях`,
+              }
+        )
         return
       }
       const nowPinned = hasPinTag(updated.note)
@@ -809,11 +822,24 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         onSuccess={onRefresh}
       />
 
-      <AddCardModal
+      {/* "+" → Додати рахунок: same flow as the cards screen (bank with sync or own account) */}
+      <AddAccountFlow
         visible={addCardVisible}
         onClose={() => setAddCardVisible(false)}
         defaultCurrency={primaryCurrency}
-        onSuccess={onRefresh}
+        onChanged={onRefresh}
+      />
+
+      {/* Tap on a card: its transactions by period, like the web */}
+      <CardTransactionsSheet
+        card={cardTxCard}
+        balance={cardTxCard ? balances[cardTxCard.id] : undefined}
+        hidden={hideBalances}
+        onClose={() => setCardTxCard(null)}
+        onOpenSettings={card => {
+          setCardTxCard(null)
+          setTimeout(() => setSettingsCard(card), SHEET_SWAP_DELAY_MS)
+        }}
       />
 
       <SettingsModal

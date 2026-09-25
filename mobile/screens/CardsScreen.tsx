@@ -7,11 +7,9 @@ import { Colors, Typography, Radius } from '../constants/theme'
 import { listCards, deleteCard, Card } from '../api/cards'
 import { getSumByCard } from '../api/transactions'
 import { fmtAmount } from '../utils/format'
-import AddCardModal from '../components/AddCardModal'
-import AddAccountModal from '../components/AddAccountModal'
+import AddAccountFlow from '../components/AddAccountFlow'
 import ConnectedBanks from '../components/ConnectedBanks'
-import { BankProvider, listBankConnections } from '../api/bankConnections'
-import { syncBanks } from '../store/useBankSyncStore'
+import { BankProvider } from '../api/bankConnections'
 import { txBus } from '../utils/txBus'
 import GlassButton from '../components/GlassButton'
 import { getBucket } from '../utils/currency'
@@ -22,12 +20,9 @@ export default function CardsScreen() {
   const [balances, setBalances] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [addCardVisible, setAddCardVisible] = useState(false)
   // "+ Додати": connect a bank (sync) or add your own account
   const [addAccountVisible, setAddAccountVisible] = useState(false)
   const [banksReloadKey, setBanksReloadKey] = useState(0)
-  const [connectedIds, setConnectedIds] = useState<string[]>([])
-  const [bankCountry, setBankCountry] = useState('fr')
   // Reconnecting a token bank (Monobank): the add sheet opens straight on its token form
   const [tokenReconnect, setTokenReconnect] = useState<BankProvider | null>(null)
 
@@ -69,13 +64,6 @@ export default function CardsScreen() {
   const openAddAccount = () => {
     setTokenReconnect(null)
     setAddAccountVisible(true)
-    // Mark already connected banks in the catalog and start it on the user's country
-    listBankConnections()
-      .then(list => {
-        setConnectedIds(list.filter(c => c.status === 'active').map(c => c.provider_id))
-        if (list[0]?.country) setBankCountry(list[0].country)
-      })
-      .catch(() => {})
   }
 
   const handleDelete = (card: Card) => {
@@ -220,31 +208,14 @@ export default function CardsScreen() {
         />
       )}
 
-      <AddAccountModal
+      <AddAccountFlow
         visible={addAccountVisible}
         onClose={() => {
           setAddAccountVisible(false)
           setTokenReconnect(null)
         }}
         initialProvider={tokenReconnect}
-        connectedProviderIds={connectedIds}
-        defaultCountry={bankCountry}
-        onManual={() => {
-          setAddAccountVisible(false)
-          // Let this sheet finish closing — iOS can't present a new modal while one is dismissing
-          setTimeout(() => setAddCardVisible(true), 350)
-        }}
-        onConnected={() => {
-          setBanksReloadKey(k => k + 1)
-          // First sync (~90 days of history) creates the bank's cards; shown by the indicator on Home
-          syncBanks().catch(() => {})
-        }}
-      />
-
-      <AddCardModal
-        visible={addCardVisible}
-        onClose={() => setAddCardVisible(false)}
-        onSuccess={loadData}
+        onChanged={what => (what === 'bank' ? setBanksReloadKey(k => k + 1) : loadData())}
       />
     </View>
   )

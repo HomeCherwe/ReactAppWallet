@@ -140,6 +140,64 @@ export async function listFeedTransactions({
   return (data || []) as Transaction[]
 }
 
+export interface CardPeriod {
+  cardId: string
+  /** ISO bounds; null = open-ended */
+  start: string | null
+  end: string | null
+}
+
+function cardPeriodQuery(userId: string, columns: string, { cardId, start, end }: CardPeriod) {
+  let q = supabase
+    .from('transactions')
+    .select(columns)
+    .eq('user_id', userId)
+    .eq('card_id', cardId)
+    .not('archives', 'is', true)
+  if (start) q = q.gte('created_at', start)
+  if (end) q = q.lte('created_at', end)
+  return q
+}
+
+/** One page of a card's transactions in a period, newest first (transfers included). */
+export async function listCardTransactions(period: CardPeriod, from: number, to: number): Promise<Transaction[]> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+  const { data, error } = await cardPeriodQuery(user.id, '*', period)
+    .order('created_at', { ascending: false })
+    .range(from, to)
+  if (error) throw error
+  return (data || []) as unknown as Transaction[]
+}
+
+/** Income / expense of a card over the whole period (not just the loaded page). */
+export async function getCardPeriodTotals(
+  period: CardPeriod,
+  includeExcluded: boolean
+): Promise<{ income: number; expense: number; count: number }> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { income: 0, expense: 0, count: 0 }
+  const totals = { income: 0, expense: 0, count: 0 }
+  const PAGE = 1000
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await cardPeriodQuery(user.id, 'amount, amount_stat, exclude_from_stats', period)
+      .order('created_at', { ascending: false })
+      .range(from, from + PAGE - 1)
+    if (error) throw error
+    const rows = (data || []) as unknown as Pick<Transaction, 'amount' | 'amount_stat' | 'exclude_from_stats'>[]
+    for (const t of rows) {
+      totals.count++
+      if (!includeExcluded && t.exclude_from_stats) continue
+      // amount_stat: expense minus its refunds
+      const v = Number(includeExcluded ? t.amount : t.amount_stat ?? t.amount)
+      if (v > 0) totals.income += v
+      else totals.expense += v
+    }
+    if (rows.length < PAGE) break
+  }
+  return totals
+}
+
 /**
  * Pinned transactions (note tag "[pinned]" or a pinned category), newest first.
  * Two plain queries merged client-side — avoids quoting category names inside an `or()` filter.
@@ -163,7 +221,11 @@ export async function listPinnedTransactions({
     return q
   }
 
-  const requests = [base().ilike('note', '%[pinned]%').order('created_at', { ascending: false }).limit(100)]
+  const requests = [
+    base().ilike('note', '%[pinned]%').order('created_at', { ascending: false }).limit(100),
+    // Bank imports not categorized yet ("Revolut Sync", "Monobank Sync", …)
+    base().ilike('category', '%sync').order('created_at', { ascending: false }).limit(100),
+  ]
   const cats = pinnedCategories.filter(c => c && c.trim())
   if (cats.length > 0) {
     requests.push(base().in('category', cats).order('created_at', { ascending: false }).limit(100))

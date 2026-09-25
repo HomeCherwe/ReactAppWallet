@@ -254,9 +254,15 @@ function TransactionList({
     return map
   }, [cards])
 
+  // Pinned ones live only in their section (like the web); they join the list once categorized
+  const regular = useMemo(
+    () => transactions.filter(t => pinStateOf(t, pinnedCategories) === 'none'),
+    [transactions, pinnedCategories]
+  )
+
   const groups = useMemo(() => {
     const out: DayGroup[] = []
-    for (const tx of transactions) {
+    for (const tx of regular) {
       const d = new Date(tx.created_at)
       const key = dayKey(d)
       let g = out[out.length - 1]
@@ -271,7 +277,7 @@ function TransactionList({
       }
     }
     return out
-  }, [transactions, cardsById])
+  }, [regular, cardsById])
 
   const mask = (s: string) => (hidden ? '••••' : s)
   const hasPickable = !!refundFor && transactions.some(canBeRefund)
@@ -362,11 +368,15 @@ function TransactionList({
 
       {loading ? (
         <TransactionRowsSkeleton />
-      ) : transactions.length === 0 ? (
+      ) : regular.length === 0 && (pinned.length === 0 || !hasMore) ? (
         <View style={styles.stateWrap}>
           <Text style={styles.stateEmoji}>{error ? '⚠️' : '🧾'}</Text>
           <Text style={styles.stateText}>
-            {error ? 'Не вдалося завантажити транзакції' : 'Транзакцій поки немає'}
+            {error
+              ? 'Не вдалося завантажити транзакції'
+              : pinned.length > 0
+                ? 'Усі транзакції — у закріплених'
+                : 'Транзакцій поки немає'}
           </Text>
           {error && onRetry && (
             <Pressable onPress={onRetry} style={styles.retryBtn}>
@@ -396,7 +406,6 @@ function TransactionList({
                   tx={tx}
                   card={tx.card_id ? cardsById[tx.card_id] : undefined}
                   hidden={hidden}
-                  isPinned={pinStateOf(tx, pinnedCategories) !== 'none'}
                   last={i === group.items.length - 1}
                   mode={modeFor(tx)}
                   onPress={handlePress}

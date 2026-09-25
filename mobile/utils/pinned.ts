@@ -1,5 +1,8 @@
 // Pinned transactions — same convention as the web app: a "[pinned]" tag in the note,
-// or a category listed in settings (dashboard.pinnedCategories).
+// or a category listed in settings (dashboard.pinnedCategories). Bank imports that still have
+// their "… Sync" category are pinned too: they wait there until you give them a real category.
+
+import { isSyncCategory } from './cardExclusion'
 
 export const PIN_TAG = '[pinned]'
 
@@ -27,7 +30,7 @@ export function pinStateOf(
   pinnedCategories: string[]
 ): PinState {
   if (hasPinTag(tx.note)) return 'tag'
-  if (tx.category && pinnedCategories.includes(tx.category)) return 'category'
+  if (tx.category && (pinnedCategories.includes(tx.category) || isSyncCategory(tx.category))) return 'category'
   return 'none'
 }
 
