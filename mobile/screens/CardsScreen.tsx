@@ -13,6 +13,7 @@ import CardSettingsModal from '../components/CardSettingsModal'
 import ConnectedBanks from '../components/ConnectedBanks'
 import { BankProvider } from '../api/bankConnections'
 import { txBus } from '../utils/txBus'
+import { useMenuOverlay } from '../store/useMenuOverlay'
 import GlassButton from '../components/GlassButton'
 import { getBucket } from '../utils/currency'
 import { GlassPressable } from '../components/LiquidGlass'
@@ -25,6 +26,8 @@ export default function CardsScreen() {
   // "+ Додати": connect a bank (sync) or add your own account
   const [addAccountVisible, setAddAccountVisible] = useState(false)
   const [banksReloadKey, setBanksReloadKey] = useState(0)
+  // No scrolling while a long-press menu is open (the finger slides over the menu instead)
+  const menuOpen = useMenuOverlay(s => !!s.menu)
   const [cardTxCard, setCardTxCard] = useState<Card | null>(null)
   const [settingsCard, setSettingsCard] = useState<Card | null>(null)
   // Reconnecting a token bank (Monobank): the add sheet opens straight on its token form
@@ -171,6 +174,7 @@ export default function CardsScreen() {
         </View>
       ) : (
         <FlatList
+          scrollEnabled={!menuOpen}
           data={[]} // using FlatList just for the refresh control and scroll
           keyExtractor={() => 'dummy'}
           contentContainerStyle={styles.list}

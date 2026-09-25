@@ -7,6 +7,7 @@ import { getCategoryIcon } from '../utils/categoryIcon'
 import { txDisplayTitle } from '../utils/pinned'
 import { triggerLightHaptic } from '../utils/haptics'
 import Icon from './Icon'
+import { menuDragHandlers, useMenuOverlay } from '../store/useMenuOverlay'
 
 const CURRENCY_SYMBOLS: Record<string, string> = { UAH: '₴', USD: '$', EUR: '€', GBP: '£', PLN: 'zł' }
 
@@ -125,6 +126,7 @@ function TxRow({
       // Clearly horizontal drags only, so the page still scrolls vertically
       onMoveShouldSetPanResponder: (_, g) =>
         canSwipeRef.current &&
+        !useMenuOverlay.getState().menu && // the finger is sliding over the long-press menu
         Math.abs(g.dx) > 10 &&
         Math.abs(g.dx) > Math.abs(g.dy) * 1.6 &&
         (g.dx < 0 || openRef.current),
@@ -195,7 +197,7 @@ function TxRow({
       : []
 
   return (
-    <View style={styles.wrap} ref={rowRef}>
+    <View style={styles.wrap} ref={rowRef} {...menuDragHandlers}>
       {canSwipe && (
         <View style={[styles.actions, { width: actionsW }]}>
           {showRefund && (

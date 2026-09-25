@@ -20,3 +20,9 @@ export function triggerErrorHaptic() {
   if (Platform.OS === 'web') return
   Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {})
 }
+
+/** Tick when moving between options (menu items under the finger) */
+export function triggerSelectionHaptic() {
+  if (Platform.OS === 'web') return
+  Haptics.selectionAsync().catch(() => {})
+}

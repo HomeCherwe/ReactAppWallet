@@ -10,7 +10,7 @@ import { triggerErrorHaptic, triggerLightHaptic, triggerMediumHaptic, triggerSuc
 import { TransactionRowsSkeleton } from './Skeleton'
 import BankSyncIndicator from './BankSyncIndicator'
 import TxRow, { RowMode, closeSwipedRow, fmtMoney } from './TxRow'
-import { GlassMenuOverlay, MenuAction, MenuFrame } from './GlassContextMenu'
+import { MenuAction, MenuFrame, openMenu as openMenuOverlay } from '../store/useMenuOverlay'
 import { pinStateOf, txDisplayTitle } from '../utils/pinned'
 
 const PINNED_COLLAPSED_KEY = 'pinned_collapsed'
@@ -272,11 +272,24 @@ function TransactionList({
   )
 
   // ---- Long press: the row lifts and a glass menu offers everything you can do with it ----
-  const [menu, setMenu] = useState<{ tx: Transaction; frame: MenuFrame } | null>(null)
-  const openMenu = useCallback((tx: Transaction, frame: MenuFrame) => {
+  const openMenu = (tx: Transaction, frame: MenuFrame) => {
     closeSwipedRow()
-    setMenu({ tx, frame })
-  }, [])
+    openMenuOverlay({
+      frame,
+      actions: menuActions(tx),
+      previewStyle: styles.menuPreview,
+      preview: (
+        <TxRow
+          tx={tx}
+          card={tx.card_id ? cardsById[tx.card_id] : undefined}
+          hidden={hidden}
+          last
+          swipeEnabled={false}
+          nested={!!tx.refund_for && Number(tx.amount) > 0}
+        />
+      ),
+    })
+  }
 
   const menuActions = (tx: Transaction): MenuAction[] => {
     const out: MenuAction[] = []
@@ -349,24 +362,6 @@ function TransactionList({
         <BankSyncIndicator />
       </View>
 
-      <GlassMenuOverlay
-        frame={menu?.frame ?? null}
-        actions={menu ? menuActions(menu.tx) : []}
-        previewStyle={styles.menuPreview}
-        preview={
-          menu ? (
-            <TxRow
-              tx={menu.tx}
-              card={menu.tx.card_id ? cardsById[menu.tx.card_id] : undefined}
-              hidden={hidden}
-              last
-              swipeEnabled={false}
-              nested={!!menu.tx.refund_for && Number(menu.tx.amount) > 0}
-            />
-          ) : null
-        }
-        onClose={() => setMenu(null)}
-      />
 
       {!loading && pinnedTop.length > 0 && (
         <View style={styles.pinnedWrap}>

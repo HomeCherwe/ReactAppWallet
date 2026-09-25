@@ -43,6 +43,7 @@ import SettingsModal from '../components/SettingsModal'
 import { useSettingsStore } from '../store/useSettingsStore'
 import FloatingActionButton from '../components/FloatingActionButton'
 import RefundPickBar from '../components/RefundPickBar'
+import { useMenuOverlay } from '../store/useMenuOverlay'
 import QuickActionPopup from '../components/QuickActionPopup'
 import AddTransactionModal from '../components/AddTransactionModal'
 import AddAccountFlow from '../components/AddAccountFlow'
@@ -130,6 +131,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
   const [cardTxCard, setCardTxCard] = useState<Card | null>(null)
   // Refund picking (swipe an expense → "Повернення"): the list highlights incomes, the bar explains
   const [refundFor, setRefundFor] = useState<Transaction | null>(null)
+  const menuOpen = useMenuOverlay(s => !!s.menu)
   const [balances, setBalances] = useState<Record<string, number>>({})
   const [totals, setTotals] = useState<TotalsData>({ cash: {}, cards: {}, savings: {} })
   const [rates, setRates] = useState<RatesMap | null>(null)
@@ -483,6 +485,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
 
       {/* Scroll */}
       <Animated.ScrollView
+        scrollEnabled={!menuOpen}
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
         refreshControl={
