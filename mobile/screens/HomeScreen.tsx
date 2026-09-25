@@ -32,6 +32,7 @@ import { setCardExcludedFromStats } from '../api/cards'
 import Skeleton from '../components/Skeleton'
 import RollingNumber from '../components/RollingNumber'
 import { useTransactionFeed } from '../hooks/useTransactionFeed'
+import { txBus } from '../utils/txBus'
 import GlassCard from '../components/GlassCard'
 import GlassButton from '../components/GlassButton'
 import SettingsModal from '../components/SettingsModal'
@@ -203,6 +204,16 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
     loadData()
     refreshTxFeed()
   }
+
+  // Background bank sync (e.g. Revolut on app open) added transactions — reload quietly
+  useEffect(() => {
+    return txBus.subscribe(ev => {
+      if (ev?.type === 'SYNCED') {
+        loadData()
+        refreshTxFeed()
+      }
+    })
+  }, [loadData, refreshTxFeed])
 
   const handleCurrencyChange = async (newCur: string) => {
     setPrimaryCurrency(newCur)

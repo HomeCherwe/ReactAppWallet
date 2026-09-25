@@ -15,6 +15,7 @@ import Toast from 'react-native-toast-message'
 import GlassButton from './GlassButton'
 import { GlassPressable } from './LiquidGlass'
 import SheetModal from './SheetModal'
+import RevolutConnectSection from './RevolutConnectSection'
 
 interface SettingsModalProps {
   visible: boolean
@@ -278,6 +279,12 @@ export default function SettingsModal({
                     )
                   })}
                 </View>
+              </View>
+
+              {/* REVOLUT (TrueLayer) */}
+              <View style={styles.section}>
+                <Text style={styles.sectionLabel}>Банки</Text>
+                <RevolutConnectSection visible={visible} />
               </View>
 
               {/* BINANCE API */}
