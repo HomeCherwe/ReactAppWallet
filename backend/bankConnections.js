@@ -374,8 +374,8 @@ async function countCardTransactions(supabase, cardId) {
 }
 
 // Banks limit how far back transactions can be read (and some count the range strictly).
-// On "invalid_date_range" retry with shorter windows.
-const FALLBACK_WINDOWS_DAYS = [60, 30, 7]
+// On "invalid_date_range" / "sca_exceeded" retry with shorter windows.
+const FALLBACK_WINDOWS_DAYS = [89, 60, 30, 7]
 
 async function fetchTransactions(client, base, days, now) {
   const iso = d => d.toISOString().split('.')[0] + 'Z'
@@ -391,7 +391,9 @@ async function fetchTransactions(client, base, days, now) {
       if (e instanceof ConsentExpiredError) throw e
       if (e.response?.status === 404) return [] // no transactions for this account
       const code = e.response?.data?.error
-      if (e.response?.status === 400 && code === 'invalid_date_range' && w !== windows[windows.length - 1]) {
+      // sca_exceeded: without a fresh bank login (SCA) some banks (Revolut EU) only serve a shorter history
+      const retryShorter = code === 'invalid_date_range' || code === 'sca_exceeded'
+      if ([400, 403].includes(e.response?.status) && retryShorter && w !== windows[windows.length - 1]) {
         console.warn(`[Banks] ${base}: ${w}-day range rejected, trying shorter`)
         continue
       }
