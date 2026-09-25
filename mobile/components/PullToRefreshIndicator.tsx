@@ -91,7 +91,8 @@ export default function PullToRefreshIndicator({
   const pullScale = scrollY.interpolate({ inputRange: [-THRESHOLD - 20, -THRESHOLD, 0], outputRange: [1.05, 1, 0.85], extrapolate: 'clamp' })
 
   const busy = phase === 'refreshing' || phase === 'done'
-  if (phase === 'idle') return null
+  // Always mounted (hidden above the edge when idle): unmounting would detach these
+  // interpolations from scrollY, and Animated then drops scrollY's listeners with them.
 
   return (
     <View style={[styles.wrap, { top }]} pointerEvents="none">
@@ -116,7 +117,7 @@ export default function PullToRefreshIndicator({
           </Animated.View>
         )}
         <Text style={[styles.text, phase === 'done' && { color: Colors.green }]}>
-          {phase === 'pull'
+          {phase === 'pull' || phase === 'idle'
             ? 'Потягніть, щоб оновити'
             : phase === 'release'
               ? 'Відпустіть, щоб оновити'

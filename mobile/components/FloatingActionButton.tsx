@@ -29,6 +29,8 @@ import { triggerHeavyHaptic } from '../utils/haptics'
 const FAB_SIZE = 64
 // Label size inside the circular button; the button's own padding brings it to ~FAB_SIZE
 const PLUS_BOX = 38
+// Hold this long on the + and iOS opens its menu
+const MENU_HOLD_MS = 420
 
 interface FloatingActionButtonProps {
   onPress: () => void
@@ -68,6 +70,32 @@ export default function FloatingActionButton({
     if (now - lastMenuBuzz.current < 500) return
     lastMenuBuzz.current = now
     triggerHeavyHaptic()
+  }
+
+  // Touches on the native button still reach RN: a hold that lasts → the menu is opening
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const holdStart = useRef(0)
+  const clearHold = () => {
+    if (holdTimer.current) clearTimeout(holdTimer.current)
+    holdTimer.current = null
+  }
+  const holdHandlers = {
+    onTouchStart: () => {
+      clearHold()
+      holdStart.current = Date.now()
+      holdTimer.current = setTimeout(() => {
+        holdTimer.current = null
+        onMenuOpened()
+      }, MENU_HOLD_MS)
+    },
+    onTouchEnd: clearHold,
+    // iOS may take the touch over as the menu lifts — buzz right then
+    onTouchCancel: () => {
+      if (holdTimer.current && Date.now() - holdStart.current > 250) {
+        clearHold()
+        onMenuOpened()
+      }
+    },
   }
 
   const handlePressIn = () => {
@@ -155,6 +183,7 @@ export default function FloatingActionButton({
   if (Platform.OS === 'ios') {
     return (
       <View style={[styles.fabWrapper, hidden && styles.hidden]} pointerEvents={hidden ? 'none' : 'box-none'}>
+        <View {...holdHandlers}>
         <Host style={styles.host} seedColor={Colors.orange} colorScheme="dark">
           <Menu
             label={
@@ -166,6 +195,7 @@ export default function FloatingActionButton({
               />
             }
             onPrimaryAction={() => {
+              clearHold() // a tap, not a hold — no menu
               triggerHeavyHaptic() // solid, noticeable tap for the main button
               onPress()
             }}
@@ -208,6 +238,7 @@ export default function FloatingActionButton({
             </Section>
           </Menu>
         </Host>
+        </View>
       </View>
     )
   }
