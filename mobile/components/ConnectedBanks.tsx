@@ -6,6 +6,7 @@ import {
   BankConnection,
   connectBank,
   disconnectBank,
+  linkBankAccountToCard,
   listBankConnections,
   syncConnectedBanks,
 } from '../api/bankConnections'
@@ -141,6 +142,21 @@ export default function ConnectedBanks({
     }
   }
 
+  // Account without a card → one of the user's cards; then pull its transactions there
+  const linkCard = async (c: BankConnection, accountId: string, card: Card) => {
+    try {
+      await linkBankAccountToCard(c.id, accountId, card.id)
+      triggerSuccessHaptic()
+      Toast.show({ type: 'success', text1: `Прив’язано до «${card.name}»`, text2: 'Підтягуємо транзакції…' })
+      await load()
+      syncOne(c)
+    } catch (e: any) {
+      triggerErrorHaptic()
+      Toast.show({ type: 'error', text1: 'Не вдалося прив’язати', text2: e?.message })
+      throw e
+    }
+  }
+
   const disconnect = (c: BankConnection) => {
     Alert.alert(
       `Відключити ${c.provider_name}?`,
@@ -232,6 +248,8 @@ export default function ConnectedBanks({
         onSync={syncOne}
         onReconnect={reconnect}
         onDisconnect={disconnect}
+        cards={cards}
+        onLinkCard={linkCard}
         onOpenCard={
           onOpenCard
             ? card => {

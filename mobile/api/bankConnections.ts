@@ -127,3 +127,11 @@ export async function syncConnectedBanks(connectionId?: string): Promise<BankSyn
     clearTimeout(timer)
   }
 }
+
+/** Links a bank account to one of the user's existing cards (its transactions go there from the next sync). */
+export async function linkBankAccountToCard(connectionId: string, accountId: string, cardId: string): Promise<void> {
+  await apiFetch(`/api/bank-connections/${connectionId}/accounts/${encodeURIComponent(accountId)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ card_id: cardId }),
+  })
+}

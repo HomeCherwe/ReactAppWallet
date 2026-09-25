@@ -1,5 +1,5 @@
-import React, { useRef } from 'react'
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import React, { useEffect, useRef, useState } from 'react'
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { Colors } from '../constants/theme'
 import { BankConnection } from '../api/bankConnections'
 import { Card } from '../api/cards'
@@ -20,7 +20,12 @@ interface Props {
   onDisconnect: (c: BankConnection) => void
   /** Tap on an account that has a card: its transactions */
   onOpenCard?: (card: Card) => void
+  /** All the user's cards, to link an account without a card to one of them */
+  cards?: Card[]
+  onLinkCard?: (c: BankConnection, accountId: string, card: Card) => Promise<void>
 }
+
+type BankAccount = BankConnection['accounts'][number]
 
 /** Tap on a connected bank: which accounts it brings in, their cards and balances. */
 export default function BankAccountsSheet({
@@ -34,7 +39,16 @@ export default function BankAccountsSheet({
   onReconnect,
   onDisconnect,
   onOpenCard,
+  cards = [],
+  onLinkCard,
 }: Props) {
+  // Account being linked to an existing card (the sheet shows the card picker)
+  const [linking, setLinking] = useState<BankAccount | null>(null)
+  const [linkBusy, setLinkBusy] = useState<string | null>(null)
+  useEffect(() => {
+    if (!connection) setLinking(null)
+  }, [connection])
+
   // Keep showing the last bank while the sheet slides out
   const last = useRef<{ c: BankConnection; s: { text: string; color: string } } | null>(null)
   if (connection && status) last.current = { c: connection, s: status }
@@ -42,6 +56,97 @@ export default function BankAccountsSheet({
   const { c, s } = last.current
 
   const expired = c.status === 'expired'
+  const accountLabel = (a: BankAccount) => a.display_name || (a.kind === 'card' ? 'Картка' : 'Рахунок')
+
+  const pickCard = (a: BankAccount, card: Card) => {
+    Alert.alert(
+      `Прив’язати до «${card.name}»?`,
+      `Транзакції рахунку «${accountLabel(a)}» підтягуватимуться в цю картку. Якщо ви вже вносили їх вручну, можуть з’явитися дублікати.`,
+      [
+        { text: 'Скасувати', style: 'cancel' },
+        {
+          text: 'Прив’язати',
+          onPress: async () => {
+            setLinkBusy(card.id)
+            try {
+              await onLinkCard?.(c, a.account_id, card)
+              setLinking(null)
+            } catch {
+              // the toast already explains it; stay on the picker
+            } finally {
+              setLinkBusy(null)
+            }
+          },
+        },
+      ]
+    )
+  }
+
+  if (linking) {
+    // Cards of this bank's other accounts can't take a second one; same currency first
+    const takenIds = new Set(c.accounts.map(a => a.card_id).filter(Boolean) as string[])
+    const options = cards
+      .filter(card => !takenIds.has(card.id))
+      .sort(
+        (x, y) =>
+          Number(y.currency === linking.currency) - Number(x.currency === linking.currency) ||
+          x.name.localeCompare(y.name)
+      )
+    return (
+      <SheetModal visible={!!connection} onClose={onClose} sheetStyle={styles.sheet}>
+        <View style={styles.header}>
+          <Pressable onPress={() => setLinking(null)} hitSlop={10}>
+            <Text style={styles.backText}>‹ Назад</Text>
+          </Pressable>
+          <View style={styles.headerText}>
+            <Text style={styles.titleSmall} numberOfLines={1}>Прив’язати до картки</Text>
+            <Text style={styles.subtle} numberOfLines={1}>{c.provider_name} · {accountLabel(linking)}</Text>
+          </View>
+          <GlassPressable onPress={onClose} style={styles.closeBtn}>
+            <Text style={styles.closeText}>✕</Text>
+          </GlassPressable>
+        </View>
+
+        <ScrollView style={styles.list} contentContainerStyle={[styles.listContent, { paddingBottom: 34 }]}>
+          {options.length === 0 ? (
+            <View style={styles.empty}>
+              <Text style={styles.emptyText}>Немає вільних карток. Створіть картку на сторінці рахунків.</Text>
+            </View>
+          ) : (
+            <View style={styles.group}>
+              {options.map((card, i) => {
+                const sameCur = card.currency === linking.currency
+                const bal = balances[card.id] ?? Number(card.initial_balance ?? 0)
+                return (
+                  <Pressable
+                    key={card.id}
+                    disabled={!!linkBusy}
+                    onPress={() => pickCard(linking, card)}
+                    style={({ pressed }) => [styles.row, i > 0 && styles.rowBorder, pressed && styles.rowPressed]}
+                  >
+                    <View style={[styles.icon, !sameCur && styles.iconIdle]}>
+                      <Text style={styles.iconText}>💳</Text>
+                    </View>
+                    <View style={styles.rowText}>
+                      <Text style={styles.accName} numberOfLines={1}>{card.name}</Text>
+                      <Text style={[styles.accMeta, !sameCur && { color: Colors.orange }]} numberOfLines={1}>
+                        {[card.bank, sameCur ? card.currency : `${card.currency} ≠ ${linking.currency}`].filter(Boolean).join(' · ')}
+                      </Text>
+                    </View>
+                    {linkBusy === card.id ? (
+                      <ActivityIndicator color={Colors.orange} />
+                    ) : (
+                      <Text style={styles.balance}>{`${bal < 0 ? '−' : ''}${fmtMoney(bal, card.currency)}`}</Text>
+                    )}
+                  </Pressable>
+                )
+              })}
+            </View>
+          )}
+        </ScrollView>
+      </SheetModal>
+    )
+  }
   // Accounts with a card first; the ones without activity (no card yet) after
   const accounts = [...c.accounts].sort((a, b) => Number(!!b.card_id) - Number(!!a.card_id))
 
@@ -72,8 +177,8 @@ export default function BankAccountsSheet({
               return (
                 <Pressable
                   key={a.account_id}
-                  disabled={!card || !onOpenCard}
-                  onPress={() => card && onOpenCard?.(card)}
+                  disabled={card ? !onOpenCard : !onLinkCard}
+                  onPress={() => (card ? onOpenCard?.(card) : setLinking(a))}
                   style={({ pressed }) => [styles.row, i > 0 && styles.rowBorder, pressed && styles.rowPressed]}
                 >
                   <View style={[styles.icon, !card && styles.iconIdle]}>
@@ -86,9 +191,14 @@ export default function BankAccountsSheet({
                     <Text style={styles.accMeta} numberOfLines={1}>
                       {card
                         ? [a.display_name && a.display_name !== card.name ? a.display_name : null, a.currency].filter(Boolean).join(' · ')
-                        : `${a.currency ?? ''} · без операцій — картку не створено`}
+                        : `${a.currency ?? ''} · картку ще не створено`}
                     </Text>
                   </View>
+                  {!card && onLinkCard ? (
+                    <View style={styles.linkPill}>
+                      <Text style={styles.linkPillText}>Прив’язати</Text>
+                    </View>
+                  ) : null}
                   {bal != null ? (
                     <View style={styles.balCol}>
                       <Text style={[styles.balance, bal < 0 && { color: '#FF6B6B' }]}>
@@ -145,6 +255,32 @@ const styles = StyleSheet.create({
   },
   headerText: {
     flex: 1,
+  },
+  backText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.orange,
+  },
+  titleSmall: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: Colors.white,
+  },
+  subtle: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
+  linkPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 100,
+    backgroundColor: 'rgba(255, 107, 0, 0.16)',
+  },
+  linkPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.orange,
   },
   title: {
     fontSize: 20,
