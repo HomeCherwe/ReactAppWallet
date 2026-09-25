@@ -218,6 +218,8 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
           if (!tx) return false
           // New rule: exclude from any stats when flag is true.
           if (tx.exclude_from_stats === true || tx.exclude_from_stats === 'true' || tx.exclude_from_stats === 1) return true
+          // Card switched off in its settings (flag computed by the backend)
+          if (tx.card_excluded_from_stats) return true
           // Safety/backward-compat: linked refund rows are not counted directly
           if (tx.refund_for) return true
           const note = String(tx.note || '')

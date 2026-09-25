@@ -7,7 +7,7 @@ export function getApiUrl(): string {
   if (envUrl) {
     return envUrl.endsWith('/') ? envUrl.slice(0, -1) : envUrl
   }
-  return 'http://192.168.1.18:8787'
+  return 'https://react-app-wallet-api.vercel.app'
 }
 
 // Get Supabase auth token
@@ -43,8 +43,8 @@ export async function apiFetch<T = any>(
   }
 
   const controller = new AbortController()
-  // Short timeout so app falls back quickly if backend server is not running
-  const timeoutId = setTimeout(() => controller.abort(), 3500)
+  // Long enough for a Vercel cold start (1–3 s), short enough to fall back if the backend is down
+  const timeoutId = setTimeout(() => controller.abort(), 8000)
   const signal = options.signal ?? controller.signal
 
   try {

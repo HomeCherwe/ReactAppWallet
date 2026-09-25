@@ -149,7 +149,9 @@ export default function MonthlyPayment() {
   }
 
   const isExcludedFromStats = (tx) => {
-    return tx?.exclude_from_stats === true || tx?.exclude_from_stats === 'true' || tx?.exclude_from_stats === 1
+    return tx?.exclude_from_stats === true || tx?.exclude_from_stats === 'true' || tx?.exclude_from_stats === 1 ||
+      // Card switched off in its settings (flag computed by the backend)
+      !!tx?.card_excluded_from_stats
   }
 
   const amountForStats = (tx) => {

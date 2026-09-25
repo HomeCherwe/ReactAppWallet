@@ -302,7 +302,7 @@ function BankModal({ open, initial, onClose, onSubmit }) {
 }
 
 function CardModal({ open, initial, onClose, onSubmit, banks = [] }) {
-  const [form, setForm] = useState({ bank_id: '', name: '', currency: 'EUR' })
+  const [form, setForm] = useState({ bank_id: '', name: '', currency: 'EUR', exclude_from_stats: false })
   const [file, setFile] = useState(null)
   const [previewUrl, setPreviewUrl] = useState(null)
 
@@ -310,8 +310,9 @@ function CardModal({ open, initial, onClose, onSubmit, banks = [] }) {
     setForm(initial ? {
       bank_id: initial.bank_id || '',
       name: initial.name || '',
-      currency: initial.currency || 'EUR'
-    } : { bank_id: '', name: '', currency: 'EUR' })
+      currency: initial.currency || 'EUR',
+      exclude_from_stats: !!initial.exclude_from_stats
+    } : { bank_id: '', name: '', currency: 'EUR', exclude_from_stats: false })
     setFile(null)
     setPreviewUrl(initial?.bg_url || null)
   }, [initial, open])
@@ -412,6 +413,18 @@ function CardModal({ open, initial, onClose, onSubmit, banks = [] }) {
         >
           <option>UAH</option><option>EUR</option><option>USD</option><option>GBP</option><option>PLN</option>
         </select>
+        <label className="flex items-start gap-2.5 py-2 text-sm cursor-pointer select-none border rounded-xl px-3 bg-gray-50/50 hover:bg-gray-50 transition-colors">
+          <input
+            type="checkbox"
+            checked={form.exclude_from_stats}
+            onChange={(e) => setForm({ ...form, exclude_from_stats: e.target.checked })}
+            className="accent-black w-4 h-4 mt-0.5 rounded border-gray-300 focus:ring-black"
+          />
+          <span>
+            <span className="text-gray-700 font-medium block">Виключити картку зі статистики</span>
+            <span className="text-gray-500 text-xs">Її транзакції не враховуються в доходах, витратах і аналітиці. Баланс картки не змінюється.</span>
+          </span>
+        </label>
         <div>
           <label className="text-sm text-gray-600 mb-1 block">Фонова картинка (опц.)</label>
           <input type="file" accept="image/*" onChange={handleFileChange} className="text-sm"/>
@@ -756,7 +769,8 @@ export default function CardsManager({ groupByBank = false, showActions = true }
     const payload = {
       bank_id: form.bank_id || null, 
       name: form.name, 
-      currency: form.currency || 'EUR'
+      currency: form.currency || 'EUR',
+      exclude_from_stats: !!form.exclude_from_stats
     }
     
     try {
