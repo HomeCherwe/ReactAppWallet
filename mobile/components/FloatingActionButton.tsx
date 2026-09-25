@@ -23,7 +23,7 @@ import { GlassView } from 'expo-glass-effect'
 import { HAS_LIQUID_GLASS } from './LiquidGlass'
 import { LinearGradient } from 'expo-linear-gradient'
 import { Colors } from '../constants/theme'
-import { triggerLightHaptic } from '../utils/haptics'
+import { triggerHeavyHaptic } from '../utils/haptics'
 
 const FAB_SIZE = 64
 // Label size inside the circular button; the button's own padding brings it to ~FAB_SIZE
@@ -91,7 +91,10 @@ export default function FloatingActionButton({
   const renderLiquidGlassButton = () => (
     <Animated.View style={{ transform: [{ scale }], backgroundColor: 'transparent' }}>
       <TouchableOpacity
-        onPress={onPress}
+        onPress={() => {
+          triggerHeavyHaptic()
+          onPress()
+        }}
         onLongPress={handleFallbackLongPress}
         delayLongPress={280}
         onPressIn={handlePressIn}
@@ -151,7 +154,7 @@ export default function FloatingActionButton({
               />
             }
             onPrimaryAction={() => {
-              triggerLightHaptic()
+              triggerHeavyHaptic() // solid, noticeable tap for the main button
               onPress()
             }}
             modifiers={[
