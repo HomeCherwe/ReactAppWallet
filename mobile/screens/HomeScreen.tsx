@@ -33,6 +33,9 @@ import Skeleton from '../components/Skeleton'
 import RollingNumber from '../components/RollingNumber'
 import { useTransactionFeed } from '../hooks/useTransactionFeed'
 import { txBus } from '../utils/txBus'
+import { usePinnedTransactions } from '../hooks/usePinnedTransactions'
+import { hasPinTag, pinStateOf } from '../utils/pinned'
+import Toast from 'react-native-toast-message'
 import GlassCard from '../components/GlassCard'
 import GlassButton from '../components/GlassButton'
 import SettingsModal from '../components/SettingsModal'
@@ -79,6 +82,9 @@ type BucketTab = 'all' | 'cards' | 'savings' | 'cash'
 interface HomeScreenProps {
   onNavigateToCards?: () => void
 }
+
+// Stable default, so the settings selector doesn't return a new array every render
+const NO_PINNED_CATEGORIES: string[] = []
 
 export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) {
   const scrollY = useRef(new Animated.Value(0)).current
@@ -137,6 +143,13 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
   const [loading, setLoading] = useState(true)
   const txFeed = useTransactionFeed({ excludeCardIds: excludedCardIds, enabled: !loading })
   const refreshTxFeed = txFeed.refresh
+  // Pinned: "[pinned]" note tag or a category pinned in settings (same as the web app)
+  const pinnedCategories = useSettingsStore(s =>
+    s.getNestedSetting<string[]>('dashboard.pinnedCategories', NO_PINNED_CATEGORIES)
+  )
+  const pinned = usePinnedTransactions({ excludeCardIds: excludedCardIds, pinnedCategories, enabled: !loading })
+  const refreshPinned = pinned.refresh
+  const togglePin = pinned.togglePin
   const [refreshing, setRefreshing] = useState(false)
 
   const getGreeting = () => {
@@ -203,6 +216,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
     setRefreshing(true)
     loadData()
     refreshTxFeed()
+    refreshPinned()
   }
 
   // Background bank sync (e.g. Revolut on app open) added transactions — reload quietly
@@ -211,9 +225,10 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
       if (ev?.type === 'SYNCED') {
         loadData()
         refreshTxFeed()
+        refreshPinned()
       }
     })
-  }, [loadData, refreshTxFeed])
+  }, [loadData, refreshTxFeed, refreshPinned])
 
   const handleCurrencyChange = async (newCur: string) => {
     setPrimaryCurrency(newCur)
@@ -316,6 +331,28 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
     }
   }, [])
 
+  // Long press on a row / button in details: pin or unpin
+  const handleTogglePin = useCallback(async (tx: Transaction) => {
+    triggerLightHaptic()
+    try {
+      const updated = await togglePin(tx)
+      if (!updated) {
+        Toast.show({
+          type: 'info',
+          text1: 'Закріплено через категорію',
+          text2: `«${tx.category}» — змінюється в налаштуваннях`,
+        })
+        return
+      }
+      const nowPinned = hasPinTag(updated.note)
+      Toast.show({ type: 'success', text1: nowPinned ? '📌 Закріплено' : 'Відкріплено' })
+      setSelectedTx(cur => (cur?.id === tx.id ? updated : cur))
+      refreshTxFeed()
+    } catch (e: any) {
+      Toast.show({ type: 'error', text1: 'Не вдалося змінити закріплення', text2: e?.message })
+    }
+  }, [togglePin, refreshTxFeed])
+
   const handlePressTx = useCallback((tx: Transaction) => {
     setSelectedTx(tx)
     setDetailsVisible(true)
@@ -387,6 +424,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
               await deleteTransaction(tx.id)
               loadData()
               refreshTxFeed()
+              refreshPinned()
             } catch (e: any) {
               Alert.alert('Помилка', e.message || 'Не вдалося видалити')
             }
@@ -701,6 +739,9 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
             onFilterChange={txFeed.changeFilter}
             onRetry={txFeed.retry}
             onPressTx={handlePressTx}
+            onLongPressTx={handleTogglePin}
+            pinned={pinned.items}
+            pinnedCategories={pinnedCategories}
           />
         </View>
 
@@ -779,6 +820,8 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
           setSplitVisible(true)
         }}
         onDelete={handleDeleteTx}
+        pinState={selectedTx ? pinStateOf(selectedTx, pinnedCategories) : 'none'}
+        onTogglePin={handleTogglePin}
       />
 
       {/* Tx Edit */}

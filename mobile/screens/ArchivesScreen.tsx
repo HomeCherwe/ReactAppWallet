@@ -7,6 +7,7 @@ import { Colors, Typography, Radius } from '../constants/theme'
 import { listArchivedTransactions, unarchiveTransaction, Transaction } from '../api/transactions'
 import { listCards, Card } from '../api/cards'
 import { txBus } from '../utils/txBus'
+import { stripPinTag } from '../utils/pinned'
 import { fmtAmount, fmtDate, isToday, isYesterday } from '../utils/format'
 import Toast from 'react-native-toast-message'
 import { GlassPressable } from '../components/LiquidGlass'
@@ -115,7 +116,7 @@ export default function ArchivesScreen() {
               <View style={styles.txRow}>
                 <View style={styles.txLeft}>
                   <Text style={styles.txCategory}>{tx.category || 'Без категорії'}</Text>
-                  <Text style={styles.txNote} numberOfLines={1}>{tx.note || ''}</Text>
+                  <Text style={styles.txNote} numberOfLines={1}>{stripPinTag(tx.note)}</Text>
                   <Text style={styles.txDate}>
                     {isToday(tx.created_at) ? 'Сьогодні' : isYesterday(tx.created_at) ? 'Вчора' : fmtDate(tx.created_at)}
                   </Text>

@@ -8,6 +8,8 @@ import { triggerLightHaptic } from '../utils/haptics'
 import { getCategoryIcon } from '../utils/categoryIcon'
 import { TransactionRowsSkeleton } from './Skeleton'
 import BankSyncIndicator from './BankSyncIndicator'
+import PinnedStrip from './PinnedStrip'
+import { pinStateOf, txDisplayTitle } from '../utils/pinned'
 
 const CURRENCY_SYMBOLS: Record<string, string> = { UAH: '₴', USD: '$', EUR: '€', GBP: '£', PLN: 'zł' }
 
@@ -63,6 +65,10 @@ interface TransactionListProps {
   onFilterChange?: (filter: TxFilter) => void
   onRetry?: () => void
   onPressTx?: (tx: Transaction) => void
+  /** Long press: pin / unpin */
+  onLongPressTx?: (tx: Transaction) => void
+  pinned?: Transaction[]
+  pinnedCategories?: string[]
 }
 
 export default React.memo(TransactionList)
@@ -79,6 +85,9 @@ function TransactionList({
   onFilterChange,
   onRetry,
   onPressTx,
+  onLongPressTx,
+  pinned = [],
+  pinnedCategories = [],
 }: TransactionListProps) {
   const cardsById = useMemo(() => {
     const map: Record<string, Card> = {}
@@ -113,6 +122,16 @@ function TransactionList({
         <Text style={styles.title}>Транзакції</Text>
         <BankSyncIndicator />
       </View>
+
+      {!loading && (
+        <PinnedStrip
+          items={pinned}
+          cardsById={cardsById}
+          hidden={hidden}
+          onPress={onPressTx}
+          onLongPress={onLongPressTx}
+        />
+      )}
 
       {onFilterChange && (
         <View style={styles.segment}>
@@ -169,7 +188,8 @@ function TransactionList({
                 const isIncome = amount > 0
                 const card = tx.card_id ? cardsById[tx.card_id] : undefined
                 const currency = tx.currency || card?.currency
-                const title = tx.note || tx.merchant_name || tx.category || (isIncome ? 'Дохід' : 'Витрата')
+                const title = txDisplayTitle(tx)
+                const isPinned = pinStateOf(tx, pinnedCategories) !== 'none'
                 const time = new Date(tx.created_at).toLocaleTimeString('uk-UA', {
                   hour: '2-digit',
                   minute: '2-digit',
@@ -182,6 +202,8 @@ function TransactionList({
                   <Pressable
                     key={tx.id}
                     onPress={() => onPressTx?.(tx)}
+                    onLongPress={() => onLongPressTx?.(tx)}
+                    delayLongPress={350}
                     style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
                   >
                     <View style={[styles.iconWrap, isIncome && styles.iconWrapGreen]}>
@@ -190,7 +212,10 @@ function TransactionList({
 
                     <View style={[styles.info, i < group.items.length - 1 && styles.infoBorder]}>
                       <View style={styles.infoText}>
-                        <Text style={styles.txTitle} numberOfLines={1}>{title}</Text>
+                        <Text style={styles.txTitle} numberOfLines={1}>
+                          {isPinned && <Text style={styles.pinMark}>📌 </Text>}
+                          {title}
+                        </Text>
                         <Text style={styles.txMeta} numberOfLines={1}>{meta}</Text>
                       </View>
                       <Text
@@ -335,6 +360,9 @@ const styles = StyleSheet.create({
   },
   infoText: {
     flex: 1,
+  },
+  pinMark: {
+    fontSize: 12,
   },
   txTitle: {
     fontSize: 15,
