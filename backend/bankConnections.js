@@ -11,7 +11,10 @@ const AUTH_BASE = 'https://auth.truelayer.com'
 const API_BASE = 'https://api.truelayer.com/data/v1'
 const CONSENT_DAYS = 90
 const FIRST_SYNC_DAYS = 90 // history pulled right after connecting
-const SYNC_DAYS = 15 // regular syncs
+// Regular syncs read from the last successful sync (+ overlap), never less than
+// MIN_SYNC_DAYS: card payments often settle days later with their original date
+const MIN_SYNC_DAYS = 15
+const SYNC_OVERLAP_DAYS = 2
 const PROVIDERS_TTL_MS = 60 * 60 * 1000
 
 // Scopes we'd like; each provider gets only the ones it supports
@@ -299,6 +302,13 @@ async function fetchTransactions(client, base, days, now) {
   return []
 }
 
+/** Days to read on a regular sync: since the last successful one, so nothing is skipped after a long break. */
+function regularSyncDays(lastSyncAt, now) {
+  if (!lastSyncAt) return FIRST_SYNC_DAYS
+  const since = Math.ceil((now.getTime() - new Date(lastSyncAt).getTime()) / 86400000)
+  return Math.min(FIRST_SYNC_DAYS, Math.max(MIN_SYNC_DAYS, since + SYNC_OVERLAP_DAYS))
+}
+
 async function syncConnection(supabase, conn, psuHeaders) {
   const client = makeClient(supabase, conn, psuHeaders)
   const userId = conn.user_id
@@ -321,7 +331,7 @@ async function syncConnection(supabase, conn, psuHeaders) {
 
     // Fetch before creating anything, so a rejected request leaves no half-made card behind
     const base = item.kind === 'card' ? `cards/${item.account_id}` : `accounts/${item.account_id}`
-    const txs = await fetchTransactions(client, base, firstImport ? FIRST_SYNC_DAYS : SYNC_DAYS, now)
+    const txs = await fetchTransactions(client, base, firstImport ? FIRST_SYNC_DAYS : regularSyncDays(conn.last_sync_at, now), now)
     const { cardId } = await ensureCardForItem(supabase, userId, conn, item, links || [])
     // Starting balance only for a card with no history yet (never overwrite an existing card's)
     const setStartingBalance = firstImport && (await countCardTransactions(supabase, cardId)) === 0
