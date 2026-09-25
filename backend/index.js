@@ -272,16 +272,45 @@ app.delete('/api/banks/:id', getUserFromToken, async (req, res) => {
   try {
     const { id } = req.params
 
-    // Перевіряємо, чи є карти, прив'язані до цього банку
-    const { data: cards } = await supabase
+    // The bank goes together with its cards and their transactions (the web asks to confirm first)
+    const { data: cards, error: cardsError } = await supabase
       .from('cards')
       .select('id')
       .eq('bank_id', id)
       .eq('user_id', req.user_id)
-      .limit(1)
+    if (cardsError) throw cardsError
+    const cardIds = (cards || []).map(c => c.id)
 
-    if (cards && cards.length > 0) {
-      return res.status(400).json({ error: 'Не можна видалити банк, до якого прив\'язані карти' })
+    if (cardIds.length > 0) {
+      // Bank connections syncing into these cards would recreate them — disconnect those
+      const { data: links } = await supabase
+        .from('bank_connection_accounts')
+        .select('connection_id')
+        .eq('user_id', req.user_id)
+        .in('card_id', cardIds)
+      const connIds = [...new Set((links || []).map(l => l.connection_id))]
+      if (connIds.length > 0) {
+        const { error: connError } = await supabase
+          .from('bank_connections')
+          .delete()
+          .eq('user_id', req.user_id)
+          .in('id', connIds)
+        if (connError) throw connError
+      }
+
+      const { error: txError } = await supabase
+        .from('transactions')
+        .delete()
+        .eq('user_id', req.user_id)
+        .in('card_id', cardIds)
+      if (txError) throw txError
+
+      const { error: delCardsError } = await supabase
+        .from('cards')
+        .delete()
+        .eq('user_id', req.user_id)
+        .in('id', cardIds)
+      if (delCardsError) throw delCardsError
     }
 
     const { error } = await supabase
@@ -291,7 +320,7 @@ app.delete('/api/banks/:id', getUserFromToken, async (req, res) => {
       .eq('user_id', req.user_id)
 
     if (error) throw error
-    res.json({ success: true })
+    res.json({ success: true, deleted_cards: cardIds.length })
   } catch (error) {
     console.error('DELETE /api/banks/:id error:', error)
     res.status(500).json({ error: error.message })
@@ -347,7 +376,7 @@ app.get('/api/cards', getUserFromToken, async (req, res) => {
 
 app.post('/api/cards', getUserFromToken, async (req, res) => {
   try {
-    const { bank_id, name, currency, bg_url, exclude_from_stats = false } = req.body
+    const { bank_id, name, currency, bg_url, exclude_from_stats = false, initial_balance, card_number } = req.body
 
     // Отримуємо назву банку, якщо bank_id вказано
     let bankName = null
@@ -370,9 +399,10 @@ app.post('/api/cards', getUserFromToken, async (req, res) => {
       bank_id: bank_id || null,
       bank: bankName || 'Інші', // Заповнюємо bank (NOT NULL constraint)
       name,
-      card_number: null,
+      // Only the last 4 digits are accepted; full card numbers are never stored
+      card_number: /^\d{4}$/.test(String(card_number || '')) ? String(card_number) : null,
       currency,
-      initial_balance: 0,
+      initial_balance: Number.isFinite(Number(initial_balance)) ? Number(initial_balance) : 0,
       bg_url,
       expiry_date: null,
       cvv: null,
@@ -3482,6 +3512,22 @@ app.get('/api/api-key', getUserFromToken, async function (req, res) {
 // POST /api/syncMonoBank - Підтримує як JWT так і API Key
 app.post('/api/syncMonoBank', getUserFromTokenOrApiKey, async function (req, res) {
   if (!req.body) return res.status(400).json({ success: false, error: 'Bad request: No body provided' })
+
+  // Monobank connected on the cards page (bank_connections): sync through it
+  const { data: monoConn } = await supabase
+    .from('bank_connections')
+    .select('id')
+    .eq('user_id', req.user_id)
+    .eq('provider_id', 'monobank')
+    .maybeSingle()
+  if (monoConn) {
+    try {
+      const { added } = await syncAllBankConnections(supabase, req.user_id, psuHeadersFrom(req))
+      return res.status(200).json({ success: true, count: added, message: `Sync transactions - ${added}`, transactions: [] })
+    } catch (e) {
+      return res.status(500).json({ success: false, error: e.message })
+    }
+  }
 
   // Get API keys from database instead of .env
   const { data: prefs, error: prefsError } = await supabase

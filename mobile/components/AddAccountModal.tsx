@@ -10,8 +10,9 @@ import {
   View,
 } from 'react-native'
 import Toast from 'react-native-toast-message'
+import * as WebBrowser from 'expo-web-browser'
 import { Colors } from '../constants/theme'
-import { BankProvider, connectBank, listBankProviders } from '../api/bankConnections'
+import { BankProvider, connectBank, connectBankWithToken, listBankProviders } from '../api/bankConnections'
 import { triggerErrorHaptic, triggerLightHaptic, triggerSuccessHaptic } from '../utils/haptics'
 import { GlassPressable } from './LiquidGlass'
 import SheetModal from './SheetModal'
@@ -19,6 +20,7 @@ import BankLogo from './BankLogo'
 
 const COUNTRIES: Record<string, { name: string; flag: string }> = {
   fr: { name: 'Франція', flag: '🇫🇷' },
+  ua: { name: 'Україна', flag: '🇺🇦' },
   uk: { name: 'Велика Британія', flag: '🇬🇧' },
   de: { name: 'Німеччина', flag: '🇩🇪' },
   es: { name: 'Іспанія', flag: '🇪🇸' },
@@ -49,6 +51,8 @@ interface AddAccountModalProps {
   onManual: () => void
   connectedProviderIds: string[]
   defaultCountry?: string
+  /** Open straight on this bank's token form (reconnecting Monobank) */
+  initialProvider?: BankProvider | null
 }
 
 /**
@@ -62,8 +66,13 @@ export default function AddAccountModal({
   onManual,
   connectedProviderIds,
   defaultCountry = 'fr',
+  initialProvider = null,
 }: AddAccountModalProps) {
-  const [step, setStep] = useState<'choice' | 'catalog'>('choice')
+  const [step, setStep] = useState<'choice' | 'catalog' | 'token'>('choice')
+  const [tokenProvider, setTokenProvider] = useState<BankProvider | null>(null)
+  const [token, setToken] = useState('')
+  const [showToken, setShowToken] = useState(false)
+  const [tokenBusy, setTokenBusy] = useState(false)
   const [providers, setProviders] = useState<BankProvider[] | null>(null)
   const [error, setError] = useState(false)
   const [country, setCountry] = useState(defaultCountry)
@@ -72,7 +81,10 @@ export default function AddAccountModal({
 
   useEffect(() => {
     if (!visible) return
-    setStep('choice')
+    setStep(initialProvider ? 'token' : 'choice')
+    setTokenProvider(initialProvider)
+    setToken('')
+    setShowToken(false)
     setQuery('')
     setCountry(defaultCountry)
     // Prefetch the catalog while the user reads the choice
@@ -98,6 +110,13 @@ export default function AddAccountModal({
 
   const handleConnect = async (p: BankProvider) => {
     triggerLightHaptic()
+    if (p.auth === 'token') {
+      // Monobank: personal token instead of a bank login
+      setTokenProvider(p)
+      setToken('')
+      setStep('token')
+      return
+    }
     setConnectingId(p.provider_id)
     try {
       const result = await connectBank(p.provider_id)
@@ -122,6 +141,36 @@ export default function AddAccountModal({
     }
   }
 
+  const handleTokenConnect = async () => {
+    if (!tokenProvider || !token.trim()) return
+    setTokenBusy(true)
+    try {
+      const res = await connectBankWithToken(tokenProvider.provider_id, token.trim())
+      triggerSuccessHaptic()
+      Toast.show({ type: 'success', text1: `${res.bank_name || tokenProvider.name} підключено`, text2: 'Завантажуємо транзакції…' })
+      setToken('')
+      onConnected(res.bank_name || tokenProvider.name)
+      onClose()
+    } catch (e: any) {
+      triggerErrorHaptic()
+      Toast.show({ type: 'error', text1: `Не вдалося підключити ${tokenProvider.name}`, text2: e?.message })
+    } finally {
+      setTokenBusy(false)
+    }
+  }
+
+  const goBack = () => {
+    if (step === 'token') {
+      if (initialProvider) onClose()
+      else setStep('catalog')
+    } else {
+      setStep('choice')
+    }
+  }
+
+  const title =
+    step === 'token' ? tokenProvider?.name ?? 'Банк' : step === 'catalog' ? 'Підключити банк' : 'Додати рахунок'
+
   return (
     <SheetModal
       visible={visible}
@@ -129,12 +178,12 @@ export default function AddAccountModal({
       sheetStyle={step === 'catalog' ? styles.sheetTall : styles.sheet}
     >
       <View style={styles.header}>
-        {step === 'catalog' ? (
-          <Pressable onPress={() => setStep('choice')} hitSlop={10} style={styles.backBtn}>
+        {step !== 'choice' && !(step === 'token' && initialProvider) ? (
+          <Pressable onPress={goBack} hitSlop={10} style={styles.backBtn}>
             <Text style={styles.backText}>‹ Назад</Text>
           </Pressable>
         ) : null}
-        <Text style={styles.title}>{step === 'catalog' ? 'Підключити банк' : 'Додати рахунок'}</Text>
+        <Text style={styles.title}>{title}</Text>
         <GlassPressable onPress={onClose} style={styles.closeBtn}>
           <Text style={styles.closeText}>✕</Text>
         </GlassPressable>
@@ -158,7 +207,7 @@ export default function AddAccountModal({
                 <Text style={styles.badge}>РЕКОМЕНДОВАНО</Text>
               </View>
               <Text style={styles.optionDesc}>
-                Транзакції й баланс підтягуються автоматично. Revolut, Wise, BNP Paribas, Monzo та ще 80+ банків.
+                Транзакції й баланс підтягуються автоматично. Monobank, Revolut, Wise, BNP Paribas, Monzo та ще 80+ банків.
               </Text>
               <Text style={styles.optionNote}>🔒 Open Banking · лише читання</Text>
             </View>
@@ -181,6 +230,79 @@ export default function AddAccountModal({
               </Text>
             </View>
           </Pressable>
+        </View>
+      ) : step === 'token' && tokenProvider ? (
+        <View style={styles.tokenWrap}>
+          <View style={styles.tokenBank}>
+            <BankLogo uri={tokenProvider.logo} name={tokenProvider.name} size={48} />
+            <View style={styles.rowText}>
+              <Text style={styles.bankName}>{tokenProvider.name}</Text>
+              <Text style={styles.bankMeta}>🇺🇦 Підключення через персональний токен</Text>
+            </View>
+          </View>
+
+          {[
+            'Відкрийте api.monobank.ua (кнопка нижче)',
+            'Увійдіть через застосунок Monobank і підтвердьте вхід',
+            'Скопіюйте токен, поверніться сюди й вставте його',
+          ].map((text, i) => (
+            <View key={i} style={styles.stepRow}>
+              <View style={styles.stepNum}>
+                <Text style={styles.stepNumText}>{i + 1}</Text>
+              </View>
+              <Text style={styles.stepText}>{text}</Text>
+            </View>
+          ))}
+
+          <Pressable
+            onPress={() => {
+              triggerLightHaptic()
+              WebBrowser.openBrowserAsync('https://api.monobank.ua/').catch(() => {})
+            }}
+            style={({ pressed }) => [styles.linkBtn, pressed && styles.optionPressed]}
+          >
+            <Text style={styles.linkBtnText}>Відкрити api.monobank.ua ↗</Text>
+          </Pressable>
+
+          <View style={styles.tokenInputBox}>
+            <TextInput
+              style={styles.tokenInput}
+              placeholder="Вставте токен"
+              placeholderTextColor="rgba(255, 255, 255, 0.35)"
+              value={token}
+              onChangeText={setToken}
+              secureTextEntry={!showToken}
+              autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="none"
+              returnKeyType="done"
+              onSubmitEditing={handleTokenConnect}
+            />
+            <Pressable onPress={() => setShowToken(v => !v)} hitSlop={10}>
+              <Text style={styles.eye}>{showToken ? '🙈' : '👁'}</Text>
+            </Pressable>
+          </View>
+
+          <Pressable
+            onPress={handleTokenConnect}
+            disabled={tokenBusy || !token.trim()}
+            style={({ pressed }) => [
+              styles.connectBtn,
+              (tokenBusy || !token.trim()) && styles.connectBtnDisabled,
+              pressed && styles.optionPressed,
+            ]}
+          >
+            {tokenBusy ? (
+              <ActivityIndicator color={Colors.white} />
+            ) : (
+              <Text style={styles.connectBtnText}>Підключити {tokenProvider.name}</Text>
+            )}
+          </Pressable>
+
+          <Text style={styles.tokenNote}>
+            🔒 Токен дає доступ лише на читання — баланс і виписка, жодних платежів. Зберігається зашифрованим;
+            відкликати можна будь-коли на api.monobank.ua.
+          </Text>
         </View>
       ) : (
       <>
@@ -262,7 +384,13 @@ export default function AddAccountModal({
                 <BankLogo uri={p.logo} name={p.name} size={40} />
                 <View style={styles.rowText}>
                   <Text style={styles.bankName}>{p.name}</Text>
-                  {query ? <Text style={styles.bankMeta}>{COUNTRIES[p.country]?.name ?? p.country.toUpperCase()}</Text> : null}
+                  {query || p.auth === 'token' ? (
+                    <Text style={styles.bankMeta}>
+                      {[query ? COUNTRIES[p.country]?.name ?? p.country.toUpperCase() : null, p.auth === 'token' ? 'через токен api.monobank.ua' : null]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </Text>
+                  ) : null}
                 </View>
                 {busy ? (
                   <ActivityIndicator color={Colors.orange} />
@@ -278,8 +406,9 @@ export default function AddAccountModal({
       )}
 
       <Text style={styles.footnote}>
-        Підключення через TrueLayer (Open Banking). Ви входите у свій банк напряму — застосунок не бачить ваш
-        пароль. Доступ лише на читання, діє 90 днів.
+        {country === 'ua' && !query
+          ? 'Monobank підключається через персональний токен — лише читання, без терміну дії.'
+          : 'Підключення через TrueLayer (Open Banking). Ви входите у свій банк напряму — застосунок не бачить ваш пароль. Доступ лише на читання, діє 90 днів.'}
       </Text>
       </>
       )}
@@ -526,6 +655,93 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: Colors.textMuted,
     paddingVertical: 30,
+  },
+  tokenWrap: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 36,
+    gap: 12,
+  },
+  tokenBank: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 4,
+  },
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  stepNum: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(255, 107, 0, 0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepNumText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: Colors.orange,
+  },
+  stepText: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 20,
+    color: Colors.white80,
+  },
+  linkBtn: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 100,
+    backgroundColor: 'rgba(255, 107, 0, 0.15)',
+  },
+  linkBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.orange,
+  },
+  tokenInputBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+  },
+  tokenInput: {
+    flex: 1,
+    paddingVertical: 13,
+    color: Colors.white,
+    fontSize: 15,
+  },
+  eye: {
+    fontSize: 17,
+  },
+  connectBtn: {
+    height: 52,
+    borderRadius: 16,
+    backgroundColor: Colors.orange,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  connectBtnDisabled: {
+    opacity: 0.45,
+  },
+  connectBtnText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: Colors.white,
+  },
+  tokenNote: {
+    fontSize: 11,
+    lineHeight: 15,
+    color: Colors.textMuted,
   },
   footnote: {
     fontSize: 11,

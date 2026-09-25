@@ -1,26 +1,34 @@
-import React, { useMemo } from 'react'
-import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, Alert, Animated, LayoutAnimation } from 'react-native'
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import Toast from 'react-native-toast-message'
 import { Colors, Radius } from '../constants/theme'
 import { Transaction } from '../api/transactions'
 import { Card } from '../api/cards'
 import { TxFilter } from '../hooks/useTransactionFeed'
-import { triggerLightHaptic } from '../utils/haptics'
-import { getCategoryIcon } from '../utils/categoryIcon'
+import { triggerErrorHaptic, triggerLightHaptic, triggerMediumHaptic, triggerSuccessHaptic } from '../utils/haptics'
 import { TransactionRowsSkeleton } from './Skeleton'
 import BankSyncIndicator from './BankSyncIndicator'
-import PinnedStrip from './PinnedStrip'
+import TxRow, { RowMode, closeSwipedRow, fmtMoney } from './TxRow'
 import { pinStateOf, txDisplayTitle } from '../utils/pinned'
 
-const CURRENCY_SYMBOLS: Record<string, string> = { UAH: '₴', USD: '$', EUR: '€', GBP: '£', PLN: 'zł' }
+const PINNED_COLLAPSED_KEY = 'pinned_collapsed'
 
-function fmtMoney(amount: number, currency?: string): string {
-  const abs = Math.abs(amount).toLocaleString('uk-UA', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })
-  if (!currency) return abs
-  return `${abs} ${CURRENCY_SYMBOLS[currency] ?? currency}`
+function pluralTx(n: number): string {
+  const mod10 = n % 10
+  const mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return 'транзакція'
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'транзакції'
+  return 'транзакцій'
 }
+
+/** Can this transaction be picked as the refund of an expense? */
+function canBeRefund(t: Transaction): boolean {
+  return Number(t.amount) > 0 && !t.refund_for && !t.is_transfer && !t.archives
+}
+
+const smoothLayout = () =>
+  LayoutAnimation.configureNext(LayoutAnimation.create(220, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity))
 
 function dayKey(d: Date) {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
@@ -67,6 +75,12 @@ interface TransactionListProps {
   onPressTx?: (tx: Transaction) => void
   /** Long press: pin / unpin */
   onLongPressTx?: (tx: Transaction) => void
+  /** Swipe → Видалити (the screen confirms) */
+  onDeleteTx?: (tx: Transaction) => void
+  /** Links `refund` (income) as a refund of `expense` */
+  onLinkRefund?: (expense: Transaction, refund: Transaction) => Promise<void>
+  /** Unlinks a refund: it counts as regular income again */
+  onUnlinkRefund?: (refund: Transaction) => Promise<void>
   pinned?: Transaction[]
   pinnedCategories?: string[]
 }
@@ -86,18 +100,169 @@ function TransactionList({
   onRetry,
   onPressTx,
   onLongPressTx,
+  onDeleteTx,
+  onLinkRefund,
+  onUnlinkRefund,
   pinned = [],
   pinnedCategories = [],
 }: TransactionListProps) {
+  // ---- Pinned section: collapsible, remembered between launches ----
+  const [pinnedCollapsed, setPinnedCollapsed] = useState(false)
+  const chevron = useRef(new Animated.Value(1)).current
+  useEffect(() => {
+    AsyncStorage.getItem(PINNED_COLLAPSED_KEY).then(v => {
+      if (v === '1') {
+        setPinnedCollapsed(true)
+        chevron.setValue(0)
+      }
+    })
+  }, [])
+  const togglePinned = () => {
+    triggerLightHaptic()
+    closeSwipedRow()
+    smoothLayout()
+    const next = !pinnedCollapsed
+    setPinnedCollapsed(next)
+    Animated.timing(chevron, { toValue: next ? 0 : 1, duration: 220, useNativeDriver: true }).start()
+    AsyncStorage.setItem(PINNED_COLLAPSED_KEY, next ? '1' : '0').catch(() => {})
+  }
+  const chevronRotate = chevron.interpolate({ inputRange: [0, 1], outputRange: ['-90deg', '0deg'] })
+
+  // ---- Refund picking (like the web): swipe an expense → "Повернення" → tap the income ----
+  const [refundFor, setRefundFor] = useState<Transaction | null>(null)
+  const [linking, setLinking] = useState(false)
+
+  const cancelRefundPick = useCallback(() => {
+    smoothLayout()
+    setRefundFor(null)
+  }, [])
+
+  const startRefund = useCallback(
+    (tx: Transaction) => {
+      if (tx.refund_for) {
+        // Already a refund: offer to unlink it
+        Alert.alert(
+          'Скасувати повернення?',
+          `«${txDisplayTitle(tx)}» знову рахуватиметься як звичайний дохід у статистиці.`,
+          [
+            { text: 'Ні', style: 'cancel' },
+            {
+              text: 'Скасувати повернення',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  await onUnlinkRefund?.(tx)
+                  triggerSuccessHaptic()
+                  Toast.show({ type: 'success', text1: 'Повернення скасовано', text2: 'Транзакція знову враховується як дохід' })
+                } catch (e: any) {
+                  triggerErrorHaptic()
+                  Toast.show({ type: 'error', text1: 'Не вдалося скасувати повернення', text2: e?.message })
+                }
+              },
+            },
+          ]
+        )
+        return
+      }
+      if (Number(tx.amount) >= 0) {
+        triggerErrorHaptic()
+        Toast.show({
+          type: 'info',
+          text1: 'Повернення — тільки для витрат',
+          text2: 'Потягніть уліво витрату (−), а потім оберіть дохід, яким її повернули',
+          visibilityTime: 4500,
+        })
+        return
+      }
+      if (tx.is_transfer) {
+        triggerErrorHaptic()
+        Toast.show({ type: 'info', text1: 'Переказ не може мати повернення', text2: 'Оберіть звичайну витрату' })
+        return
+      }
+      triggerMediumHaptic()
+      smoothLayout()
+      setRefundFor(tx)
+    },
+    [onUnlinkRefund]
+  )
+
+  const pickRefund = useCallback(
+    async (refund: Transaction) => {
+      const expense = refundFor
+      if (!expense || linking) return
+      if (refund.id === expense.id) return
+      if (!canBeRefund(refund)) {
+        triggerErrorHaptic()
+        Toast.show({
+          type: 'error',
+          text1: refund.refund_for ? 'Це вже повернення іншої витрати' : 'Оберіть дохід (+)',
+          text2: refund.refund_for
+            ? 'Спершу скасуйте його повернення свайпом уліво'
+            : 'Повернення — це гроші, що прийшли назад: від магазину, сервісу чи друга',
+          visibilityTime: 4000,
+        })
+        return
+      }
+      setLinking(true)
+      try {
+        await onLinkRefund?.(expense, refund)
+        triggerSuccessHaptic()
+        smoothLayout()
+        setRefundFor(null)
+        const refundAmount = Number(refund.amount)
+        const left = Math.abs(Number(expense.amount)) - refundAmount
+        Toast.show({
+          type: 'success',
+          text1: 'Повернення прив’язано',
+          text2:
+            left > 0.005
+              ? `«${txDisplayTitle(expense)}»: у статистиці тепер −${fmtMoney(left)}`
+              : `«${txDisplayTitle(expense)}» повністю повернено`,
+        })
+      } catch (e: any) {
+        triggerErrorHaptic()
+        Toast.show({ type: 'error', text1: 'Не вдалося прив’язати повернення', text2: e?.message })
+      } finally {
+        setLinking(false)
+      }
+    },
+    [refundFor, linking, onLinkRefund]
+  )
+
+  const modeFor = (t: Transaction): RowMode => {
+    if (!refundFor) return 'normal'
+    if (t.id === refundFor.id) return 'target'
+    return canBeRefund(t) ? 'pickable' : 'dimmed'
+  }
+
+  const handlePress = useCallback(
+    (tx: Transaction) => {
+      if (refundFor) pickRefund(tx)
+      else onPressTx?.(tx)
+    },
+    [refundFor, pickRefund, onPressTx]
+  )
+
+  const swipeProps = {
+    onRefund: onLinkRefund ? startRefund : undefined,
+    onDelete: onDeleteTx,
+  }
+
   const cardsById = useMemo(() => {
     const map: Record<string, Card> = {}
     for (const c of cards) map[c.id] = c
     return map
   }, [cards])
 
+  // Pinned ones live only in their section (like the web); they join the list once categorized
+  const regular = useMemo(
+    () => transactions.filter(t => pinStateOf(t, pinnedCategories) === 'none'),
+    [transactions, pinnedCategories]
+  )
+
   const groups = useMemo(() => {
     const out: DayGroup[] = []
-    for (const tx of transactions) {
+    for (const tx of regular) {
       const d = new Date(tx.created_at)
       const key = dayKey(d)
       let g = out[out.length - 1]
@@ -112,9 +277,10 @@ function TransactionList({
       }
     }
     return out
-  }, [transactions, cardsById])
+  }, [regular, cardsById])
 
   const mask = (s: string) => (hidden ? '••••' : s)
+  const hasPickable = !!refundFor && transactions.some(canBeRefund)
 
   return (
     <View style={styles.card}>
@@ -123,14 +289,61 @@ function TransactionList({
         <BankSyncIndicator />
       </View>
 
-      {!loading && (
-        <PinnedStrip
-          items={pinned}
-          cardsById={cardsById}
-          hidden={hidden}
-          onPress={onPressTx}
-          onLongPress={onLongPressTx}
-        />
+      {refundFor && (
+        <View style={styles.pickBanner}>
+          <View style={styles.pickIcon}>
+            <Text style={styles.pickIconText}>↩︎</Text>
+          </View>
+          <View style={styles.pickTextWrap}>
+            <Text style={styles.pickTitle}>Оберіть дохід-повернення</Text>
+            <Text style={styles.pickSub} numberOfLines={2}>
+              для «{txDisplayTitle(refundFor)}» · {mask(`−${fmtMoney(Number(refundFor.amount), refundFor.currency || (refundFor.card_id ? cardsById[refundFor.card_id]?.currency : undefined))}`)}
+              {!hasPickable ? '\nДоходів у списку немає — прокрутіть нижче' : ''}
+            </Text>
+          </View>
+          {linking ? (
+            <ActivityIndicator color={Colors.orange} />
+          ) : (
+            <Pressable onPress={cancelRefundPick} hitSlop={8} style={styles.pickCancel}>
+              <Text style={styles.pickCancelText}>Скасувати</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
+
+      {!loading && pinned.length > 0 && (
+        <View style={styles.pinnedWrap}>
+          <Pressable onPress={togglePinned} style={({ pressed }) => [styles.pinnedHeader, pressed && styles.pinnedHeaderPressed]}>
+            <Text style={styles.pinnedEmoji}>📌</Text>
+            <View style={styles.pinnedTitleWrap}>
+              <Text style={styles.pinnedTitle}>Закріплені</Text>
+              {pinnedCollapsed && (
+                <Text style={styles.pinnedSub}>
+                  {pinned.length} {pluralTx(pinned.length)} · натисніть, щоб розгорнути
+                </Text>
+              )}
+            </View>
+            <View style={styles.pinnedBadge}>
+              <Text style={styles.pinnedBadgeText}>{pinned.length}</Text>
+            </View>
+            <Animated.Text style={[styles.pinnedChevron, { transform: [{ rotate: chevronRotate }] }]}>⌄</Animated.Text>
+          </Pressable>
+          {!pinnedCollapsed &&
+            pinned.map((tx, i) => (
+              <TxRow
+                key={`pin-${tx.id}`}
+                tx={tx}
+                card={tx.card_id ? cardsById[tx.card_id] : undefined}
+                hidden={hidden}
+                showDate
+                last={i === pinned.length - 1}
+                mode={modeFor(tx)}
+                onPress={handlePress}
+                onLongPress={onLongPressTx}
+                {...swipeProps}
+              />
+            ))}
+        </View>
       )}
 
       {onFilterChange && (
@@ -155,11 +368,15 @@ function TransactionList({
 
       {loading ? (
         <TransactionRowsSkeleton />
-      ) : transactions.length === 0 ? (
+      ) : regular.length === 0 && (pinned.length === 0 || !hasMore) ? (
         <View style={styles.stateWrap}>
           <Text style={styles.stateEmoji}>{error ? '⚠️' : '🧾'}</Text>
           <Text style={styles.stateText}>
-            {error ? 'Не вдалося завантажити транзакції' : 'Транзакцій поки немає'}
+            {error
+              ? 'Не вдалося завантажити транзакції'
+              : pinned.length > 0
+                ? 'Усі транзакції — у закріплених'
+                : 'Транзакцій поки немає'}
           </Text>
           {error && onRetry && (
             <Pressable onPress={onRetry} style={styles.retryBtn}>
@@ -183,54 +400,19 @@ function TransactionList({
                 </Text>
               </View>
 
-              {group.items.map((tx, i) => {
-                const amount = Number(tx.amount)
-                const isIncome = amount > 0
-                const card = tx.card_id ? cardsById[tx.card_id] : undefined
-                const currency = tx.currency || card?.currency
-                const title = txDisplayTitle(tx)
-                const isPinned = pinStateOf(tx, pinnedCategories) !== 'none'
-                const time = new Date(tx.created_at).toLocaleTimeString('uk-UA', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })
-                const meta = [tx.category && tx.category !== title ? tx.category : null, card?.name, time]
-                  .filter(Boolean)
-                  .join(' · ')
-
-                return (
-                  <Pressable
-                    key={tx.id}
-                    onPress={() => onPressTx?.(tx)}
-                    onLongPress={() => onLongPressTx?.(tx)}
-                    delayLongPress={350}
-                    style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
-                  >
-                    <View style={[styles.iconWrap, isIncome && styles.iconWrapGreen]}>
-                      <Text style={styles.iconEmoji}>{getCategoryIcon(tx.category ?? null, amount)}</Text>
-                    </View>
-
-                    <View style={[styles.info, i < group.items.length - 1 && styles.infoBorder]}>
-                      <View style={styles.infoText}>
-                        <Text style={styles.txTitle} numberOfLines={1}>
-                          {isPinned && <Text style={styles.pinMark}>📌 </Text>}
-                          {title}
-                        </Text>
-                        <Text style={styles.txMeta} numberOfLines={1}>{meta}</Text>
-                      </View>
-                      <Text
-                        style={[
-                          styles.amount,
-                          isIncome && styles.amountGreen,
-                          tx.exclude_from_stats && styles.amountMuted,
-                        ]}
-                      >
-                        {mask(`${isIncome ? '+' : '−'}${fmtMoney(amount, currency)}`)}
-                      </Text>
-                    </View>
-                  </Pressable>
-                )
-              })}
+              {group.items.map((tx, i) => (
+                <TxRow
+                  key={tx.id}
+                  tx={tx}
+                  card={tx.card_id ? cardsById[tx.card_id] : undefined}
+                  hidden={hidden}
+                  last={i === group.items.length - 1}
+                  mode={modeFor(tx)}
+                  onPress={handlePress}
+                  onLongPress={onLongPressTx}
+                  {...swipeProps}
+                />
+              ))}
             </View>
           ))}
 
@@ -323,68 +505,109 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     textAlign: 'right',
   },
-  item: {
+  pickBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingLeft: 16,
     gap: 12,
-  },
-  itemPressed: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-  },
-  iconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    marginHorizontal: 16,
+    marginBottom: 10,
+    padding: 12,
+    borderRadius: 16,
     backgroundColor: 'rgba(255, 107, 0, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 107, 0, 0.45)',
+  },
+  pickIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: Colors.orange,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconWrapGreen: {
-    backgroundColor: 'rgba(34, 197, 94, 0.12)',
+  pickIconText: {
+    fontSize: 17,
+    color: Colors.white,
+    fontWeight: '800',
   },
-  iconEmoji: {
-    fontSize: 19,
-  },
-  info: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingRight: 16,
-    gap: 10,
-  },
-  infoBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  infoText: {
+  pickTextWrap: {
     flex: 1,
   },
-  pinMark: {
-    fontSize: 12,
-  },
-  txTitle: {
-    fontSize: 15,
-    fontWeight: '600',
+  pickTitle: {
+    fontSize: 14,
+    fontWeight: '700',
     color: Colors.white,
   },
-  txMeta: {
+  pickSub: {
+    fontSize: 12,
+    color: Colors.white60,
+    marginTop: 2,
+  },
+  pickCancel: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 100,
+    backgroundColor: 'rgba(255, 255, 255, 0.10)',
+  },
+  pickCancelText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.white,
+  },
+  pinnedWrap: {
+    marginHorizontal: 12,
+    marginBottom: 8,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+  },
+  pinnedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  pinnedHeaderPressed: {
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+  },
+  pinnedEmoji: {
+    fontSize: 15,
+  },
+  pinnedTitleWrap: {
+    flex: 1,
+  },
+  pinnedTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.white,
+  },
+  pinnedSub: {
     fontSize: 12,
     color: Colors.textMuted,
     marginTop: 2,
   },
-  amount: {
-    fontSize: 15,
+  pinnedBadge: {
+    minWidth: 24,
+    height: 24,
+    paddingHorizontal: 7,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 107, 0, 0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pinnedBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: Colors.orange,
+  },
+  pinnedChevron: {
+    fontSize: 18,
+    lineHeight: 20,
+    color: Colors.white60,
     fontWeight: '700',
-    color: Colors.white,
-    fontVariant: ['tabular-nums'],
-  },
-  amountGreen: {
-    color: Colors.green,
-  },
-  amountMuted: {
-    opacity: 0.45,
   },
   stateWrap: {
     paddingVertical: 36,

@@ -14,6 +14,7 @@ import { triggerLightHaptic } from "./utils/haptics"
 import { GlassSurface } from "./components/LiquidGlass"
 import { useSettingsStore } from "./store/useSettingsStore"
 import { useBankAutoSync } from "./hooks/useBankAutoSync"
+import { toastConfig } from "./components/ToastConfig"
 
 // Screens
 import AuthScreen from "./screens/AuthScreen"
@@ -161,7 +162,7 @@ export default function App() {
         </View>
       </View>
 
-      <Toast />
+      <Toast config={toastConfig} topOffset={58} />
     </View>
   )
 }

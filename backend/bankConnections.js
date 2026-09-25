@@ -1,8 +1,23 @@
 import crypto from 'crypto'
 import axios from 'axios'
 import { decryptJSON, encryptJSON, isEncryptionConfigured } from './secretBox.js'
+import {
+  MONOBANK_ID,
+  MONOBANK_LOGO_SVG,
+  MONOBANK_PROVIDER,
+  MONO_MAX_DAYS,
+  MONO_REQUEST_GAP_MS,
+  MonoRateLimitError,
+  MonoTokenError,
+  accountsFromClientInfo,
+  fetchClientInfo,
+  fetchStatement,
+  monoTransactionRow,
+  setWebhook,
+} from './monobank.js'
 
-// Bank connections through TrueLayer for any supported provider (Revolut, Wise, BNP, Monzo, …).
+// Bank connections through TrueLayer for any supported provider (Revolut, Wise, BNP, Monzo, …),
+// plus Monobank (Ukraine) through its personal-token API — same table, same sync, same UI.
 // Flow: app asks /start for an auth URL → user logs in at the bank → TrueLayer redirects to
 // /callback on this backend → tokens are encrypted and stored in bank_connections → user is sent
 // back to the app/web. Each bank account (or credit card) is imported into its own app card.
@@ -71,10 +86,35 @@ function withQuery(url, params) {
   return url + sep + new URLSearchParams(params).toString()
 }
 
-function callbackUrl(req) {
+function publicBase(req) {
   const base = process.env.PUBLIC_API_URL ||
     `${req.headers['x-forwarded-proto'] || req.protocol}://${req.headers['x-forwarded-host'] || req.headers.host}`
-  return `${base.replace(/\/$/, '')}/api/bank-connections/callback`
+  return base.replace(/\/$/, '')
+}
+
+function callbackUrl(req) {
+  return `${publicBase(req)}/api/bank-connections/callback`
+}
+
+const monoLogoUrl = req => `${publicBase(req)}/api/bank-logos/monobank.svg`
+
+// Webhook URL per connection, signed so nobody can post fake transactions into it
+function monoWebhookSig(connId) {
+  return crypto.createHmac('sha256', stateSecret()).update(`mono-webhook:${connId}`).digest('base64url').slice(0, 32)
+}
+
+function monoWebhookUrl(base, connId) {
+  return `${base}/api/bank-connections/monobank/webhook/${connId}/${monoWebhookSig(connId)}`
+}
+
+/** Monobank pushes every new transaction to the webhook. Needs a public https backend. */
+async function enableMonoWebhook(token, base, connId) {
+  if (!/^https:\/\//.test(base)) return // local dev: polling only
+  try {
+    await setWebhook(token, monoWebhookUrl(base, connId))
+  } catch (e) {
+    console.warn('[Banks] Monobank webhook not set:', e.message)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -260,17 +300,22 @@ async function ensureCardForItem(supabase, userId, conn, item, links) {
   const linkedCardIds = links.map(l => l.card_id).filter(Boolean)
   const { data: candidates } = await supabase
     .from('cards')
-    .select('id')
+    .select('id, name')
     .eq('user_id', userId)
     .ilike('bank', `%${conn.provider_name}%`)
     .eq('currency', item.currency)
-  let cardId = (candidates || []).map(c => c.id).find(id => !linkedCardIds.includes(id))
+  const matchName = item.meta?.match_name?.toLowerCase()
+  let cardId = (candidates || [])
+    // Banks with several same-currency accounts (Monobank Black/White): only a card with that name
+    .filter(c => !matchName || String(c.name).toLowerCase().includes(matchName))
+    .map(c => c.id)
+    .find(id => !linkedCardIds.includes(id))
 
   if (!cardId) {
     const bankId = await ensureBankRow(supabase, userId, conn.provider_name)
-    const baseName = item.kind === 'card'
+    const baseName = item.meta?.card_name || (item.kind === 'card'
       ? `${conn.provider_name} ${item.display_name || 'Card'}`
-      : `${conn.provider_name} ${item.currency}`
+      : `${conn.provider_name} ${item.currency}`)
     for (let attempt = 0; attempt < 5 && !cardId; attempt++) {
       const name = attempt === 0 ? baseName : `${baseName} ${attempt + 1}`
       const { data, error } = await supabase
@@ -293,10 +338,31 @@ async function ensureCardForItem(supabase, userId, conn, item, links) {
       display_name: item.display_name,
       currency: item.currency,
       card_id: cardId,
+      ...(item.meta && { meta: item.meta }),
     },
     { onConflict: 'connection_id,account_id' }
   )
   return { cardId }
+}
+
+/** Inserts rows whose bank transaction id isn't imported yet. Returns the inserted rows. */
+async function insertNewTransactions(supabase, userId, rows) {
+  const ids = rows.map(r => r.transaction_id_card).filter(Boolean)
+  const existing = new Set()
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data } = await supabase
+      .from('transactions')
+      .select('transaction_id_card')
+      .eq('user_id', userId)
+      .in('transaction_id_card', ids.slice(i, i + 200))
+    for (const r of data || []) existing.add(r.transaction_id_card)
+  }
+  const fresh = rows.filter(r => r.transaction_id_card && !existing.has(r.transaction_id_card))
+  if (fresh.length > 0) {
+    const { error } = await supabase.from('transactions').insert(fresh)
+    if (error) throw error
+  }
+  return fresh
 }
 
 async function countCardTransactions(supabase, cardId) {
@@ -308,8 +374,8 @@ async function countCardTransactions(supabase, cardId) {
 }
 
 // Banks limit how far back transactions can be read (and some count the range strictly).
-// On "invalid_date_range" retry with shorter windows.
-const FALLBACK_WINDOWS_DAYS = [60, 30, 7]
+// On "invalid_date_range" / "sca_exceeded" retry with shorter windows.
+const FALLBACK_WINDOWS_DAYS = [89, 60, 30, 7]
 
 async function fetchTransactions(client, base, days, now) {
   const iso = d => d.toISOString().split('.')[0] + 'Z'
@@ -325,7 +391,9 @@ async function fetchTransactions(client, base, days, now) {
       if (e instanceof ConsentExpiredError) throw e
       if (e.response?.status === 404) return [] // no transactions for this account
       const code = e.response?.data?.error
-      if (e.response?.status === 400 && code === 'invalid_date_range' && w !== windows[windows.length - 1]) {
+      // sca_exceeded: without a fresh bank login (SCA) some banks (Revolut EU) only serve a shorter history
+      const retryShorter = code === 'invalid_date_range' || code === 'sca_exceeded'
+      if ([400, 403].includes(e.response?.status) && retryShorter && w !== windows[windows.length - 1]) {
         console.warn(`[Banks] ${base}: ${w}-day range rejected, trying shorter`)
         continue
       }
@@ -369,20 +437,9 @@ async function syncConnection(supabase, conn, psuHeaders) {
     // Starting balance only for a card with no history yet (never overwrite an existing card's)
     const setStartingBalance = firstImport && (await countCardTransactions(supabase, cardId)) === 0
 
-    // Skip transactions imported before (matched by the bank's transaction id)
-    const ids = txs.map(t => t.transaction_id).filter(Boolean)
-    const existing = new Set()
-    for (let i = 0; i < ids.length; i += 200) {
-      const { data } = await supabase
-        .from('transactions')
-        .select('transaction_id_card')
-        .eq('user_id', userId)
-        .in('transaction_id_card', ids.slice(i, i + 200))
-      for (const r of data || []) existing.add(r.transaction_id_card)
-    }
-
-    const rows = txs
-      .filter(t => t.transaction_id && !existing.has(t.transaction_id))
+    // Transactions imported before are skipped (matched by the bank's transaction id)
+    const rows = await insertNewTransactions(supabase, userId, txs
+      .filter(t => t.transaction_id)
       .map(t => ({
         user_id: userId,
         amount: signedAmount(t),
@@ -394,13 +451,8 @@ async function syncConnection(supabase, conn, psuHeaders) {
         transaction_id_card: t.transaction_id,
         created_at: t.timestamp,
         merchant_name: t.merchant_name || null,
-      }))
-
-    if (rows.length > 0) {
-      const { error } = await supabase.from('transactions').insert(rows)
-      if (error) throw error
-      added += rows.length
-    }
+      })))
+    added += rows.length
 
     // First import into an empty card: set its starting balance so the app matches the bank
     if (setStartingBalance) {
@@ -426,6 +478,198 @@ async function syncConnection(supabase, conn, psuHeaders) {
     .update({ status: 'active', last_sync_at: now.toISOString(), last_error: null, updated_at: now.toISOString() })
     .eq('id', conn.id)
   return added
+}
+
+// ---------------------------------------------------------------------------
+// Monobank
+// ---------------------------------------------------------------------------
+async function saveMonoAccounts(supabase, conn, items) {
+  if (items.length === 0) return
+  // No card_id here: existing links stay, cards are created on the first sync with activity
+  const { error } = await supabase.from('bank_connection_accounts').upsert(
+    items.map(i => ({
+      connection_id: conn.id,
+      user_id: conn.user_id,
+      account_id: i.account_id,
+      kind: i.kind,
+      display_name: i.display_name,
+      currency: i.currency,
+      meta: i.meta,
+    })),
+    { onConflict: 'connection_id,account_id' }
+  )
+  if (error) throw error
+}
+
+const itemFromLink = l => ({
+  kind: l.kind,
+  account_id: l.account_id,
+  currency: l.currency,
+  display_name: l.display_name,
+  meta: l.meta || undefined,
+})
+
+const syncedAtMs = l => (l.last_sync_at ? new Date(l.last_sync_at).getTime() : 0)
+
+/**
+ * Monobank allows one statement request per minute, so every sync reads one account — the one
+ * synced longest ago — and the accounts take turns. Real-time updates come from the webhook.
+ */
+async function syncMonobankConnection(supabase, conn) {
+  const { token } = decryptJSON(conn.tokens_encrypted)
+  const userId = conn.user_id
+  const loadLinks = async () =>
+    (await supabase.from('bank_connection_accounts').select('*').eq('connection_id', conn.id)).data || []
+
+  let links = await loadLinks()
+  if (links.length === 0) {
+    await saveMonoAccounts(supabase, conn, accountsFromClientInfo(await fetchClientInfo(token)))
+    links = await loadLinks()
+    if (links.length === 0) return 0
+  }
+
+  const now = new Date()
+  if (now.getTime() - Math.max(...links.map(syncedAtMs)) < MONO_REQUEST_GAP_MS) return 0 // not our minute yet
+
+  const link = [...links].sort((a, b) => syncedAtMs(a) - syncedAtMs(b))[0]
+  const firstImport = !link.card_id || (await countCardTransactions(supabase, link.card_id)) === 0
+  const days = firstImport ? MONO_MAX_DAYS : Math.min(MONO_MAX_DAYS, regularSyncDays(link.last_sync_at, now))
+  const toSec = Math.floor(now.getTime() / 1000)
+
+  // Taken before the request, so a parallel sync (web + phone) waits for its own minute
+  await supabase.from('bank_connection_accounts').update({ last_sync_at: now.toISOString() }).eq('id', link.id)
+  let items
+  try {
+    items = await fetchStatement(token, link.account_id, toSec - days * 86400, toSec)
+  } catch (e) {
+    if (e instanceof MonoRateLimitError) return 0
+    throw e
+  }
+  items = Array.isArray(items) ? items : []
+
+  const meta = link.meta || {}
+  // Unused account (no card yet, nothing happened, no money): don't clutter the cards page
+  if (!link.card_id && items.length === 0 && !Number(meta.balance)) {
+    await markSynced(supabase, conn.id, now)
+    return 0
+  }
+
+  const { cardId } = await ensureCardForItem(supabase, userId, conn, itemFromLink(link), links)
+  const setStartingBalance = firstImport && (await countCardTransactions(supabase, cardId)) === 0
+  const rows = await insertNewTransactions(
+    supabase,
+    userId,
+    items.map(it => monoTransactionRow(it, { userId, cardId, providerName: conn.provider_name, accountCurrency: link.currency }))
+  )
+
+  if (setStartingBalance) {
+    // Items are newest first; their balance is right after that operation (incl. the credit limit)
+    const bankBalance = items.length
+      ? Number(items[0].balance || 0) / 100 - Number(meta.credit_limit || 0)
+      : Number(meta.balance || 0)
+    const importedSum = rows.reduce((s, r) => s + Number(r.amount), 0)
+    await supabase
+      .from('cards')
+      .update({ initial_balance: Math.round((bankBalance - importedSum) * 100) / 100 })
+      .eq('id', cardId)
+  }
+
+  await markSynced(supabase, conn.id, now)
+  return rows.length
+}
+
+async function markSynced(supabase, connId, now) {
+  await supabase
+    .from('bank_connections')
+    .update({ status: 'active', last_sync_at: now.toISOString(), last_error: null, updated_at: now.toISOString() })
+    .eq('id', connId)
+}
+
+/** Creates/refreshes the user's Monobank connection from a personal token. */
+async function connectMonobank(supabase, userId, token, { base, logo }) {
+  const info = await fetchClientInfo(token)
+  const { data: conn, error } = await supabase
+    .from('bank_connections')
+    .upsert(
+      {
+        user_id: userId,
+        provider_id: MONOBANK_ID,
+        provider_name: MONOBANK_PROVIDER.name,
+        provider_logo: logo,
+        country: MONOBANK_PROVIDER.country,
+        tokens_encrypted: encryptJSON({ token }),
+        status: 'active',
+        consent_expires_at: null, // personal tokens don't expire (until revoked)
+        last_error: null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id,provider_id' }
+    )
+    .select('*')
+    .single()
+  if (error) throw error
+  const items = accountsFromClientInfo(info)
+  await saveMonoAccounts(supabase, conn, items)
+  if (base) await enableMonoWebhook(token, base, conn.id)
+  return { conn, accounts: items.length }
+}
+
+/** One transaction pushed by Monobank's webhook. */
+async function handleMonoWebhook(supabase, connId, body) {
+  if (body?.type !== 'StatementItem' || !body.data?.statementItem) return
+  const { data: conn } = await supabase
+    .from('bank_connections')
+    .select('*')
+    .eq('id', connId)
+    .eq('provider_id', MONOBANK_ID)
+    .eq('status', 'active')
+    .maybeSingle()
+  if (!conn) return
+
+  const links = (await supabase.from('bank_connection_accounts').select('*').eq('connection_id', conn.id)).data || []
+  const link = links.find(l => l.account_id === body.data.account)
+  if (!link) return // a jar or an account opened after connecting
+
+  const it = body.data.statementItem
+  const { cardId } = await ensureCardForItem(supabase, conn.user_id, conn, itemFromLink(link), links)
+  const newCard = !link.card_id && (await countCardTransactions(supabase, cardId)) === 0
+  const rows = await insertNewTransactions(supabase, conn.user_id, [
+    monoTransactionRow(it, { userId: conn.user_id, cardId, providerName: conn.provider_name, accountCurrency: link.currency }),
+  ])
+  // First activity on a new card: starting balance = balance before this operation
+  if (newCard && rows.length) {
+    const before = Number(it.balance || 0) / 100 - Number(link.meta?.credit_limit || 0) - rows[0].amount
+    await supabase.from('cards').update({ initial_balance: Math.round(before * 100) / 100 }).eq('id', cardId)
+  }
+}
+
+// Legacy: Monobank token stored in plain text in user_preferences.monobank_api
+async function migrateLegacyMonobank(supabase, userId, opts = {}) {
+  if (!isEncryptionConfigured()) return
+  const { data: prefs } = await supabase
+    .from('user_preferences')
+    .select('monobank_api')
+    .eq('user_id', userId)
+    .maybeSingle()
+  const legacy = prefs?.monobank_api
+  if (!legacy?.token) return
+  try {
+    const { data: existing } = await supabase
+      .from('bank_connections')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('provider_id', MONOBANK_ID)
+      .maybeSingle()
+    if (!existing) await connectMonobank(supabase, userId, legacy.token, opts)
+    // The token now lives (encrypted) in bank_connections
+    await supabase
+      .from('user_preferences')
+      .update({ monobank_api: { ...legacy, token: null } })
+      .eq('user_id', userId)
+    console.log('[Banks] Migrated legacy Monobank token for user:', userId)
+  } catch (e) {
+    console.warn('[Banks] Legacy Monobank migration failed:', e.message)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -481,8 +725,32 @@ async function migrateLegacyRevolut(supabase, userId) {
 }
 
 /** Syncs every active connection of the user. Used by the apps and by /api/syncTrueLayer. */
-export async function syncAllBankConnections(supabase, userId, psuHeaders = {}) {
+/** Syncs one connection of any kind (TrueLayer or Monobank). */
+async function syncAnyConnection(supabase, conn, psuHeaders) {
+  try {
+    return conn.provider_id === MONOBANK_ID
+      ? await syncMonobankConnection(supabase, conn)
+      : await syncConnection(supabase, conn, psuHeaders)
+  } catch (e) {
+    if (e instanceof MonoTokenError) {
+      // Token revoked in Monobank — like an expired consent: the user connects again
+      await supabase
+        .from('bank_connections')
+        .update({ status: 'expired', last_error: 'consent_expired', updated_at: new Date().toISOString() })
+        .eq('id', conn.id)
+      throw new ConsentExpiredError(e.message)
+    }
+    throw e
+  }
+}
+
+/**
+ * Syncs every active connection of the user. Used by the apps and by /api/syncTrueLayer.
+ * `opts` ({ base, logo }) lets a legacy Monobank token be moved into a connection.
+ */
+export async function syncAllBankConnections(supabase, userId, psuHeaders = {}, opts = {}) {
   await migrateLegacyRevolut(supabase, userId)
+  if (opts.base) await migrateLegacyMonobank(supabase, userId, opts)
   const { data: conns } = await supabase
     .from('bank_connections')
     .select('*')
@@ -492,7 +760,7 @@ export async function syncAllBankConnections(supabase, userId, psuHeaders = {}) 
   const results = []
   for (const conn of conns || []) {
     try {
-      results.push({ id: conn.id, provider_name: conn.provider_name, added: await syncConnection(supabase, conn, psuHeaders) })
+      results.push({ id: conn.id, provider_name: conn.provider_name, added: await syncAnyConnection(supabase, conn, psuHeaders) })
     } catch (e) {
       const expired = e instanceof ConsentExpiredError
       const message = expired ? 'consent_expired' : e.response?.data?.error || e.message
@@ -513,6 +781,7 @@ function publicConnection(c, accounts = []) {
     provider_name: c.provider_name,
     provider_logo: c.provider_logo,
     country: c.country,
+    auth: c.provider_id === MONOBANK_ID ? 'token' : 'redirect',
     status: c.status,
     consent_expires_at: c.consent_expires_at,
     last_sync_at: c.last_sync_at,
@@ -532,7 +801,12 @@ export function registerBankConnections(app, { supabase, getUserFromToken, getUs
   app.get('/api/bank-providers', getUserFromToken, async (req, res) => {
     try {
       const country = String(req.query.country || '').toLowerCase()
-      const list = await getProviders()
+      // Monobank first: it doesn't depend on TrueLayer, so it's listed even if TrueLayer is down
+      const mono = { ...MONOBANK_PROVIDER, logo: monoLogoUrl(req), scopes: [] }
+      const list = [mono, ...(await getProviders().catch(e => {
+        console.error('[Banks] TrueLayer providers error:', e.message)
+        return []
+      }))]
       res.json(
         (country ? list.filter(p => p.country === country) : list)
           .map(({ scopes, ...p }) => p)
@@ -543,10 +817,59 @@ export function registerBankConnections(app, { supabase, getUserFromToken, getUs
     }
   })
 
+  app.get('/api/bank-logos/monobank.svg', (req, res) => {
+    res.set('Cache-Control', 'public, max-age=604800').type('image/svg+xml').send(MONOBANK_LOGO_SVG)
+  })
+
+  // POST /api/bank-connections/token { provider_id: 'monobank', token } — banks connected with a
+  // personal token (Monobank: api.monobank.ua) instead of a login redirect
+  app.post('/api/bank-connections/token', getUserFromToken, async (req, res) => {
+    try {
+      if (req.body?.provider_id !== MONOBANK_ID) return res.status(400).json({ error: 'Unknown bank' })
+      if (!isEncryptionConfigured()) {
+        return res.status(500).json({ error: 'ENCRYPTION_KEY is not configured on the server' })
+      }
+      const token = String(req.body?.token || '').trim()
+      if (!/^[\w-]{20,100}$/.test(token)) return res.status(400).json({ error: 'Невірний формат токена' })
+
+      const { accounts } = await connectMonobank(supabase, req.user_id, token, {
+        base: publicBase(req),
+        logo: monoLogoUrl(req),
+      })
+      console.log('[Banks] Monobank connected for user:', req.user_id)
+      res.json({ success: true, bank_name: MONOBANK_PROVIDER.name, accounts })
+    } catch (e) {
+      if (e instanceof MonoTokenError) return res.status(400).json({ error: e.message })
+      if (e instanceof MonoRateLimitError) return res.status(429).json({ error: e.message })
+      console.error('[Banks] token connect error:', e.message)
+      res.status(500).json({ error: e.message })
+    }
+  })
+
+  // Monobank webhook: GET is its URL check, POST brings one new transaction
+  const webhookPath = '/api/bank-connections/monobank/webhook/:id/:sig'
+  const webhookSigOk = req => {
+    const a = Buffer.from(String(req.params.sig))
+    const b = Buffer.from(monoWebhookSig(req.params.id))
+    return a.length === b.length && crypto.timingSafeEqual(a, b)
+  }
+  app.get(webhookPath, (req, res) => res.sendStatus(webhookSigOk(req) ? 200 : 404))
+  app.post(webhookPath, async (req, res) => {
+    if (!webhookSigOk(req)) return res.sendStatus(404)
+    try {
+      await handleMonoWebhook(supabase, req.params.id, req.body)
+    } catch (e) {
+      console.error('[Banks] Monobank webhook error:', e.message)
+    }
+    // Always 200: Monobank disables webhooks that keep failing; polling catches anything missed
+    res.sendStatus(200)
+  })
+
   // GET /api/bank-connections — the user's connected banks (never includes tokens)
   app.get('/api/bank-connections', getUserFromToken, async (req, res) => {
     try {
       await migrateLegacyRevolut(supabase, req.user_id)
+      await migrateLegacyMonobank(supabase, req.user_id, { base: publicBase(req), logo: monoLogoUrl(req) })
       const [{ data: conns, error }, { data: accounts }] = await Promise.all([
         supabase.from('bank_connections').select('*').eq('user_id', req.user_id).order('created_at'),
         supabase.from('bank_connection_accounts').select('*').eq('user_id', req.user_id),
@@ -653,14 +976,17 @@ export function registerBankConnections(app, { supabase, getUserFromToken, getUs
           .maybeSingle()
         if (!conn) return res.status(404).json({ success: false, error: 'Connection not found' })
         try {
-          const added = await syncConnection(supabase, conn, psu)
+          const added = await syncAnyConnection(supabase, conn, psu)
           return res.json({ success: true, added, results: [{ id: conn.id, provider_name: conn.provider_name, added }] })
         } catch (e) {
           const message = e instanceof ConsentExpiredError ? 'consent_expired' : e.response?.data?.error || e.message
           return res.json({ success: false, added: 0, error: message })
         }
       }
-      const result = await syncAllBankConnections(supabase, req.user_id, psu)
+      const result = await syncAllBankConnections(supabase, req.user_id, psu, {
+        base: publicBase(req),
+        logo: monoLogoUrl(req),
+      })
       res.json({ success: true, ...result })
     } catch (e) {
       console.error('[Banks] sync error:', e.message)
@@ -671,6 +997,20 @@ export function registerBankConnections(app, { supabase, getUserFromToken, getUs
   // DELETE /api/bank-connections/:id — disconnect (imported transactions and cards stay)
   app.delete('/api/bank-connections/:id', getUserFromToken, async (req, res) => {
     try {
+      const { data: conn } = await supabase
+        .from('bank_connections')
+        .select('provider_id, tokens_encrypted')
+        .eq('id', req.params.id)
+        .eq('user_id', req.user_id)
+        .maybeSingle()
+      // Monobank: stop the webhook pushes (best effort)
+      if (conn?.provider_id === MONOBANK_ID && conn.tokens_encrypted) {
+        try {
+          await setWebhook(decryptJSON(conn.tokens_encrypted).token, '')
+        } catch (e) {
+          console.warn('[Banks] Could not remove Monobank webhook:', e.message)
+        }
+      }
       const { error } = await supabase
         .from('bank_connections')
         .delete()
