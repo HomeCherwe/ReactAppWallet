@@ -3,7 +3,7 @@ import { Animated,
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   Alert, ActivityIndicator, Platform, RefreshControl
 } from 'react-native'
-import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
+import PullToRefreshIndicator, { usePullToRefresh } from '../components/PullToRefreshIndicator'
 import { LinearGradient } from 'expo-linear-gradient'
 import { BlurView } from 'expo-blur'
 import GlassContextMenu from '../components/GlassContextMenu'
@@ -187,6 +187,14 @@ export default function CardsScreen() {
     )
   }
 
+  const pull = usePullToRefresh(() => {
+    setRefreshing(true)
+    loadData()
+    setBanksReloadKey(k => k + 1)
+    syncBanks().catch(() => {})
+    checkForAppUpdate()
+  }, refreshing)
+
   return (
     <View style={styles.root}>
       <LinearGradient
@@ -226,17 +234,12 @@ export default function CardsScreen() {
           contentContainerStyle={styles.list}
           refreshControl={
             <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true)
-                loadData()
-                setBanksReloadKey(k => k + 1)
-                syncBanks().catch(() => {})
-                checkForAppUpdate()
-              }}
+              refreshing={pull.controlRefreshing}
+              onRefresh={pull.onRefresh}
               tintColor="transparent"
             />
           }
+          onScrollEndDrag={pull.onScrollEndDrag}
           ListHeaderComponent={
             <ConnectedBanks
               reloadKey={banksReloadKey}

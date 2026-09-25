@@ -3,7 +3,7 @@ import { Animated,
   View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl,
   TextInput, Alert, ActivityIndicator, Platform
 } from 'react-native'
-import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
+import PullToRefreshIndicator, { usePullToRefresh } from '../components/PullToRefreshIndicator'
 import { checkForAppUpdate } from '../utils/appUpdate'
 import { Colors, Typography, Radius } from '../constants/theme'
 import { listArchivedTransactions, unarchiveTransaction, Transaction } from '../api/transactions'
@@ -85,6 +85,12 @@ export default function ArchivesScreen() {
     ])
   }
 
+  const pull = usePullToRefresh(() => {
+    setRefreshing(true)
+    fetchArchived(true)
+    checkForAppUpdate()
+  }, refreshing)
+
   return (
     <View style={styles.root}>
       <View style={styles.header}>
@@ -114,15 +120,12 @@ export default function ArchivesScreen() {
           keyExtractor={(item) => item.id}
           refreshControl={
             <RefreshControl
-              refreshing={refreshing}
+              refreshing={pull.controlRefreshing}
               tintColor="transparent"
-              onRefresh={() => {
-                setRefreshing(true)
-                fetchArchived(true)
-                checkForAppUpdate()
-              }}
+              onRefresh={pull.onRefresh}
             />
           }
+          onScrollEndDrag={pull.onScrollEndDrag}
           contentContainerStyle={styles.list}
           ListEmptyComponent={
             <View style={styles.emptyState}>

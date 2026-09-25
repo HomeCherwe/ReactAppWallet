@@ -1,18 +1,47 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Animated, Easing, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Animated, Easing, NativeScrollEvent, NativeSyntheticEvent, Platform, StyleSheet, Text, View } from 'react-native'
 import { Colors } from '../constants/theme'
 import { triggerLightHaptic, triggerSuccessHaptic } from '../utils/haptics'
 import { GlassSurface } from './LiquidGlass'
 import Icon from './Icon'
 
-// Pull further than this (px) and release to refresh (matches iOS RefreshControl)
-const THRESHOLD = 72
+// Pull further than this (px) and let go to refresh (the native control alone needs ~2x more)
+export const PULL_THRESHOLD = 60
+const THRESHOLD = PULL_THRESHOLD
 const DONE_VISIBLE_MS = 700
 const PILL_H = 36
 // Gap between the pill and the content it sits above
 const PILL_GAP = 10
 
 type Phase = 'idle' | 'pull' | 'release' | 'refreshing' | 'done'
+
+/**
+ * Wires a screen's refresh to the pill: letting go past PULL_THRESHOLD refreshes (exactly when
+ * the pill says "Відпустіть"), and on iOS the content springs right back while the pill at the
+ * top shows the progress. Pass `onRefresh` / `controlRefreshing` to the RefreshControl and
+ * `onScrollEndDrag` to the scroll view. One refresh at a time.
+ */
+export function usePullToRefresh(onRefresh: () => void, refreshing: boolean) {
+  const busy = useRef(refreshing)
+  useEffect(() => {
+    busy.current = refreshing
+  }, [refreshing])
+
+  const start = () => {
+    if (busy.current) return
+    busy.current = true
+    onRefresh()
+  }
+
+  return {
+    onRefresh: start,
+    // iOS: don't hold the content down — the pill shows the progress instead
+    controlRefreshing: Platform.OS === 'ios' ? false : refreshing,
+    onScrollEndDrag: (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (e.nativeEvent.contentOffset.y < -PULL_THRESHOLD) start()
+    },
+  }
+}
 
 /**
  * Pull-to-refresh status pill (the native spinner is hidden), like Telegram: it comes out of the
@@ -61,7 +90,9 @@ export default function PullToRefreshIndicator({
   useEffect(() => {
     if (refreshing) {
       set('refreshing')
-      Animated.spring(status, { toValue: 1, useNativeDriver: true, speed: 16, bounciness: 6 }).start()
+      // Already fully out from the pull — just keep it there
+      status.stopAnimation()
+      status.setValue(1)
       return
     }
     if (phaseRef.current !== 'refreshing') return
@@ -88,6 +119,8 @@ export default function PullToRefreshIndicator({
     outputRange: [PILL_GAP, -PILL_H - PILL_GAP],
     extrapolate: 'clamp',
   })
+  // While refreshing: pinned at the top edge; slides back up as it fades out when done
+  const pinned = status.interpolate({ inputRange: [0, 1], outputRange: [-PILL_H - PILL_GAP, PILL_GAP] })
   const pullScale = scrollY.interpolate({ inputRange: [-THRESHOLD - 20, -THRESHOLD, 0], outputRange: [1.05, 1, 0.85], extrapolate: 'clamp' })
 
   const busy = phase === 'refreshing' || phase === 'done'
@@ -102,7 +135,7 @@ export default function PullToRefreshIndicator({
           phase === 'release' && styles.pillReady,
           phase === 'done' && styles.pillDone,
           busy
-            ? { opacity: status, transform: [{ translateY: follow }] }
+            ? { opacity: status, transform: [{ translateY: pinned }] }
             : { opacity: pullOpacity, transform: [{ translateY: follow }, { scale: pullScale }] },
         ]}
       >
