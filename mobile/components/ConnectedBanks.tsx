@@ -15,6 +15,7 @@ import { txBus } from '../utils/txBus'
 import { triggerErrorHaptic, triggerLightHaptic, triggerMediumHaptic, triggerSuccessHaptic } from '../utils/haptics'
 import { Card } from '../api/cards'
 import BankLogo from './BankLogo'
+import { GlassSurface } from './LiquidGlass'
 import BankAccountsSheet from './BankAccountsSheet'
 import GlassContextMenu, { MenuAction } from './GlassContextMenu'
 
@@ -205,6 +206,7 @@ export default function ConnectedBanks({
     <View style={styles.wrap}>
       <Text style={styles.title}>🔄 Підключені банки</Text>
       <View style={styles.group}>
+        <GlassSurface borderRadius={20} />
       {connections.map((c, i) => {
           const status = statusLine(c)
           return (
@@ -274,15 +276,13 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   group: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
     borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.14)',
     overflow: 'hidden',
   },
   row: {
-    // Solid, so the lifted preview of the iOS context menu isn't see-through
-    backgroundColor: '#161619',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
