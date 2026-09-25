@@ -14,6 +14,8 @@ import ConnectedBanks from '../components/ConnectedBanks'
 import { BankProvider } from '../api/bankConnections'
 import { txBus } from '../utils/txBus'
 import { useMenuOverlay } from '../store/useMenuOverlay'
+import { syncBanks } from '../store/useBankSyncStore'
+import { checkForAppUpdate } from '../utils/appUpdate'
 import GlassButton from '../components/GlassButton'
 import { getBucket } from '../utils/currency'
 import { GlassPressable } from '../components/LiquidGlass'
@@ -184,6 +186,9 @@ export default function CardsScreen() {
               onRefresh={() => {
                 setRefreshing(true)
                 loadData()
+                setBanksReloadKey(k => k + 1)
+                syncBanks().catch(() => {})
+                checkForAppUpdate()
               }}
               tintColor={Colors.orange}
             />

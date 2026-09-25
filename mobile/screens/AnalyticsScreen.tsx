@@ -1,8 +1,9 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl,
   ActivityIndicator, Platform, Dimensions
 } from "react-native"
+import { checkForAppUpdate } from '../utils/appUpdate'
 import { Colors, Typography, Radius } from "../constants/theme"
 import { listTransactions, Transaction } from "../api/transactions"
 import { listCards, Card } from "../api/cards"
@@ -58,8 +59,10 @@ export default function AnalyticsScreen() {
   const [loading, setLoading] = useState(true)
   const [txType, setTxType] = useState<"expense" | "income">("expense")
 
-  const loadData = useCallback(async () => {
-    setLoading(true)
+  const [refreshing, setRefreshing] = useState(false)
+
+  const loadData = useCallback(async (pulled = false) => {
+    if (!pulled) setLoading(true)
     try {
       const start = new Date(selectedMonth.year, selectedMonth.month - 1, 1)
       const end = new Date(selectedMonth.year, selectedMonth.month, 0)
@@ -87,6 +90,7 @@ export default function AnalyticsScreen() {
       })
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }, [selectedMonth])
 
@@ -143,7 +147,21 @@ export default function AnalyticsScreen() {
   }
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.root}
+      contentContainerStyle={styles.content}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          tintColor={Colors.orange}
+          onRefresh={() => {
+            setRefreshing(true)
+            loadData(true)
+            checkForAppUpdate()
+          }}
+        />
+      }
+    >
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Аналітика</Text>
         <Text style={styles.headerSub}>{selectedMonth.label}</Text>

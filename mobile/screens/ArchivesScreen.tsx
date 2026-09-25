@@ -1,8 +1,9 @@
 ﻿import React, { useCallback, useEffect, useState } from 'react'
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl,
   TextInput, Alert, ActivityIndicator, Platform
 } from 'react-native'
+import { checkForAppUpdate } from '../utils/appUpdate'
 import { Colors, Typography, Radius } from '../constants/theme'
 import { listArchivedTransactions, unarchiveTransaction, Transaction } from '../api/transactions'
 import { listCards, Card } from '../api/cards'
@@ -28,8 +29,10 @@ export default function ArchivesScreen() {
   const [search, setSearch] = useState('')
   const [unarchivingId, setUnarchivingId] = useState<string | null>(null)
 
-  const fetchArchived = useCallback(async () => {
-    setLoading(true)
+  const [refreshing, setRefreshing] = useState(false)
+
+  const fetchArchived = useCallback(async (pulled = false) => {
+    if (!pulled) setLoading(true)
     try {
       const [txs, cards] = await Promise.all([
         listArchivedTransactions({ search }).catch(() => []),
@@ -45,6 +48,7 @@ export default function ArchivesScreen() {
       Toast.show({ type: 'error', text1: 'Помилка завантаження архіву' })
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }, [search])
 
@@ -52,7 +56,7 @@ export default function ArchivesScreen() {
 
   useEffect(() => {
     return txBus.subscribe((ev) => {
-      if (ev?.type === 'REALTIME') fetchArchived()
+      if (ev?.type === 'REALTIME') fetchArchived(true)
     })
   }, [fetchArchived])
 
@@ -101,6 +105,17 @@ export default function ArchivesScreen() {
         <FlatList
           data={rows}
           keyExtractor={(item) => item.id}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              tintColor={Colors.orange}
+              onRefresh={() => {
+                setRefreshing(true)
+                fetchArchived(true)
+                checkForAppUpdate()
+              }}
+            />
+          }
           contentContainerStyle={styles.list}
           ListEmptyComponent={
             <View style={styles.emptyState}>

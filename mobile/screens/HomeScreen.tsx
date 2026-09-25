@@ -44,6 +44,8 @@ import { useSettingsStore } from '../store/useSettingsStore'
 import FloatingActionButton from '../components/FloatingActionButton'
 import RefundPickBar from '../components/RefundPickBar'
 import { useMenuOverlay } from '../store/useMenuOverlay'
+import { syncBanks } from '../store/useBankSyncStore'
+import { checkForAppUpdate } from '../utils/appUpdate'
 import QuickActionPopup from '../components/QuickActionPopup'
 import AddTransactionModal from '../components/AddTransactionModal'
 import AddAccountFlow from '../components/AddAccountFlow'
@@ -225,11 +227,14 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
     loadData()
   }, [loadData])
 
+  // Pull down: reload everything, pull new bank transactions, and look for a new app version
   const onRefresh = () => {
     setRefreshing(true)
     loadData()
     refreshTxFeed()
     refreshPinned()
+    syncBanks().catch(() => {})
+    checkForAppUpdate()
   }
 
   // Background bank sync (e.g. Revolut on app open) added transactions — reload quietly
