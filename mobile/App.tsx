@@ -13,6 +13,7 @@ import Toast from "react-native-toast-message"
 import { triggerLightHaptic } from "./utils/haptics"
 import { GlassSurface } from "./components/LiquidGlass"
 import { useSettingsStore } from "./store/useSettingsStore"
+import { useBankAutoSync } from "./hooks/useBankAutoSync"
 
 // Screens
 import AuthScreen from "./screens/AuthScreen"
@@ -70,6 +71,9 @@ export default function App() {
 
     return () => subscription.unsubscribe()
   }, [])
+
+  // Pull new bank transactions whenever the app is opened (signed in only)
+  useBankAutoSync(!!session)
 
   const handleTabPress = (tab: TabId) => {
     if (activeTab !== tab) triggerLightHaptic()

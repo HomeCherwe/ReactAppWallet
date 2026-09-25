@@ -9,6 +9,7 @@ import { Card } from '../api/cards'
 import GlassButton from './GlassButton'
 import { GlassPressable } from './LiquidGlass'
 import SheetModal from './SheetModal'
+import { hasPinTag, stripPinTag, withPinTag } from '../utils/pinned'
 
 interface EditTxModalProps {
   visible: boolean
@@ -41,7 +42,7 @@ export default function EditTxModal({
       setAmount(String(Math.abs(amt)))
       setCategory(tx.category || '')
       setCardId(tx.card_id || '')
-      setNote(tx.note || '')
+      setNote(stripPinTag(tx.note))
     }
   }, [tx])
 
@@ -69,7 +70,8 @@ export default function EditTxModal({
         amount: finalAmount,
         category: category.trim() || 'Інше',
         card_id: cardId || null,
-        note: note.trim() || category.trim(),
+        // Keep the pin set elsewhere (the tag isn't shown in the editor)
+        note: withPinTag(note.trim() || category.trim(), hasPinTag(tx.note)) ?? undefined,
       })
       setSaving(false)
       onSaved()

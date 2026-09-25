@@ -8,6 +8,7 @@ import { fmtAmount, fmtDate } from '../utils/format'
 import GlassButton from './GlassButton'
 import { GlassPressable } from './LiquidGlass'
 import SheetModal from './SheetModal'
+import { PinState, stripPinTag } from '../utils/pinned'
 
 interface DetailsModalProps {
   visible: boolean
@@ -17,6 +18,9 @@ interface DetailsModalProps {
   onEdit?: (tx: Transaction) => void
   onSplit?: (tx: Transaction) => void
   onDelete?: (tx: Transaction) => void
+  /** 'tag' = pinned itself, 'category' = pinned through its category (changed in settings) */
+  pinState?: PinState
+  onTogglePin?: (tx: Transaction) => void
 }
 
 export default function DetailsModal({
@@ -27,6 +31,8 @@ export default function DetailsModal({
   onEdit,
   onSplit,
   onDelete,
+  pinState = 'none',
+  onTogglePin,
 }: DetailsModalProps) {
   if (!tx) return null
 
@@ -83,12 +89,12 @@ export default function DetailsModal({
                 </>
               ) : null}
 
-              {tx.note ? (
+              {stripPinTag(tx.note) ? (
                 <>
                   <View style={styles.rowDivider} />
                   <View style={styles.noteBox}>
                     <Text style={styles.rowLabel}>Примітка</Text>
-                    <Text style={styles.noteValue}>{tx.note}</Text>
+                    <Text style={styles.noteValue}>{stripPinTag(tx.note)}</Text>
                   </View>
                 </>
               ) : null}
@@ -121,6 +127,20 @@ export default function DetailsModal({
                 />
               )}
             </View>
+
+            {onTogglePin && (
+              pinState === 'category' ? (
+                <Text style={styles.pinHint}>📌 Закріплено через категорію «{tx.category}» — змінюється в налаштуваннях</Text>
+              ) : (
+                <GlassButton
+                  label={pinState === 'tag' ? 'Відкріпити' : '📌 Закріпити'}
+                  variant="glass"
+                  size="md"
+                  style={{ width: '100%', marginTop: 8 }}
+                  onPress={() => onTogglePin(tx)}
+                />
+              )
+            )}
 
             {onDelete && (
               <GlassButton
@@ -270,5 +290,11 @@ const styles = StyleSheet.create({
   actionsRow: {
     flexDirection: 'row',
     gap: 10,
+  },
+  pinHint: {
+    fontSize: 12,
+    color: Colors.textSub,
+    textAlign: 'center',
+    marginTop: 12,
   },
 })

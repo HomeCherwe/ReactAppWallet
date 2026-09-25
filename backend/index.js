@@ -8,6 +8,7 @@ import https from 'https'
 import cors from 'cors'
 import crypto from 'crypto'
 import { createClient } from '@supabase/supabase-js'
+import { registerBankConnections, syncAllBankConnections, psuHeadersFrom } from './bankConnections.js'
 dotenv.config();
 
 const app = express();
@@ -4249,67 +4250,6 @@ async function refreshTrueLayerToken(user_id, refresh_token) {
   }
 }
 
-// Helper to save TrueLayer transaction
-async function postNewCheckTrueLayer(user_id, tx, account_id, card_id) {
-  try {
-    const txId = tx.transaction_id
-    if (!txId) {
-      console.warn('[TrueLayer] Transaction missing transaction_id, skipping:', tx)
-      return null
-    }
-
-    // Check duplicates
-    const { data: existing } = await supabase
-      .from('transactions')
-      .select('id')
-      .eq('transaction_id_card', txId)
-      .eq('user_id', user_id)
-      .maybeSingle()
-
-    if (existing) {
-      // console.log(`[TrueLayer] Transaction ${txId} already exists, skipping.`)
-      return null // Already exists
-    }
-
-    // Map fields
-    const amount = Number(tx.amount)
-    const date = tx.timestamp
-    let description = tx.description
-
-    // Append user comments if available
-    if (tx.meta && tx.meta.user_comments) {
-      description += ` | ${tx.meta.user_comments}`
-    }
-
-    // Determine category (optional mapping)
-    const category = 'Revolut Sync'
-
-    // Create payload
-    const payload = {
-      amount: amount,
-      category: category,
-      note: description,
-      archives: false,
-      card: 'Revolut', // Or actual card name if available
-      card_id: card_id,
-      transaction_id_card: txId,
-      user_id: user_id,
-      created_at: date,
-      merchant_name: tx.merchant_name || null
-    }
-
-    const { data, error } = await supabase.from('transactions').insert([payload]).select().single()
-    if (error) {
-      console.error('[TrueLayer] Supabase insert error for transaction:', txId, error)
-      throw error
-    }
-    // console.log('[TrueLayer] Saved new transaction:', txId)
-    return data
-  } catch (error) {
-    console.error('[TrueLayer] Error saving tx:', error)
-    return null
-  }
-}
 
 app.post('/api/truelayer/data', async (req, res) => {
   try {
@@ -4402,150 +4342,17 @@ app.get('/api/truelayer/check-token', getUserFromToken, async (req, res) => {
 })
 
 // POST /api/syncTrueLayer - Sync Revolut/TrueLayer transactions
+// Kept for existing clients (web sync button, iPhone Shortcuts with an API key):
+// now syncs every bank connected through TrueLayer, not just Revolut.
 app.post('/api/syncTrueLayer', getUserFromTokenOrApiKey, async (req, res) => {
   try {
-    const userId = req.user_id
-    console.log('[TrueLayer] Starting sync for user:', userId)
-
-    // Get tokens from DB
-    const { data: prefs, error: prefsError } = await supabase
-      .from('user_preferences')
-      .select('revolut_api')
-      .eq('user_id', userId)
-      .single()
-
-    if (prefsError) {
-      console.warn('[TrueLayer] User preferences not found for user:', userId)
-      return res.status(400).json({ error: 'User preferences not found' })
-    }
-
-    const tlTokens = prefs?.revolut_api
-    if (!tlTokens || !tlTokens.access_token) {
-      console.warn('[TrueLayer] No TrueLayer tokens found for user:', userId)
-      return res.json({ success: false, message: 'TrueLayer not connected. Please connect in Profile.' })
-    }
-
-    let accessToken = tlTokens.access_token
-
-    // Determine card_id for Revolut
-    // Try to find a card with bank 'Revolut' or create one
-    let cardId = null
-    const { data: cardData } = await supabase
-      .from('cards')
-      .select('id')
-      .eq('user_id', userId)
-      .ilike('bank', '%revolut%')
-      .limit(1)
-      .maybeSingle()
-
-    if (cardData) {
-      cardId = cardData.id
-    } else {
-      console.log('[TrueLayer] Creating new Revolut card for user:', userId)
-      // Create Revolut card if not exists
-      const { data: newCard } = await supabase
-        .from('cards')
-        .insert([{
-          user_id: userId,
-          name: 'Revolut Main',
-          bank: 'Revolut',
-          currency: 'UAH', // Default, maybe change later
-          initial_balance: 0,
-          bg_url: 'https://assets.revolut.com/media/icons/flags/uk.png' // Placeholder
-        }])
-        .select()
-        .single()
-      if (newCard) cardId = newCard.id
-    }
-
-    // Helper to fetch data with automatic retry on 401
-    const fetchData = async (endpoint, token) => {
-      try {
-        const url = `https://api.truelayer.com/data/v1/${endpoint}`
-        // console.log(`[TrueLayer] Fetching: ${url}`)
-        return await axios.get(url, { headers: { Authorization: `Bearer ${token}` } })
-      } catch (error) {
-        if (error.response?.status === 401 && tlTokens.refresh_token) {
-          console.log('[TrueLayer] Access token expired (401), refreshing...')
-          const newToken = await refreshTrueLayerToken(userId, tlTokens.refresh_token)
-          if (newToken) {
-            accessToken = newToken // Update local variable
-            // Retry with new token
-            const url = `https://api.truelayer.com/data/v1/${endpoint}`
-            return await axios.get(url, { headers: { Authorization: `Bearer ${newToken}` } })
-          }
-        }
-        throw error
-      }
-    }
-
-    // 1. Get Accounts to find account_id
-    let accountsResp
-    try {
-      accountsResp = await fetchData('accounts', accessToken)
-    } catch (e) {
-      console.error('[TrueLayer] Failed to fetch accounts:', e.message)
-      return res.json({ success: false, error: 'Failed to access TrueLayer accounts. Re-authentication may be required.' })
-    }
-
-    const accounts = accountsResp.data.results
-    console.log(`[TrueLayer] Fetched ${accounts?.length || 0} accounts.`)
-    if (!accounts || accounts.length === 0) {
-      console.log('[TrueLayer] No accounts found in TrueLayer response')
-      return res.json({ success: true, count: 0, message: 'No accounts found in TrueLayer' })
-    }
-
-    const accountId = accounts[0].account_id // Use first account for now
-    console.log('[TrueLayer] Using account ID:', accountId)
-
-    // 2. Get Transactions for last 15 days
-    const now = new Date()
-    const past = new Date()
-    past.setDate(now.getDate() - 15)
-
-    const to = now.toISOString().split('.')[0] + 'Z'
-    const from = past.toISOString().split('.')[0] + 'Z'
-
-    const txEndpoint = `accounts/${accountId}/transactions?from=${from}&to=${to}`
-    console.log('[TrueLayer] Fetching transactions endpoint:', txEndpoint)
-
-    let txResp
-    try {
-      txResp = await fetchData(txEndpoint, accessToken)
-    } catch (e) {
-      console.error('[TrueLayer] Failed to fetch transactions:', e.message, e.response?.data)
-      // Check for 404 (maybe no transactions or wrong endpoint for specific provider)
-      if (e.response?.status === 404) {
-        return res.json({ success: true, count: 0, message: 'No transactions found (404)' })
-      }
-      return res.json({ success: false, error: 'Failed to fetch transactions' })
-    }
-
-    // Log raw data structure to debug
-    // console.log('[TrueLayer] Raw transaction response data:', JSON.stringify(txResp.data, null, 2))
-
-    const transactions = txResp.data.results
-    console.log('[TrueLayer] Fetched transaction count:', transactions?.length || 0)
-
-    if (!transactions || transactions.length === 0) {
-      return res.json({ success: true, count: 0, message: 'No new transactions' })
-    }
-
-    // 3. Save transactions
-    let savedCount = 0
-    for (const tx of transactions) {
-      const saved = await postNewCheckTrueLayer(userId, tx, accountId, cardId)
-      if (saved) savedCount++
-    }
-
-    console.log('[TrueLayer] Sync complete. Saved transactions:', savedCount)
-
+    const result = await syncAllBankConnections(supabase, req.user_id, psuHeadersFrom(req))
     res.json({
       success: true,
-      count: savedCount,
-      message: `Sync successful. Added ${savedCount} transactions.`
+      count: result.added,
+      ...result,
+      message: `Sync successful. Added ${result.added} transactions.`
     })
-
   } catch (error) {
     console.error('[TrueLayer] Sync error:', error)
     res.status(500).json({ success: false, error: error.message })
@@ -4553,6 +4360,9 @@ app.post('/api/syncTrueLayer', getUserFromTokenOrApiKey, async (req, res) => {
 })
 
 // Global error handler for unhandled errors
+// Bank connections through TrueLayer (any bank): catalog, connect, sync, disconnect
+registerBankConnections(app, { supabase, getUserFromToken, getUserFromTokenOrApiKey })
+
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err)
   res.status(500).json({

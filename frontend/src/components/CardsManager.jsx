@@ -14,6 +14,7 @@ import toast from 'react-hot-toast'
 import BaseModal from './BaseModal'
 import { useSettingsStore } from '../store/useSettingsStore'
 import CardTransactionsDrawer from './transactions/CardTransactionsDrawer'
+import AddBankChoiceModal from './AddBankChoiceModal'
 
 const GRADS = [
   'from-indigo-500 via-fuchsia-500 to-amber-400',
@@ -457,7 +458,7 @@ function CardModal({ open, initial, onClose, onSubmit, banks = [] }) {
   )
 }
 
-export default function CardsManager({ groupByBank = false, showActions = true }) {
+export default function CardsManager({ groupByBank = false, showActions = true, reloadKey = 0 }) {
   // Використовуємо новий store
   const settings = useSettingsStore((state) => state.settings)
   const updateNestedSetting = useSettingsStore((state) => state.updateNestedSetting)
@@ -467,6 +468,8 @@ export default function CardsManager({ groupByBank = false, showActions = true }
   const [loading, setLoading] = useState(true)
   const [cardModalOpen, setCardModalOpen] = useState(false)
   const [bankModalOpen, setBankModalOpen] = useState(false)
+  // "Додати банк": choose between connecting a real bank (sync) and your own account
+  const [addBankChoiceOpen, setAddBankChoiceOpen] = useState(false)
   const [editingCard, setEditingCard] = useState(null)
   const [editingBank, setEditingBank] = useState(null)
 
@@ -599,6 +602,8 @@ export default function CardsManager({ groupByBank = false, showActions = true }
     }
   }
   useEffect(() => { load() }, [groupByBank])
+  // Reload when connected banks add cards/transactions (see BankConnections on the cards page)
+  useEffect(() => { if (reloadKey) load() }, [reloadKey])
 
   useEffect(() => {
     const off = txBus.subscribe(async ({ card_id, delta, type }) => {
@@ -751,9 +756,14 @@ export default function CardsManager({ groupByBank = false, showActions = true }
     setEditingCard(c); 
     setCardModalOpen(true) 
   }
-  const openCreateBank = () => { 
-    setEditingBank(null); 
-    setBankModalOpen(true) 
+  const openCreateBank = () => {
+    setAddBankChoiceOpen(true)
+  }
+  // "Власний рахунок" in the choice: the manual bank form
+  const openManualBank = () => {
+    setAddBankChoiceOpen(false)
+    setEditingBank(null)
+    setBankModalOpen(true)
   }
   const openEditBank = (b) => { 
     setEditingBank(b); 
@@ -1192,6 +1202,14 @@ return (
       onSubmit={handleCardSubmit}
     />
     
+    {groupByBank && (
+      <AddBankChoiceModal
+        open={addBankChoiceOpen}
+        onClose={() => setAddBankChoiceOpen(false)}
+        onManual={openManualBank}
+      />
+    )}
+
     {groupByBank && (
       <BankModal
         open={bankModalOpen}

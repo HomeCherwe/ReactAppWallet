@@ -8,6 +8,11 @@ import { listCards, deleteCard, Card } from '../api/cards'
 import { getSumByCard } from '../api/transactions'
 import { fmtAmount } from '../utils/format'
 import AddCardModal from '../components/AddCardModal'
+import AddAccountModal from '../components/AddAccountModal'
+import ConnectedBanks from '../components/ConnectedBanks'
+import { listBankConnections } from '../api/bankConnections'
+import { syncBanks } from '../store/useBankSyncStore'
+import { txBus } from '../utils/txBus'
 import GlassButton from '../components/GlassButton'
 import { getBucket } from '../utils/currency'
 import { GlassPressable } from '../components/LiquidGlass'
@@ -18,6 +23,11 @@ export default function CardsScreen() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [addCardVisible, setAddCardVisible] = useState(false)
+  // "+ Додати": connect a bank (sync) or add your own account
+  const [addAccountVisible, setAddAccountVisible] = useState(false)
+  const [banksReloadKey, setBanksReloadKey] = useState(0)
+  const [connectedIds, setConnectedIds] = useState<string[]>([])
+  const [bankCountry, setBankCountry] = useState('fr')
 
   const loadData = useCallback(async () => {
     try {
@@ -43,6 +53,27 @@ export default function CardsScreen() {
   useEffect(() => {
     loadData()
   }, [loadData])
+
+  // Bank sync added cards/transactions (auto-sync on app open, "sync now") — reload quietly
+  useEffect(() => {
+    return txBus.subscribe(ev => {
+      if (ev?.type === 'SYNCED') {
+        loadData()
+        setBanksReloadKey(k => k + 1)
+      }
+    })
+  }, [loadData])
+
+  const openAddAccount = () => {
+    setAddAccountVisible(true)
+    // Mark already connected banks in the catalog and start it on the user's country
+    listBankConnections()
+      .then(list => {
+        setConnectedIds(list.filter(c => c.status === 'active').map(c => c.provider_id))
+        if (list[0]?.country) setBankCountry(list[0].country)
+      })
+      .catch(() => {})
+  }
 
   const handleDelete = (card: Card) => {
     Alert.alert(
@@ -118,7 +149,7 @@ export default function CardsScreen() {
           <Text style={styles.headerTitle}>Рахунки та картки</Text>
           <Text style={styles.headerSub}>{cards.length} активних рахунків</Text>
         </View>
-        <GlassPressable style={styles.addBtn} onPress={() => setAddCardVisible(true)}>
+        <GlassPressable style={styles.addBtn} onPress={openAddAccount}>
           <Text style={styles.addBtnText}>+ Додати</Text>
         </GlassPressable>
       </View>
@@ -142,12 +173,13 @@ export default function CardsScreen() {
               tintColor={Colors.orange}
             />
           }
+          ListHeaderComponent={<ConnectedBanks reloadKey={banksReloadKey} onChanged={loadData} />}
           ListEmptyComponent={
             cards.length === 0 ? (
               <View style={styles.emptyWrap}>
                 <Text style={styles.emptyIcon}>💳</Text>
                 <Text style={styles.emptyTitle}>Карток не додано</Text>
-                <Text style={styles.emptySub}>Додайте картку або рахунок для обліку</Text>
+                <Text style={styles.emptySub}>Натисніть «+ Додати», щоб підключити банк або додати рахунок вручну</Text>
               </View>
             ) : (
               <View>
@@ -175,6 +207,23 @@ export default function CardsScreen() {
           renderItem={() => null}
         />
       )}
+
+      <AddAccountModal
+        visible={addAccountVisible}
+        onClose={() => setAddAccountVisible(false)}
+        connectedProviderIds={connectedIds}
+        defaultCountry={bankCountry}
+        onManual={() => {
+          setAddAccountVisible(false)
+          // Let this sheet finish closing — iOS can't present a new modal while one is dismissing
+          setTimeout(() => setAddCardVisible(true), 350)
+        }}
+        onConnected={() => {
+          setBanksReloadKey(k => k + 1)
+          // First sync (~90 days of history) creates the bank's cards; shown by the indicator on Home
+          syncBanks().catch(() => {})
+        }}
+      />
 
       <AddCardModal
         visible={addCardVisible}

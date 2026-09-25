@@ -10,6 +10,7 @@ import { fmtAmount } from '../utils/format'
 import GlassButton from './GlassButton'
 import { GlassPressable } from './LiquidGlass'
 import SheetModal from './SheetModal'
+import { hasPinTag, stripPinTag, withPinTag } from '../utils/pinned'
 
 interface SplitPart {
   id: string
@@ -43,7 +44,7 @@ export default function SplitTxModal({
       const origAmt = Math.abs(Number(tx.amount || 0))
       const half = (origAmt / 2).toFixed(2)
       setParts([
-        { id: '1', amount: half, category: tx.category || 'Частина 1', note: tx.note || '' },
+        { id: '1', amount: half, category: tx.category || 'Частина 1', note: stripPinTag(tx.note) },
         { id: '2', amount: (origAmt - parseFloat(half)).toFixed(2), category: 'Частина 2', note: '' },
       ])
     }
@@ -96,7 +97,7 @@ export default function SplitTxModal({
       await updateTransaction(tx.id, {
         amount: isExpense ? -firstAmt : firstAmt,
         category: first.category,
-        note: first.note || tx.note || undefined,
+        note: withPinTag(first.note || stripPinTag(tx.note), hasPinTag(tx.note)) ?? undefined,
       })
 
       // Remaining parts are created as new transactions

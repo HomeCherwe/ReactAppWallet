@@ -139,6 +139,44 @@ export async function listFeedTransactions({
   return (data || []) as Transaction[]
 }
 
+/**
+ * Pinned transactions (note tag "[pinned]" or a pinned category), newest first.
+ * Two plain queries merged client-side — avoids quoting category names inside an `or()` filter.
+ */
+export async function listPinnedTransactions({
+  pinnedCategories = [],
+  excludeCardIds = [],
+}: { pinnedCategories?: string[]; excludeCardIds?: string[] }): Promise<Transaction[]> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+
+  const base = () => {
+    let q = supabase
+      .from('transactions')
+      .select('*')
+      .eq('user_id', user.id)
+      .not('archives', 'is', true)
+    if (excludeCardIds.length > 0) {
+      q = q.or(`card_id.is.null,card_id.not.in.(${excludeCardIds.join(',')})`)
+    }
+    return q
+  }
+
+  const requests = [base().ilike('note', '%[pinned]%').order('created_at', { ascending: false }).limit(100)]
+  const cats = pinnedCategories.filter(c => c && c.trim())
+  if (cats.length > 0) {
+    requests.push(base().in('category', cats).order('created_at', { ascending: false }).limit(100))
+  }
+
+  const results = await Promise.all(requests)
+  const byId = new Map<string, Transaction>()
+  for (const { data, error } of results) {
+    if (error) throw error
+    for (const tx of (data || []) as Transaction[]) byId.set(tx.id, tx)
+  }
+  return [...byId.values()].sort((a, b) => b.created_at.localeCompare(a.created_at))
+}
+
 export async function listArchivedTransactions(params: Omit<ListTransactionsParams, 'archived'> = {}): Promise<Transaction[]> {
   return listTransactions({ ...params, archived: true, from: 0, to: 9999 })
 }

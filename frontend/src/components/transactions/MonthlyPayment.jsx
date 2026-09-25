@@ -14,6 +14,9 @@ import ScanReceiptModal from './ScanReceiptModal'
 import SplitTxModal from './SplitTxModal'
 import { apiFetch, getApiUrl } from '../../utils.jsx'
 import { listTransactions, updateTransaction, deleteTransaction, archiveTransaction, deleteTransactions, getTransactionCategories } from '../../api/transactions'
+import { listBankConnections } from '../../api/bankConnections'
+import { useBankSyncStore } from '../../store/useBankSyncStore'
+import BankSyncIndicator from '../BankSyncIndicator'
 import { txBus } from '../../utils/txBus'
 import { listCards } from '../../api/cards'
 import { useSettingsStore } from '../../store/useSettingsStore'
@@ -93,10 +96,9 @@ export default function MonthlyPayment() {
 
   const [createOpen, setCreateOpen] = useState(false)
   const [transferOpen, setTransferOpen] = useState(false)
-  const [syncLoading, setSyncLoading] = useState(false)
   const [scanOpen, setScanOpen] = useState(false)
   const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false)
-  const [revolutConnected, setRevolutConnected] = useState(null) // null=checking, true, false
+  const [expiredBanks, setExpiredBanks] = useState([]) // names of banks whose 90-day access ran out
 
   const [searchQuery, setSearchQuery] = useState('')
   const [hasMore, setHasMore] = useState(true)
@@ -337,18 +339,21 @@ export default function MonthlyPayment() {
     }
   }
 
-  // Check Revolut connection status on mount
-  useEffect(() => {
-    const checkRevolut = async () => {
-      try {
-        const result = await apiFetch('/api/truelayer/check-token')
-        setRevolutConnected(result?.connected === true && result?.valid !== false)
-      } catch (e) {
-        setRevolutConnected(false)
-      }
+  // Check connected banks on mount (to show an "access expired" banner)
+  const refreshBankStatus = useCallback(async () => {
+    try {
+      const list = await listBankConnections()
+      setExpiredBanks(list.filter(c => c.status === 'expired').map(c => c.provider_name))
+    } catch (e) {
+      // keep the previous state
     }
-    checkRevolut()
   }, [])
+
+  // Re-check after every bank sync (a sync can find a bank's access has expired)
+  const lastBankSyncAt = useBankSyncStore(s => s.lastSyncAt)
+  useEffect(() => {
+    refreshBankStatus()
+  }, [refreshBankStatus, lastBankSyncAt])
 
   // Load categories once on mount (не залежить від preferences)
   useEffect(() => {
@@ -1071,18 +1076,18 @@ export default function MonthlyPayment() {
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-2xl p-5 shadow-soft min-h-[400px]">
 
-      {/* Persistent Revolut not connected banner */}
-      {revolutConnected === false && (
+      {/* A bank's 90-day access ran out */}
+      {expiredBanks.length > 0 && (
         <div className="mb-4 flex items-start gap-3 bg-amber-50 border-2 border-amber-400 rounded-xl p-3 sticky top-0 z-10">
           <AlertTriangle size={18} className="text-amber-600 mt-0.5 flex-shrink-0" />
           <div className="flex-1 min-w-0">
-            <span className="text-xs font-semibold text-amber-900">⚠️ Revolut не підключено</span>
-            <span className="text-xs text-amber-800 ml-1">— синхронізація транзакцій Revolut призупинена.</span>
+            <span className="text-xs font-semibold text-amber-900">⚠️ Доступ до {expiredBanks.join(', ')} сплив</span>
+            <span className="text-xs text-amber-800 ml-1">— синхронізація цих банків призупинена.</span>
             <a
               href="#/profile"
               className="ml-2 text-xs font-bold text-amber-700 underline hover:text-amber-900 whitespace-nowrap"
             >
-              Підключити в профілі →
+              Підключити знову в профілі →
             </a>
           </div>
         </div>
@@ -1090,7 +1095,10 @@ export default function MonthlyPayment() {
 
       <div className="mb-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
-          <div className="font-semibold text-gray-900">Recent transactions</div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="font-semibold text-gray-900">Recent transactions</div>
+            <BankSyncIndicator />
+          </div>
           <div className="flex flex-wrap items-center gap-2 relative">
             {selectedIds.size > 0 && (
               <>
@@ -1169,95 +1177,6 @@ export default function MonthlyPayment() {
             </button>
             <button className="btn btn-soft text-xs inline-flex items-center gap-1" onClick={() => setTransferOpen(true)}>
               Transfer
-            </button>
-            <button
-              className={`btn btn-soft text-xs inline-flex items-center gap-2 ${syncLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
-              onClick={async () => {
-                if (syncLoading) return
-                setSyncLoading(true)
-
-                // Toast IDs for per-bank notifications
-                const monoToastId = toast.loading('⏳ Mono: синхронізація...')
-                const revToastId = revolutConnected !== false
-                  ? toast.loading('⏳ Revolut: синхронізація...')
-                  : null
-
-                try {
-                  // Run both syncs in parallel
-                  const [monoRes, tlRes] = await Promise.all([
-                    apiFetch('/api/syncMonoBank', {
-                      method: 'POST',
-                      body: JSON.stringify({})
-                    }).catch(e => ({ error: e.message || 'Mono error' })),
-
-                    apiFetch('/api/syncTrueLayer', {
-                      method: 'POST',
-                      body: JSON.stringify({})
-                    }).catch(e => ({ error: e.message || 'TrueLayer error' }))
-                  ])
-
-                  // Dismiss loading toasts
-                  toast.dismiss(monoToastId)
-                  if (revToastId) toast.dismiss(revToastId)
-
-                  // --- Monobank notification ---
-                  if (monoRes?.error) {
-                    toast.error(`🟡 Monobank: помилка — ${monoRes.error}`, { duration: 6000, id: 'mono-sync' })
-                  } else {
-                    const monoCount = monoRes?.count || 0
-                    toast.success(
-                      monoCount > 0
-                        ? `🟡 Monobank: додано ${monoCount} транзакцій`
-                        : '🟡 Monobank: нових транзакцій немає',
-                      { duration: 4000, id: 'mono-sync' }
-                    )
-                  }
-
-                  // --- Revolut notification ---
-                  if (tlRes?.success === false && !tlRes?.error && !revolutConnected) {
-                    // Not connected — show persistent warning but don't spam
-                    setRevolutConnected(false)
-                  } else if (tlRes?.error) {
-                    toast.error(`🔵 Revolut: помилка — ${tlRes.error}`, { duration: 6000, id: 'rev-sync' })
-                    if (tlRes.error.includes('auth') || tlRes.error.includes('connect')) {
-                      setRevolutConnected(false)
-                    }
-                  } else if (tlRes?.message?.includes('not connected') || tlRes?.message?.includes('TrueLayer not connected')) {
-                    setRevolutConnected(false)
-                  } else {
-                    const tlCount = tlRes?.count || 0
-                    toast.success(
-                      tlCount > 0
-                        ? `🔵 Revolut: додано ${tlCount} транзакцій`
-                        : '🔵 Revolut: нових транзакцій немає',
-                      { duration: 4000, id: 'rev-sync' }
-                    )
-                    setRevolutConnected(true)
-                  }
-
-                  // Emit SYNC event if any transactions were added
-                  const totalCount = (monoRes?.count || 0) + (tlRes?.count || 0)
-                  if (totalCount > 0 || (monoRes?.transactions?.length > 0)) {
-                    try { txBus.emit({ type: 'SYNC' }) } catch { }
-                  }
-                } catch (e) {
-                  toast.dismiss(monoToastId)
-                  if (revToastId) toast.dismiss(revToastId)
-                  toast.error('Критична помилка синхронізації')
-                  console.error('sync error', e)
-                } finally {
-                  setSyncLoading(false)
-                }
-              }}
-              disabled={syncLoading}
-            >
-              {syncLoading ? (
-                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-                </svg>
-              ) : null}
-              <span>SyncBank</span>
             </button>
           </div>
         </div>

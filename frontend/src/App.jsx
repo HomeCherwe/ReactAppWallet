@@ -16,6 +16,7 @@ import { listCards } from './api/cards'
 import { sumTransactionsByCard, listTransactions } from './api/transactions'
 import { fetchTotalsByBucket } from './api/totals'
 import { useRealtimeTransactions } from './hooks/useRealtimeTransactions'
+import { useBankAutoSync } from './hooks/useBankAutoSync'
 import { useSettingsStore } from './store/useSettingsStore'
 
 export default function App(){
@@ -29,6 +30,8 @@ export default function App(){
   
   // Підписка на Realtime зміни транзакцій (тільки для авторизованих користувачів)
   useRealtimeTransactions()
+  // Sync every bank on page load / return to the tab (like the iPhone app)
+  useBankAutoSync(!!session)
 
   // Check authentication state and handle OAuth callback
   useEffect(() => {
