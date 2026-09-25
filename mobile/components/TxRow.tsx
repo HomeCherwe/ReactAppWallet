@@ -22,6 +22,7 @@ export function fmtMoney(amount: number, currency?: string): string {
 // Minimal icon buttons revealed by the swipe
 const SLOT_W = 56
 const BTN = 42
+const REFUND_COLOR = '#FFA53A'
 
 // Only one row is open at a time: opening another closes the previous one
 let closeOpenRow: (() => void) | null = null
@@ -198,7 +199,7 @@ function TxRow({
                 }}
                 style={({ pressed }) => [styles.btn, isRefund ? styles.btnMuted : styles.btnRefund, pressed && styles.btnPressed]}
               >
-                <Icon name={isRefund ? 'close' : 'undo'} size={19} color={isRefund ? Colors.white80 : Colors.orange} strokeWidth={2.4} />
+                <Icon name={isRefund ? 'close' : 'undo'} size={19} color={isRefund ? Colors.white80 : REFUND_COLOR} strokeWidth={2.4} />
               </Pressable>
             </Animated.View>
           )}
@@ -299,9 +300,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
   },
+  // Warm amber-orange, so it never reads as the red delete button next to it
   btnRefund: {
-    backgroundColor: 'rgba(255, 107, 0, 0.14)',
-    borderColor: 'rgba(255, 107, 0, 0.35)',
+    backgroundColor: 'rgba(255, 159, 28, 0.20)',
+    borderColor: 'rgba(255, 170, 60, 0.60)',
   },
   btnMuted: {
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
