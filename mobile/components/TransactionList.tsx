@@ -10,6 +10,7 @@ import { triggerErrorHaptic, triggerLightHaptic, triggerMediumHaptic, triggerSuc
 import { TransactionRowsSkeleton } from './Skeleton'
 import BankSyncIndicator from './BankSyncIndicator'
 import TxRow, { RowMode, closeSwipedRow, fmtMoney } from './TxRow'
+import { GlassMenuOverlay, MenuAction, MenuFrame } from './GlassContextMenu'
 import { pinStateOf, txDisplayTitle } from '../utils/pinned'
 
 const PINNED_COLLAPSED_KEY = 'pinned_collapsed'
@@ -73,8 +74,10 @@ interface TransactionListProps {
   onFilterChange?: (filter: TxFilter) => void
   onRetry?: () => void
   onPressTx?: (tx: Transaction) => void
-  /** Long press: pin / unpin */
-  onLongPressTx?: (tx: Transaction) => void
+  /** Long-press menu: pin / unpin */
+  onTogglePin?: (tx: Transaction) => void
+  /** Long-press menu: split into parts */
+  onSplitTx?: (tx: Transaction) => void
   /** Swipe → Видалити (the screen confirms) */
   onDeleteTx?: (tx: Transaction) => void
   /** Links `refund` (income) as a refund of `expense` */
@@ -104,7 +107,8 @@ function TransactionList({
   onFilterChange,
   onRetry,
   onPressTx,
-  onLongPressTx,
+  onTogglePin,
+  onSplitTx,
   onDeleteTx,
   onLinkRefund,
   onUnlinkRefund,
@@ -267,6 +271,30 @@ function TransactionList({
     [refundFor, pickRefund, onPressTx]
   )
 
+  // ---- Long press: the row lifts and a glass menu offers everything you can do with it ----
+  const [menu, setMenu] = useState<{ tx: Transaction; frame: MenuFrame } | null>(null)
+  const openMenu = useCallback((tx: Transaction, frame: MenuFrame) => {
+    closeSwipedRow()
+    setMenu({ tx, frame })
+  }, [])
+
+  const menuActions = (tx: Transaction): MenuAction[] => {
+    const out: MenuAction[] = []
+    const pin = pinStateOf(tx, pinnedCategories)
+    if (pin === 'category') {
+      out.push({ label: 'Обрати категорію', icon: 'tag', onPress: () => onPressTx?.(tx) })
+    } else if (onTogglePin) {
+      out.push({ label: pin === 'tag' ? 'Відкріпити' : 'Закріпити', icon: pin === 'tag' ? 'pinOff' : 'pin', onPress: () => onTogglePin(tx) })
+    }
+    if (onSplitTx && !tx.refund_for) out.push({ label: 'Розділити', icon: 'split', onPress: () => onSplitTx(tx) })
+    if (onLinkRefund && Number(tx.amount) < 0 && !tx.is_transfer) {
+      out.push({ label: 'Прив’язати повернення', icon: 'undo', onPress: () => startRefund(tx) })
+    }
+    if (onUnlinkRefund && tx.refund_for) out.push({ label: 'Скасувати повернення', icon: 'close', onPress: () => startRefund(tx) })
+    if (onDeleteTx) out.push({ label: 'Видалити', icon: 'trash', destructive: true, onPress: () => onDeleteTx(tx) })
+    return out
+  }
+
   const swipeProps = {
     onRefund: onLinkRefund ? startRefund : undefined,
     onDelete: onDeleteTx,
@@ -321,6 +349,25 @@ function TransactionList({
         <BankSyncIndicator />
       </View>
 
+      <GlassMenuOverlay
+        frame={menu?.frame ?? null}
+        actions={menu ? menuActions(menu.tx) : []}
+        previewStyle={styles.menuPreview}
+        preview={
+          menu ? (
+            <TxRow
+              tx={menu.tx}
+              card={menu.tx.card_id ? cardsById[menu.tx.card_id] : undefined}
+              hidden={hidden}
+              last
+              swipeEnabled={false}
+              nested={!!menu.tx.refund_for && Number(menu.tx.amount) > 0}
+            />
+          ) : null
+        }
+        onClose={() => setMenu(null)}
+      />
+
       {!loading && pinnedTop.length > 0 && (
         <View style={styles.pinnedWrap}>
           <Pressable onPress={togglePinned} style={({ pressed }) => [styles.pinnedHeader, pressed && styles.pinnedHeaderPressed]}>
@@ -354,7 +401,7 @@ function TransactionList({
                     wiggle={wiggle}
                     wiggleDir={i % 2 ? 1 : -1}
                     onPress={handlePress}
-                    onLongPress={onLongPressTx}
+                    onLongPress={openMenu}
                     {...swipeProps}
                   />
                   {kids.map((r, k) => (
@@ -368,7 +415,7 @@ function TransactionList({
                       last={lastRow && k === kids.length - 1}
                       mode={refundFor ? 'dimmed' : 'normal'}
                       onPress={handlePress}
-                      onLongPress={onLongPressTx}
+                      onLongPress={openMenu}
                       {...swipeProps}
                     />
                   ))}
@@ -446,7 +493,7 @@ function TransactionList({
                       wiggle={wiggle}
                       wiggleDir={i % 2 ? 1 : -1}
                       onPress={handlePress}
-                      onLongPress={onLongPressTx}
+                      onLongPress={openMenu}
                       {...swipeProps}
                     />
                     {kids.map((r, k) => (
@@ -460,7 +507,7 @@ function TransactionList({
                         last={lastInDay && k === kids.length - 1}
                         mode={refundFor ? 'dimmed' : 'normal'}
                         onPress={handlePress}
-                        onLongPress={onLongPressTx}
+                        onLongPress={openMenu}
                         {...swipeProps}
                       />
                     ))}
@@ -607,6 +654,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: Colors.white,
+  },
+  menuPreview: {
+    backgroundColor: '#141416',
   },
   pinnedWrap: {
     marginHorizontal: 12,

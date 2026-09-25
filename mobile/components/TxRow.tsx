@@ -43,7 +43,8 @@ interface TxRowProps {
   mode?: RowMode
   swipeEnabled?: boolean
   onPress?: (tx: Transaction) => void
-  onLongPress?: (tx: Transaction) => void
+  /** Long press, with the row's position on screen (for the lifted menu) */
+  onLongPress?: (tx: Transaction, frame: { x: number; y: number; w: number; h: number }) => void
   onRefund?: (tx: Transaction) => void
   onDelete?: (tx: Transaction) => void
   /** Refund picking: shared -1…1 driver that makes pickable rows jiggle (like iOS edit mode) */
@@ -77,6 +78,7 @@ function TxRow({
 }: TxRowProps) {
   const x = useRef(new Animated.Value(0)).current
   const openRef = useRef(false)
+  const rowRef = useRef<View>(null)
 
   const amount = Number(tx.amount)
   const isRefund = !!tx.refund_for
@@ -193,7 +195,7 @@ function TxRow({
       : []
 
   return (
-    <View style={styles.wrap}>
+    <View style={styles.wrap} ref={rowRef}>
       {canSwipe && (
         <View style={[styles.actions, { width: actionsW }]}>
           {showRefund && (
@@ -230,7 +232,11 @@ function TxRow({
       <Animated.View style={{ transform: [{ translateX: x }, ...jiggle] }} {...(canSwipe ? pan.panHandlers : {})}>
         <Pressable
           onPress={handlePress}
-          onLongPress={mode === 'normal' ? () => onLongPress?.(tx) : undefined}
+          onLongPress={
+            mode === 'normal' && onLongPress
+              ? () => rowRef.current?.measureInWindow((fx, fy, w, h) => onLongPress(tx, { x: fx, y: fy, w, h }))
+              : undefined
+          }
           delayLongPress={350}
           style={({ pressed }) => [
             styles.item,

@@ -47,8 +47,7 @@ import QuickActionPopup from '../components/QuickActionPopup'
 import AddTransactionModal from '../components/AddTransactionModal'
 import AddAccountFlow from '../components/AddAccountFlow'
 import CardTransactionsSheet from '../components/CardTransactionsSheet'
-import DetailsModal from '../components/DetailsModal'
-import EditTxModal from '../components/EditTxModal'
+import TxSheet from '../components/TxSheet'
 import TransferModal from '../components/TransferModal'
 import SplitTxModal from '../components/SplitTxModal'
 import ScanReceiptModal from '../components/ScanReceiptModal'
@@ -120,7 +119,6 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
   // Tx operations modals
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null)
   const [detailsVisible, setDetailsVisible] = useState(false)
-  const [editVisible, setEditVisible] = useState(false)
   const [splitVisible, setSplitVisible] = useState(false)
 
   // Data state
@@ -765,7 +763,11 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
             onFilterChange={txFeed.changeFilter}
             onRetry={txFeed.retry}
             onPressTx={handlePressTx}
-            onLongPressTx={handleTogglePin}
+            onTogglePin={handleTogglePin}
+            onSplitTx={tx => {
+              setSelectedTx(tx)
+              setSplitVisible(true)
+            }}
             onDeleteTx={handleDeleteTx}
             onLinkRefund={handleLinkRefund}
             onUnlinkRefund={handleUnlinkRefund}
@@ -855,40 +857,16 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         usedCurrencies={usedCurrencies}
       />
 
-      {/* Tx Details */}
-      <DetailsModal
-        visible={detailsVisible}
-        tx={selectedTx}
-        currency={primaryCurrency}
+      {/* Tap on a transaction: view and edit in one sheet */}
+      <TxSheet
+        tx={detailsVisible ? selectedTx : null}
+        cards={cards}
+        hidden={hideBalances}
         onClose={() => {
           setDetailsVisible(false)
           setSelectedTx(null)
         }}
-        // iOS can't present a sheet while the details sheet is still closing — the new one never
-        // appears but blocks every touch (looked like a freeze). Open it once that one is gone.
-        onEdit={tx => {
-          setSelectedTx(tx)
-          setTimeout(() => setEditVisible(true), SHEET_SWAP_DELAY_MS)
-        }}
-        onSplit={tx => {
-          setSelectedTx(tx)
-          setTimeout(() => setSplitVisible(true), SHEET_SWAP_DELAY_MS)
-        }}
-        onDelete={handleDeleteTx}
-        pinState={selectedTx ? pinStateOf(selectedTx, pinnedCategories) : 'none'}
-        onTogglePin={handleTogglePin}
-      />
-
-      {/* Tx Edit */}
-      <EditTxModal
-        visible={editVisible}
-        tx={selectedTx}
-        cards={cards}
-        onClose={() => {
-          setEditVisible(false)
-          setSelectedTx(null)
-        }}
-        onSaved={onRefresh}
+        onSaved={() => onRefresh()}
       />
 
       {/* Tx Split */}
