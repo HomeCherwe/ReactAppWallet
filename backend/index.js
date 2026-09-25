@@ -272,16 +272,45 @@ app.delete('/api/banks/:id', getUserFromToken, async (req, res) => {
   try {
     const { id } = req.params
 
-    // Перевіряємо, чи є карти, прив'язані до цього банку
-    const { data: cards } = await supabase
+    // The bank goes together with its cards and their transactions (the web asks to confirm first)
+    const { data: cards, error: cardsError } = await supabase
       .from('cards')
       .select('id')
       .eq('bank_id', id)
       .eq('user_id', req.user_id)
-      .limit(1)
+    if (cardsError) throw cardsError
+    const cardIds = (cards || []).map(c => c.id)
 
-    if (cards && cards.length > 0) {
-      return res.status(400).json({ error: 'Не можна видалити банк, до якого прив\'язані карти' })
+    if (cardIds.length > 0) {
+      // Bank connections syncing into these cards would recreate them — disconnect those
+      const { data: links } = await supabase
+        .from('bank_connection_accounts')
+        .select('connection_id')
+        .eq('user_id', req.user_id)
+        .in('card_id', cardIds)
+      const connIds = [...new Set((links || []).map(l => l.connection_id))]
+      if (connIds.length > 0) {
+        const { error: connError } = await supabase
+          .from('bank_connections')
+          .delete()
+          .eq('user_id', req.user_id)
+          .in('id', connIds)
+        if (connError) throw connError
+      }
+
+      const { error: txError } = await supabase
+        .from('transactions')
+        .delete()
+        .eq('user_id', req.user_id)
+        .in('card_id', cardIds)
+      if (txError) throw txError
+
+      const { error: delCardsError } = await supabase
+        .from('cards')
+        .delete()
+        .eq('user_id', req.user_id)
+        .in('id', cardIds)
+      if (delCardsError) throw delCardsError
     }
 
     const { error } = await supabase
@@ -291,7 +320,7 @@ app.delete('/api/banks/:id', getUserFromToken, async (req, res) => {
       .eq('user_id', req.user_id)
 
     if (error) throw error
-    res.json({ success: true })
+    res.json({ success: true, deleted_cards: cardIds.length })
   } catch (error) {
     console.error('DELETE /api/banks/:id error:', error)
     res.status(500).json({ error: error.message })

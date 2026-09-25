@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowLeft, ExternalLink, Eye, EyeOff, Landmark, RefreshC
 import toast from 'react-hot-toast'
 import BaseModal from './BaseModal'
 import ConfirmModal from './ConfirmModal'
+import { txBus } from '../utils/txBus'
 import {
   connectBankWithToken,
   disconnectBankConnection,
@@ -371,6 +372,9 @@ export default function BankConnections({ onChanged }) {
         })
     )
   }, [load, onChanged])
+
+  // A bank deleted on the cards page may have taken its connection with it
+  useEffect(() => txBus.subscribe(({ type }) => type === 'SYNC' && load()), [load])
 
   // Token banks (Monobank) connect inside the catalog modal, without leaving the page
   useEffect(() => {

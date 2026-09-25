@@ -832,10 +832,16 @@ export default function CardsManager({ groupByBank = false, showActions = true, 
   }
 
   const handleDeleteBank = async (b) => {
-    if (!confirm(`Видалити банк «${b.name}»?`)) return
+    if (!b?.id) return
+    const n = cards.filter(c => c.bank_id === b.id).length
+    const message = n > 0
+      ? `Видалити банк «${b.name}» разом з ${n === 1 ? '1 карткою' : `${n} картками`} і всіма їхніми транзакціями?\n\nЯкщо банк синхронізується, синхронізацію буде відключено. Це не можна скасувати.`
+      : `Видалити банк «${b.name}»?`
+    if (!confirm(message)) return
     try {
       await deleteBank(b.id)
       await load()
+      try { txBus.emit({ type: 'SYNC' }) } catch {} // totals/transactions elsewhere reload
       toast.success('Банк видалено')
     } catch (e) {
       console.error('Delete bank error:', e)
