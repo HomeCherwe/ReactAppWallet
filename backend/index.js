@@ -347,7 +347,7 @@ app.get('/api/cards', getUserFromToken, async (req, res) => {
 
 app.post('/api/cards', getUserFromToken, async (req, res) => {
   try {
-    const { bank_id, name, currency, bg_url, exclude_from_stats = false } = req.body
+    const { bank_id, name, currency, bg_url, exclude_from_stats = false, initial_balance, card_number } = req.body
 
     // Отримуємо назву банку, якщо bank_id вказано
     let bankName = null
@@ -370,9 +370,10 @@ app.post('/api/cards', getUserFromToken, async (req, res) => {
       bank_id: bank_id || null,
       bank: bankName || 'Інші', // Заповнюємо bank (NOT NULL constraint)
       name,
-      card_number: null,
+      // Only the last 4 digits are accepted; full card numbers are never stored
+      card_number: /^\d{4}$/.test(String(card_number || '')) ? String(card_number) : null,
       currency,
-      initial_balance: 0,
+      initial_balance: Number.isFinite(Number(initial_balance)) ? Number(initial_balance) : 0,
       bg_url,
       expiry_date: null,
       cvv: null,
