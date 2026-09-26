@@ -16,8 +16,8 @@ import { txBus } from '../../utils/txBus'
 import toast, { Toaster } from 'react-hot-toast'
 
 const COLORS = [
-  '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
-  '#EC4899', '#06B6D4', '#84CC16', '#F97316', '#6366F1',
+  '#FF6B00', '#3B82F6', '#10B981', '#F59E0B', '#EF4444',
+  '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16', '#FF8C3A',
   '#14B8A6', '#A855F7', '#F43F5E', '#22C55E', '#EAB308'
 ]
 
@@ -32,18 +32,18 @@ const CustomTooltip = ({ active, payload, type }) => {
     // Визначаємо чи це витрати чи доходи
     const isExpense = type === 'expenses'
     const sign = isExpense ? '-' : '+'
-    const colorClass = isExpense ? 'text-red-600' : 'text-green-600'
+    const colorClass = isExpense ? 'text-red-400' : 'text-green-400'
     
     return (
-      <div className="bg-white shadow-lg rounded-lg px-4 py-3 border border-gray-200">
+      <div className="bg-surface/90 shadow-lg rounded-lg px-4 py-3 border border-white/10">
         <div className="font-semibold text-sm mb-2">{data.name || 'Без категорії'}</div>
-        <div className="text-xs text-gray-600 mb-1">
+        <div className="text-xs text-white/70 mb-1">
           Сума UAH: <span className={`font-semibold ${colorClass}`}>{sign}{fmtAmount(totalUAH, 'UAH')}</span>
         </div>
-        <div className="text-xs text-gray-600 mb-1">
+        <div className="text-xs text-white/70 mb-1">
           Сума EUR: <span className={`font-semibold ${colorClass}`}>{sign}{fmtAmount(totalEUR, 'EUR')}</span>
         </div>
-        <div className="text-xs text-gray-600">
+        <div className="text-xs text-white/70">
           Транзакцій: <span className="font-semibold">{data.count || 0}</span>
         </div>
       </div>
@@ -775,7 +775,7 @@ export default function CategoryPieChart() {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => handlePeriodChange('prev')}
-                className="p-2 rounded-lg hover:bg-gray-100 transition"
+                className="p-2 rounded-lg hover:bg-white/[0.06] transition"
               >
                 <ChevronLeft size={20} />
               </button>
@@ -785,14 +785,14 @@ export default function CategoryPieChart() {
                 className="relative"
               >
                 <div
-                  className="flex items-center gap-2 px-4 py-2 bg-gray-50 rounded-lg min-w-[200px] justify-between cursor-pointer hover:bg-gray-100 transition"
+                  className="flex items-center gap-2 px-4 py-2 bg-white/[0.03] rounded-lg min-w-[200px] justify-between cursor-pointer hover:bg-white/[0.06] transition"
                   onClick={() => setShowDatePicker(!showDatePicker)}
                 >
                   <div className="flex items-center gap-2">
-                    <Calendar size={16} className="text-gray-500" />
+                    <Calendar size={16} className="text-white/55" />
                     <span className="font-medium text-sm">{formatPeriodLabel()}</span>
                   </div>
-                  <ChevronDown size={16} className={`text-gray-500 transition-transform ${showDatePicker ? 'rotate-180' : ''}`} />
+                  <ChevronDown size={16} className={`text-white/55 transition-transform ${showDatePicker ? 'rotate-180' : ''}`} />
                 </div>
                 
                 <AnimatePresence>
@@ -802,12 +802,12 @@ export default function CategoryPieChart() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
                       transition={{ duration: 0.2 }}
-                      className="absolute top-full left-0 mt-2 bg-white border border-gray-200 rounded-xl shadow-lg z-50 max-h-80 overflow-y-auto"
+                      className="absolute top-full left-0 mt-2 bg-surface/90 border border-white/10 rounded-xl shadow-lg z-50 max-h-80 overflow-y-auto"
                       style={{ minWidth: '280px' }}
                     >
                       {periodType === 'month' && (
                         <div className="p-2">
-                          <div className="text-xs font-semibold text-gray-500 mb-2 px-2">Виберіть місяць та рік</div>
+                          <div className="text-xs font-semibold text-white/55 mb-2 px-2">Виберіть місяць та рік</div>
                           <div className="space-y-1">
                             {getMonthsList().map((item, index) => {
                               const isSelected = currentDate.getFullYear() === item.year && 
@@ -818,8 +818,8 @@ export default function CategoryPieChart() {
                                   onClick={() => handleDateSelect(item)}
                                   className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
                                     isSelected
-                                      ? 'bg-indigo-600 text-white'
-                                      : 'hover:bg-gray-100 text-gray-700'
+                                      ? 'bg-brand text-white'
+                                      : 'hover:bg-white/[0.06] text-white/85'
                                   }`}
                                 >
                                   {item.month} {item.year}
@@ -832,7 +832,7 @@ export default function CategoryPieChart() {
                       
                       {periodType === 'year' && (
                         <div className="p-2">
-                          <div className="text-xs font-semibold text-gray-500 mb-2 px-2">Виберіть рік</div>
+                          <div className="text-xs font-semibold text-white/55 mb-2 px-2">Виберіть рік</div>
                           <div className="grid grid-cols-3 gap-1">
                             {getYearsList().map((year) => {
                               const isSelected = currentDate.getFullYear() === year
@@ -842,8 +842,8 @@ export default function CategoryPieChart() {
                                   onClick={() => handleDateSelect(year)}
                                   className={`px-3 py-2 rounded-lg text-sm transition-colors ${
                                     isSelected
-                                      ? 'bg-indigo-600 text-white'
-                                      : 'hover:bg-gray-100 text-gray-700'
+                                      ? 'bg-brand text-white'
+                                      : 'hover:bg-white/[0.06] text-white/85'
                                   }`}
                                 >
                                   {year}
@@ -856,7 +856,7 @@ export default function CategoryPieChart() {
                       
                       {periodType === 'week' && (
                         <div className="p-2">
-                          <div className="text-xs font-semibold text-gray-500 mb-2 px-2">Виберіть тиждень</div>
+                          <div className="text-xs font-semibold text-white/55 mb-2 px-2">Виберіть тиждень</div>
                           <div className="space-y-1">
                             {getWeeksOfMonth().map((week, index) => {
                               const weekStartStr = week.start.toLocaleDateString('uk-UA', { day: '2-digit', month: 'short' })
@@ -868,8 +868,8 @@ export default function CategoryPieChart() {
                                   onClick={() => handleDateSelect(week)}
                                   className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
                                     isCurrentWeek
-                                      ? 'bg-indigo-600 text-white'
-                                      : 'hover:bg-gray-100 text-gray-700'
+                                      ? 'bg-brand text-white'
+                                      : 'hover:bg-white/[0.06] text-white/85'
                                   }`}
                                 >
                                   {weekStartStr} - {weekEndStr}
@@ -886,7 +886,7 @@ export default function CategoryPieChart() {
               
               <button
                 onClick={() => handlePeriodChange('next')}
-                className="p-2 rounded-lg hover:bg-gray-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                className="p-2 rounded-lg hover:bg-white/[0.06] transition disabled:opacity-50 disabled:cursor-not-allowed"
                 disabled={
                   (periodType === 'month' && 
                    currentDate.getMonth() >= new Date().getMonth() && 
@@ -909,8 +909,8 @@ export default function CategoryPieChart() {
                   }}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
                     periodType === type
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      ? 'bg-brand text-white'
+                      : 'bg-white/[0.06] text-white/85 hover:bg-white/10'
                   }`}
                 >
                   {type === 'week' ? 'Тиждень' : type === 'month' ? 'Місяць' : 'Рік'}
@@ -920,8 +920,8 @@ export default function CategoryPieChart() {
                 onClick={handleCustomModeToggle}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
                   customMode
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    ? 'bg-brand text-white'
+                    : 'bg-white/[0.06] text-white/85 hover:bg-white/10'
                 }`}
               >
                 Вибрати вручну
@@ -931,33 +931,33 @@ export default function CategoryPieChart() {
         ) : (
           <div className="flex items-center gap-4 flex-wrap w-full">
             <div className="flex items-center gap-2 flex-1">
-              <label className="text-sm text-gray-600 min-w-[80px]">З дати:</label>
+              <label className="text-sm text-white/70 min-w-[80px]">З дати:</label>
               <input
                 type="date"
                 value={customFromDate}
                 onChange={(e) => setCustomFromDate(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="px-3 py-2 border border-white/[0.14] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand"
               />
             </div>
             <div className="flex items-center gap-2 flex-1">
-              <label className="text-sm text-gray-600 min-w-[80px]">По дату:</label>
+              <label className="text-sm text-white/70 min-w-[80px]">По дату:</label>
               <input
                 type="date"
                 value={customToDate}
                 onChange={(e) => setCustomToDate(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="px-3 py-2 border border-white/[0.14] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand"
               />
             </div>
             <div className="flex gap-2">
               <button
                 onClick={handleApplyCustomDates}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition"
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-brand text-white hover:bg-brand-dark transition"
               >
                 Застосувати
               </button>
               <button
                 onClick={handleCustomModeToggle}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition"
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-white/[0.06] text-white/85 hover:bg-white/10 transition"
               >
                 Скасувати
               </button>
@@ -969,20 +969,20 @@ export default function CategoryPieChart() {
       {/* Графіки */}
       {loading ? (
         <div className="flex items-center justify-center h-64">
-          <div className="text-gray-500">Завантаження...</div>
+          <div className="text-white/55">Завантаження...</div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Витрати */}
-          <div className="bg-white rounded-xl p-6 border border-gray-200">
-            <h3 className="text-lg font-semibold mb-4 text-rose-600">Витрати по категоріям</h3>
+          <div className="bg-surface/90 rounded-xl p-6 border border-white/10">
+            <h3 className="text-lg font-semibold mb-4 text-rose-400">Витрати по категоріям</h3>
             {/* Загальна витрата */}
-            <div className="bg-rose-50 rounded-xl p-3 mb-4 border border-rose-200">
-              <div className="text-xs text-rose-600 font-medium mb-1">Загальна витрата</div>
-              <div className="text-xl font-bold text-rose-700 transition-colors cursor-default hover:text-red-600">
+            <div className="bg-rose-500/10 rounded-xl p-3 mb-4 border border-rose-500/25">
+              <div className="text-xs text-rose-400 font-medium mb-1">Загальна витрата</div>
+              <div className="text-xl font-bold text-rose-300 transition-colors cursor-default hover:text-red-400">
                 -{fmtAmount(totalExpense.uah, 'UAH')}
               </div>
-              <div className="text-xs text-rose-600 mt-1 transition-colors cursor-default hover:text-red-600">
+              <div className="text-xs text-rose-400 mt-1 transition-colors cursor-default hover:text-red-400">
                 -{fmtAmount(totalExpense.eur, 'EUR')}
               </div>
             </div>
@@ -995,8 +995,12 @@ export default function CategoryPieChart() {
                       cx="50%"
                       cy="50%"
                       labelLine={false}
+                      innerRadius={62}
                       outerRadius={100}
-                      fill="#8884d8"
+                      paddingAngle={2}
+                      cornerRadius={6}
+                      stroke="none"
+                      fill="#FF6B00"
                       dataKey="value"
                       animationBegin={0}
                       animationDuration={800}
@@ -1019,7 +1023,7 @@ export default function CategoryPieChart() {
                     return (
                       <div 
                         key={index} 
-                        className="flex items-center justify-between text-sm py-1.5 px-2 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors"
+                        className="flex items-center justify-between text-sm py-1.5 px-2 rounded-lg hover:bg-white/[0.03] cursor-pointer transition-colors"
                         onClick={() => {
                           setSelectedCategory(entry.name)
                           setCategoryTransactions(entry.transactions || [])
@@ -1034,9 +1038,9 @@ export default function CategoryPieChart() {
                           <span className="font-medium">{entry.name || 'Без категорії'}</span>
                         </div>
                         <div className="flex items-center gap-3 text-xs">
-                          <span className="text-gray-600">-{fmtAmount(entry.totalUAH, 'UAH')}</span>
-                          <span className="text-gray-600">-{fmtAmount(entry.totalEUR, 'EUR')}</span>
-                          <span className="text-gray-400 font-medium min-w-[50px] text-right">{percentage}%</span>
+                          <span className="text-white/70">-{fmtAmount(entry.totalUAH, 'UAH')}</span>
+                          <span className="text-white/70">-{fmtAmount(entry.totalEUR, 'EUR')}</span>
+                          <span className="text-white/40 font-medium min-w-[50px] text-right">{percentage}%</span>
                         </div>
                       </div>
                     )
@@ -1044,22 +1048,22 @@ export default function CategoryPieChart() {
                 </div>
               </>
             ) : (
-              <div className="flex items-center justify-center h-64 text-gray-500">
+              <div className="flex items-center justify-center h-64 text-white/55">
                 Немає витрат за цей період
               </div>
             )}
           </div>
 
           {/* Доходи */}
-          <div className="bg-white rounded-xl p-6 border border-gray-200">
-            <h3 className="text-lg font-semibold mb-4 text-emerald-600">Доходи по категоріям</h3>
+          <div className="bg-surface/90 rounded-xl p-6 border border-white/10">
+            <h3 className="text-lg font-semibold mb-4 text-emerald-400">Доходи по категоріям</h3>
             {/* Загальний дохід */}
-            <div className="bg-emerald-50 rounded-xl p-3 mb-4 border border-emerald-200">
-              <div className="text-xs text-emerald-600 font-medium mb-1">Загальний дохід</div>
-              <div className="text-xl font-bold text-emerald-700 transition-colors cursor-default hover:text-green-600">
+            <div className="bg-emerald-500/10 rounded-xl p-3 mb-4 border border-emerald-500/25">
+              <div className="text-xs text-emerald-400 font-medium mb-1">Загальний дохід</div>
+              <div className="text-xl font-bold text-emerald-300 transition-colors cursor-default hover:text-green-400">
                 +{fmtAmount(totalIncome.uah, 'UAH')}
               </div>
-              <div className="text-xs text-emerald-600 mt-1 transition-colors cursor-default hover:text-green-600">
+              <div className="text-xs text-emerald-400 mt-1 transition-colors cursor-default hover:text-green-400">
                 +{fmtAmount(totalIncome.eur, 'EUR')}
               </div>
             </div>
@@ -1072,8 +1076,12 @@ export default function CategoryPieChart() {
                       cx="50%"
                       cy="50%"
                       labelLine={false}
+                      innerRadius={62}
                       outerRadius={100}
-                      fill="#8884d8"
+                      paddingAngle={2}
+                      cornerRadius={6}
+                      stroke="none"
+                      fill="#FF6B00"
                       dataKey="value"
                       animationBegin={0}
                       animationDuration={800}
@@ -1096,7 +1104,7 @@ export default function CategoryPieChart() {
                     return (
                       <div 
                         key={index} 
-                        className="flex items-center justify-between text-sm py-1.5 px-2 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors"
+                        className="flex items-center justify-between text-sm py-1.5 px-2 rounded-lg hover:bg-white/[0.03] cursor-pointer transition-colors"
                         onClick={() => {
                           setSelectedCategory(entry.name)
                           setCategoryTransactions(entry.transactions || [])
@@ -1111,9 +1119,9 @@ export default function CategoryPieChart() {
                           <span className="font-medium">{entry.name || 'Без категорії'}</span>
                         </div>
                         <div className="flex items-center gap-3 text-xs">
-                          <span className="text-gray-600">+{fmtAmount(entry.totalUAH, 'UAH')}</span>
-                          <span className="text-gray-600">+{fmtAmount(entry.totalEUR, 'EUR')}</span>
-                          <span className="text-gray-400 font-medium min-w-[50px] text-right">{percentage}%</span>
+                          <span className="text-white/70">+{fmtAmount(entry.totalUAH, 'UAH')}</span>
+                          <span className="text-white/70">+{fmtAmount(entry.totalEUR, 'EUR')}</span>
+                          <span className="text-white/40 font-medium min-w-[50px] text-right">{percentage}%</span>
                         </div>
                       </div>
                     )
@@ -1121,7 +1129,7 @@ export default function CategoryPieChart() {
                 </div>
               </>
             ) : (
-              <div className="flex items-center justify-center h-64 text-gray-500">
+              <div className="flex items-center justify-center h-64 text-white/55">
                 Немає доходів за цей період
               </div>
             )}
@@ -1159,7 +1167,7 @@ export default function CategoryPieChart() {
               )
             })
           ) : (
-            <div className="text-center text-gray-500 py-8">Немає транзакцій</div>
+            <div className="text-center text-white/55 py-8">Немає транзакцій</div>
           )}
         </div>
       </BaseModal>

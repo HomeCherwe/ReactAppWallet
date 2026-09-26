@@ -49,28 +49,28 @@ export default function Auth() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-pink-400 via-fuchsia-500 to-sky-500">
+    <div className="min-h-screen flex items-center justify-center">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4"
+        className="bg-liquid-glass rounded-[32px] p-8 w-full max-w-md mx-4"
       >
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-pink-500 to-sky-500 rounded-2xl mb-4">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-brand to-brand-deep rounded-2xl mb-4 shadow-brand">
             <Wallet className="text-white" size={32} />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Wallet Dashboard</h1>
-          <p className="text-gray-600">Вхід через Google</p>
+          <h1 className="text-3xl font-bold tracking-tight text-white mb-2">MyWallet</h1>
+          <p className="text-white/70">Вхід через Google</p>
         </div>
 
         <button
           onClick={signInWithGoogle}
           disabled={loading}
-          className="w-full flex items-center justify-center gap-3 bg-white border-2 border-gray-300 rounded-xl py-3.5 px-4 font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+          className="w-full flex items-center justify-center gap-3 bg-white text-[#111] rounded-full py-3.5 px-4 font-semibold hover:bg-white/90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {loading ? (
             <>
-              <div className="w-5 h-5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
+              <div className="w-5 h-5 border-2 border-black/20 border-t-brand rounded-full animate-spin"></div>
               <span>Завантаження...</span>
             </>
           ) : (
@@ -98,7 +98,7 @@ export default function Auth() {
           )}
         </button>
 
-        <p className="mt-6 text-xs text-center text-gray-500">
+        <p className="mt-6 text-xs text-center text-white/55">
           Увійшовши, ви погоджуєтесь з умовами використання
         </p>
       </motion.div>

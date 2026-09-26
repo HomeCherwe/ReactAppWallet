@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { supabase, cacheUser, getUserCacheStats } from './lib/supabase'
-import Sidebar from './components/Sidebar.jsx'
+import Sidebar, { MobileDock } from './components/Sidebar.jsx'
 import DashboardPage from './pages/DashboardPage'
 import ProfilePage from './pages/ProfilePage'
 import AnalyticsPage from './pages/AnalyticsPage'
@@ -426,15 +426,7 @@ export default function App(){
   // Show loader while checking auth
   if (loading) {
     return (
-      <div className="fixed inset-0 flex items-center justify-center bg-gradient-to-br from-pink-400 via-fuchsia-500 to-sky-500">
-        <div className="text-center">
-          <div className="relative w-16 h-16 mx-auto mb-4">
-            <div className="absolute inset-0 border-4 border-white/20 rounded-full"></div>
-            <div className="absolute inset-0 border-4 border-white rounded-full border-t-transparent animate-spin"></div>
-          </div>
-          <div className="text-white font-medium">Завантаження...</div>
-        </div>
-      </div>
+      <AppLoader />
     )
   }
 
@@ -447,33 +439,19 @@ export default function App(){
   if (syncLoading || initialDataLoading) {
     
     return (
-      <div className="fixed inset-0 flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50">
-        <div className="text-center">
-          <div className="relative w-16 h-16 mx-auto mb-4">
-            <div className="absolute inset-0 border-4 border-indigo-200 rounded-full"></div>
-            <div className="absolute inset-0 border-4 border-indigo-600 rounded-full border-t-transparent animate-spin"></div>
-          </div>
-          <div className="text-gray-600 font-medium">Завантаження...</div>
-          <div className="text-sm text-gray-400 mt-1">
-            {syncLoading ? 'Синхронізація даних' : 'Завантаження даних'}
-          </div>
-          <div className="text-xs text-gray-300 mt-2">
-            syncLoading: {String(syncLoading)}, initialDataLoading: {String(initialDataLoading)}
-          </div>
-        </div>
-      </div>
+      <AppLoader subtitle={syncLoading ? 'Синхронізація даних' : 'Завантаження даних'} />
     )
   }
   
   
 
   return (
-    <div className="app-container min-h-dvh sm:pt-6 pb-20 sm:pb-2 pt-4 sm:pt-6">
-      {/* Mobile sidebar - fixed at bottom */}
-      <Sidebar className="sm:hidden" />
-      
-      <div className="max-w-[1300px] mx-auto grid grid-cols-1 lg:grid-cols-[220px_1fr_360px] gap-4 sm:gap-4">
-        <div className="hidden sm:block"><Sidebar /></div>
+    <div className="app-container min-h-dvh pt-4 sm:pt-6 pb-40 lg:pb-6">
+      {/* Phone & tablet: bottom dock + big orange + like the iPhone app */}
+      <div className="lg:hidden"><MobileDock /></div>
+
+      <div className="max-w-[1300px] mx-auto grid grid-cols-1 lg:grid-cols-[230px_1fr_360px] gap-4">
+        <div className="hidden lg:block"><Sidebar /></div>
         
         <Routes>
           <Route path="/" element={<DashboardPage />} />
@@ -510,6 +488,22 @@ export default function App(){
           } />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+      </div>
+    </div>
+  )
+}
+
+/** Full-screen loader on the dark background (orange ring, like the iPhone app) */
+function AppLoader({ subtitle }) {
+  return (
+    <div className="fixed inset-0 flex items-center justify-center">
+      <div className="text-center">
+        <div className="relative w-14 h-14 mx-auto mb-4">
+          <div className="absolute inset-0 border-4 border-white/10 rounded-full"></div>
+          <div className="absolute inset-0 border-4 border-brand rounded-full border-t-transparent animate-spin"></div>
+        </div>
+        <div className="text-white/85 font-semibold">Завантаження...</div>
+        {subtitle && <div className="text-sm text-white/45 mt-1">{subtitle}</div>}
       </div>
     </div>
   )

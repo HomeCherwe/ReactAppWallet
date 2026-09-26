@@ -234,10 +234,10 @@ export default function TotalsCard({ title = 'Total balance' }) {
   }, [data, convertCurrency])
 
   const sections = useMemo(() => ([
-    { key:'all',     title:'All',      icon:<Globe size={14} className="text-indigo-600"/>, totals:allTotals },
-    { key:'cash',    title:'Cash',     icon:<Wallet size={14} className="text-green-600"/>,  totals:data.cash },
-    { key:'cards',   title:'Cards',      icon:<CreditCard size={14} className="text-blue-600"/>, totals:data.cards },
-    { key:'savings', title:'Savings',  icon:<PiggyBank size={14} className="text-purple-600"/>, totals:data.savings },
+    { key:'all',     title:'Всі',      icon:<Globe size={14} className="text-brand"/>, totals:allTotals },
+    { key:'cash',    title:'Готівка',     icon:<Wallet size={14} className="text-green-400"/>,  totals:data.cash },
+    { key:'cards',   title:'Картки',      icon:<CreditCard size={14} className="text-blue-400"/>, totals:data.cards },
+    { key:'savings', title:'Заощадження',  icon:<PiggyBank size={14} className="text-brand"/>, totals:data.savings },
   ]), [data, allTotals])
 
   const current = sections[idx]
@@ -310,29 +310,29 @@ export default function TotalsCard({ title = 'Total balance' }) {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="rounded-2xl bg-white shadow-soft border border-gray-200 overflow-hidden"
+      className="rounded-3xl bg-white/[0.04] backdrop-blur-xl shadow-glass overflow-hidden border border-white/10"
     >
-      <div className="p-3 border-b border-gray-100">
+      <div className="p-3 border-b border-white/[0.06]">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Wallet size={16} className="text-indigo-600" />
-            <h3 className="text-sm font-semibold text-gray-800">{title}</h3>
+            <Wallet size={16} className="text-brand" />
+            <h3 className="text-sm font-semibold text-white">{title}</h3>
           </div>
         </div>
       </div>
 
-      <div className="p-2 border-b border-gray-100">
+      <div className="p-2 border-b border-white/[0.06]">
         <div 
           ref={tabsRef}
-          className="flex gap-0.5 overflow-x-auto scrollbar-hide"
+          className="flex gap-0.5 overflow-x-auto scrollbar-hide rounded-full bg-white/[0.06] p-0.5"
         >
           {sections.map((s, i) => (
             <button
               key={s.key}
               ref={(el) => { tabButtonsRef.current[i] = el }}
               onClick={() => setIdx(i)}
-              className={`flex items-center gap-1 px-1.5 py-1 rounded-md transition-all text-xs flex-shrink-0 justify-center whitespace-nowrap ${
-                i===idx ? 'bg-indigo-100 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-100'
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-full transition-all text-xs font-semibold flex-shrink-0 justify-center whitespace-nowrap ${
+                i===idx ? 'bg-white/[0.14] text-white shadow-sm' : 'text-white/60 hover:text-white'
               }`}
             >
               {s.icon}
@@ -347,13 +347,13 @@ export default function TotalsCard({ title = 'Total balance' }) {
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
         onClick={() => { if (!didSwipeRef.current) setHistoryOpen(true) }}
-        whileHover={{ backgroundColor: 'rgba(99,102,241,0.04)' }}
+        whileHover={{ backgroundColor: 'rgba(255,107,0,0.04)' }}
         transition={{ duration: 0.15 }}
         title="Переглянути графік балансу"
       >
         {/* Chart hint icon */}
         <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-          <BarChart2 size={13} className="text-indigo-400" />
+          <BarChart2 size={13} className="text-brand-light" />
         </div>
 
         <div className="min-h-[120px]">
@@ -368,7 +368,7 @@ export default function TotalsCard({ title = 'Total balance' }) {
             >
               {loading ? (
                 <div className="flex items-center justify-center py-4 flex-1">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600"></div>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-brand"></div>
                 </div>
               ) : (
                 <div className="flex-1 flex flex-col justify-center">
@@ -384,10 +384,10 @@ export default function TotalsCard({ title = 'Total balance' }) {
         <div className="flex items-center justify-between">
           <div className="flex gap-1">
             {sections.map((_, i) => (
-              <div key={i} className={`h-1 rounded-full transition-all ${i===idx ? 'w-4 bg-indigo-500' : 'w-1 bg-gray-300'}`} />
+              <div key={i} className={`h-1 rounded-full transition-all ${i===idx ? 'w-4 bg-brand' : 'w-1 bg-white/15'}`} />
             ))}
           </div>
-          <div className="text-xs text-gray-500">{idx+1}/{sections.length}</div>
+          <div className="text-xs text-white/55">{idx+1}/{sections.length}</div>
         </div>
       </div>
 

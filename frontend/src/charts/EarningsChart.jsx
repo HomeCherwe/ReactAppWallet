@@ -18,11 +18,11 @@ import useMonoRates from '../hooks/useMonoRates'
 
 // Кольори для різних валют
 const CURRENCY_COLORS = {
-  'UAH': '#3b82f6',   // синій
-  'USD': '#10b981',    // зелений
-  'EUR': '#f59e0b',    // помаранчевий
-  'USDT': '#8b5cf6',   // фіолетовий
-  'DEFAULT': '#6b7280' // сірий
+  'UAH': '#60A5FA',   // синій
+  'USD': '#22C55E',    // зелений
+  'EUR': '#FF6B00',    // помаранчевий (бренд)
+  'USDT': '#A78BFA',   // фіолетовий
+  'DEFAULT': 'rgba(255,255,255,0.4)' // сірий
 }
 
 const getCurrencyColor = (currency) => {
@@ -96,18 +96,18 @@ const CustomTooltip = ({ active, payload, label, onPointClick, isMobile, currenc
         <div
           role={isMobile ? "button" : undefined}
           tabIndex={isMobile ? 0 : undefined}
-          className={`bg-white shadow-soft rounded-lg px-3 py-2 text-sm ${isMobile ? 'cursor-pointer select-none active:scale-95 transition-transform' : ''}`}
+          className={`bg-surface/90 shadow-soft rounded-lg px-3 py-2 text-sm ${isMobile ? 'cursor-pointer select-none active:scale-95 transition-transform' : ''}`}
           style={{ pointerEvents: isMobile ? 'auto' : 'none', touchAction: 'manipulation' }}
           onClick={isMobile ? handleActivate : undefined}
           onTouchEnd={isMobile ? handleActivate : undefined}
           title={isMobile ? "Натисніть, щоб побачити транзакції цього дня" : undefined}
         >
-          <div className="text-xs text-gray-500 mb-1">{label}</div>
+          <div className="text-xs text-white/55 mb-1">{label}</div>
           
           {/* Окремі валюти */}
           {nonZeroPayloads.map((p, idx) => {
             const cur = p.dataKey || 'UAH'
-            const amountColor = isSpending ? 'text-red-600' : 'text-green-600'
+            const amountColor = isSpending ? 'text-red-400' : 'text-green-400'
             return (
               <div key={idx} className="flex items-center gap-2">
                 <div 
@@ -123,15 +123,15 @@ const CustomTooltip = ({ active, payload, label, onPointClick, isMobile, currenc
           
           {/* Конвертовані суми */}
           {(totalEURConverted > 0 || totalUAHConverted > 0) && (
-            <div className="border-t border-gray-200 mt-2 pt-2">
-              <div className="text-xs text-gray-400 mb-0.5">Конвертовано:</div>
+            <div className="border-t border-white/10 mt-2 pt-2">
+              <div className="text-xs text-white/40 mb-0.5">Конвертовано:</div>
               {totalEURConverted > 0 && (
-                <div className={`text-xs font-semibold ${isSpending ? 'text-red-600' : 'text-green-600'}`}>
+                <div className={`text-xs font-semibold ${isSpending ? 'text-red-400' : 'text-green-400'}`}>
                   {sign}{totalEURConverted.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR
                 </div>
               )}
               {totalUAHConverted > 0 && (
-                <div className={`text-xs font-semibold ${isSpending ? 'text-red-600' : 'text-green-600'}`}>
+                <div className={`text-xs font-semibold ${isSpending ? 'text-red-400' : 'text-green-400'}`}>
                   {sign}{totalUAHConverted.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} UAH
                 </div>
               )}
@@ -139,9 +139,9 @@ const CustomTooltip = ({ active, payload, label, onPointClick, isMobile, currenc
           )}
           
           {isMobile ? (
-            <div className="text-xs text-gray-400 mt-1">👆 Детальніше</div>
+            <div className="text-xs text-white/40 mt-1">👆 Детальніше</div>
           ) : (
-            <div className="text-xs text-gray-400 mt-1">🖱️ Клік для деталей</div>
+            <div className="text-xs text-white/40 mt-1">🖱️ Клік для деталей</div>
           )}
         </div>
       )
@@ -168,13 +168,13 @@ const CustomTooltip = ({ active, payload, label, onPointClick, isMobile, currenc
       if (onPointClick && iso) onPointClick(iso)
     }
 
-    const amountColor = isSpending ? 'text-red-600' : 'text-green-600'
+    const amountColor = isSpending ? 'text-red-400' : 'text-green-400'
 
     return (
       <div
         role={isMobile ? "button" : undefined}
         tabIndex={isMobile ? 0 : undefined}
-        className={`bg-white shadow-soft rounded-lg px-3 py-2 text-sm ${isMobile ? 'cursor-pointer select-none active:scale-95 transition-transform' : ''}`}
+        className={`bg-surface/90 shadow-soft rounded-lg px-3 py-2 text-sm ${isMobile ? 'cursor-pointer select-none active:scale-95 transition-transform' : ''}`}
         style={{ pointerEvents: isMobile ? 'auto' : 'none', touchAction: 'manipulation' }}
         onClick={isMobile ? handleActivate : undefined}
         onTouchEnd={isMobile ? handleActivate : undefined}
@@ -183,12 +183,12 @@ const CustomTooltip = ({ active, payload, label, onPointClick, isMobile, currenc
         <div className={`font-semibold ${amountColor}`}>
           {sign}{value.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {currentCurrency}
         </div>
-        <div className="text-xs text-gray-500 mb-1">{label}</div>
+        <div className="text-xs text-white/55 mb-1">{label}</div>
         
         {/* Конвертовані суми */}
         {(inEUR !== null || inUAH !== null) && (
-          <div className="border-t border-gray-200 pt-1 mt-1">
-            <div className="text-xs text-gray-400 mb-0.5">Конвертовано:</div>
+          <div className="border-t border-white/10 pt-1 mt-1">
+            <div className="text-xs text-white/40 mb-0.5">Конвертовано:</div>
             {inEUR !== null && currentCurrency !== 'EUR' && (
               <div className={`text-xs font-semibold ${amountColor}`}>
                 {sign}{inEUR.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR
@@ -203,9 +203,9 @@ const CustomTooltip = ({ active, payload, label, onPointClick, isMobile, currenc
         )}
         
         {isMobile ? (
-          <div className="text-xs text-gray-400 mt-1">👆 Детальніше</div>
+          <div className="text-xs text-white/40 mt-1">👆 Детальніше</div>
         ) : (
-          <div className="text-xs text-gray-400 mt-1">🖱️ Клік для деталей</div>
+          <div className="text-xs text-white/40 mt-1">🖱️ Клік для деталей</div>
         )}
       </div>
     )
@@ -828,15 +828,15 @@ export default function EarningsChart(){
   }
 
   return (
-    <motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} className="bg-white rounded-2xl p-3 md:p-5 shadow-soft">
+    <motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} className="bg-white/[0.04] backdrop-blur-xl rounded-3xl p-3 md:p-5 shadow-glass border border-white/10">
       <div className="flex flex-col sm:flex-row items-center sm:items-center gap-2 sm:gap-3 mb-2">
           <div className="flex items-center gap-2 justify-center w-full sm:w-auto">
-          <button onClick={() => { setMode('earning'); setAnimKey(k => k + 1); }} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${mode==='earning' ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}>Дохід</button>
-          <button onClick={() => { setMode('spending'); setAnimKey(k => k + 1); }} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${mode==='spending' ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}>Витрата</button>
+          <button onClick={() => { setMode('earning'); setAnimKey(k => k + 1); }} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${mode==='earning' ? 'bg-surface-raised text-white' : 'bg-white/[0.06]'}`}>Дохід</button>
+          <button onClick={() => { setMode('spending'); setAnimKey(k => k + 1); }} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${mode==='spending' ? 'bg-surface-raised text-white' : 'bg-white/[0.06]'}`}>Витрата</button>
         </div>
         <div className="ml-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 text-xs w-full sm:w-auto">
           {/* Currency selector with icon */}
-          <div className="flex items-center gap-2 border rounded px-2 py-1 bg-white flex-1 sm:flex-none">
+          <div className="flex items-center gap-2 border rounded px-2 py-1 bg-surface/90 flex-1 sm:flex-none">
             <select aria-label="Currency" className="appearance-none bg-transparent text-sm font-semibold w-full sm:w-auto" value={currency} onChange={e=>{
               const v = e.target.value
               setCurrency(v)
@@ -854,12 +854,12 @@ export default function EarningsChart(){
           </div>
 
           {/* From date with calendar icon */}
-          <div className="flex items-center gap-2 border rounded px-2 py-1 bg-white flex-1 sm:flex-none">
+          <div className="flex items-center gap-2 border rounded px-2 py-1 bg-surface/90 flex-1 sm:flex-none">
             <input aria-label="From date" type="date" value={from} onChange={e=>setFrom(e.target.value)} className="text-sm font-semibold appearance-none bg-transparent w-full sm:w-auto" />
           </div>
 
           {/* To date with calendar icon */}
-          <div className="flex items-center gap-2 border rounded px-2 py-1 bg-white flex-1 sm:flex-none">
+          <div className="flex items-center gap-2 border rounded px-2 py-1 bg-surface/90 flex-1 sm:flex-none">
             <input aria-label="To date" type="date" value={to} onChange={e=>setTo(e.target.value)} className="text-sm font-semibold appearance-none bg-transparent w-full sm:w-auto" />
           </div>
 
@@ -868,7 +868,7 @@ export default function EarningsChart(){
             setAppliedTo(to)
             fetchData({ showLoading: true }); 
             setAnimKey(k => k + 1) 
-          }} className="btn btn-soft text-xs px-3 w-full sm:w-auto">Apply</button>
+          }} className="btn btn-soft text-xs px-3 w-full sm:w-auto">Застосувати</button>
         </div>
       </div>
 
@@ -882,14 +882,14 @@ export default function EarningsChart(){
                   className="w-3 h-3 rounded" 
                   style={{ backgroundColor: getCurrencyColor(cur) }}
                 />
-                <div className={`${mode==='spending' ? 'text-red-600' : 'text-green-600'} text-xs sm:text-sm font-semibold`}>
+                <div className={`${mode==='spending' ? 'text-red-400' : 'text-green-400'} text-xs sm:text-sm font-semibold`}>
                   {mode==='spending' ? '-' : '+'}{total.toLocaleString()} {cur}
                 </div>
               </div>
             ))}
           </div>
         ) : (
-          <div className={`${mode==='spending' ? 'text-red-600' : 'text-green-600'} text-xs sm:text-sm font-semibold`}>
+          <div className={`${mode==='spending' ? 'text-red-400' : 'text-green-400'} text-xs sm:text-sm font-semibold`}>
             {mode==='spending' ? '-' : '+'}{periodTotal.toLocaleString()} {currency}
           </div>
         )}
@@ -938,7 +938,7 @@ export default function EarningsChart(){
         }}
       >
         {loading ? (
-          <div className="flex items-center justify-center h-full">Loading...</div>
+          <div className="flex items-center justify-center h-full text-white/55">Завантаження...</div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             {/* Single-layer chart: rely on Recharts' built-in animation for smooth updates. */}
@@ -948,10 +948,10 @@ export default function EarningsChart(){
               margin={{ left: 0, right: 0, top: 12, bottom: window.innerWidth < 768 ? 10 : 18 }}
               style={{ cursor: 'pointer' }}
             >
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.08)" />
               <XAxis 
                 dataKey="name" 
-                tick={{ fontSize: window.innerWidth < 768 ? 9 : 11 }} 
+                tick={{ fontSize: window.innerWidth < 768 ? 9 : 11, fill: 'rgba(255,255,255,0.45)' }} 
                 axisLine={false} 
                 tickLine={false} 
                 angle={window.innerWidth < 768 ? 0 : -45} 
@@ -960,13 +960,14 @@ export default function EarningsChart(){
                 interval={window.innerWidth < 768 ? 'preserveStartEnd' : 0}
               />
               <YAxis 
-                tick={{ fontSize: window.innerWidth < 768 ? 9 : 11 }} 
+                tick={{ fontSize: window.innerWidth < 768 ? 9 : 11, fill: 'rgba(255,255,255,0.45)' }} 
                 axisLine={false} 
                 tickLine={false}
                 width={window.innerWidth < 768 ? 40 : 60}
               />
               <Tooltip 
                 trigger="hover"
+                cursor={{ fill: 'rgba(255,255,255,0.05)' }}
                 animationDuration={200}
                 content={<CustomTooltip isMobile={isMobileViewport} currency={currency} mode={mode} rates={rates} onPointClick={(iso) => {
                   const included = getIncludedTxIds(txs || [], mode, currency === 'ALL' ? null : currency)
@@ -1021,7 +1022,7 @@ export default function EarningsChart(){
               ) : (
                 <Bar
                   dataKey="value"
-                  fill={mode === 'spending' ? '#dc2626' : '#16a34a'}
+                  fill={mode === 'spending' ? '#FF453A' : '#22C55E'}
                   isAnimationActive={true}
                   radius={[4, 4, 0, 0]}
                   cursor="pointer"
@@ -1043,7 +1044,7 @@ export default function EarningsChart(){
         >
           <div className="max-h-[60vh] overflow-auto space-y-2">
             {dayTxs.length === 0 ? (
-              <div className="text-sm text-gray-500">Немає транзакцій за цей день</div>
+              <div className="text-sm text-white/55">Немає транзакцій за цей день</div>
             ) : (
               <>
                 {dayTxs.map(tx => (

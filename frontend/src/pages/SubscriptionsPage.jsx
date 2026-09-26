@@ -350,7 +350,7 @@ export default function SubscriptionsPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand"></div>
       </div>
     )
   }
@@ -359,21 +359,21 @@ export default function SubscriptionsPage() {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white rounded-2xl shadow-soft border border-gray-200 p-4 sm:p-6"
+      className="bg-white/[0.04] backdrop-blur-xl rounded-3xl shadow-glass p-4 sm:p-6 border border-white/10"
     >
       {/* Загальна витрата на місяць */}
       {subscriptions.length > 0 && (
-        <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl border border-indigo-200">
+        <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-gradient-to-r from-brand/10 to-brand/10 rounded-xl border border-brand/25">
           <div>
-            <h3 className="text-xs sm:text-sm font-medium text-gray-600 mb-2">Загальна витрата на місяць (всі активні підписки)</h3>
+            <h3 className="text-xs sm:text-sm font-medium text-white/70 mb-2">Загальна витрата на місяць (всі активні підписки)</h3>
             <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
               <div className="flex items-center gap-2">
-                <span className="text-lg sm:text-2xl font-bold text-indigo-700">
+                <span className="text-lg sm:text-2xl font-bold text-brand-light">
                   {totalMonthlyExpense.UAH.toFixed(2)} UAH
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-lg sm:text-2xl font-bold text-purple-700">
+                <span className="text-lg sm:text-2xl font-bold text-brand-light">
                   {totalMonthlyExpense.EUR.toFixed(2)} EUR
                 </span>
               </div>
@@ -383,7 +383,7 @@ export default function SubscriptionsPage() {
       )}
 
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
-        <h2 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
+        <h2 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2">
           <Repeat size={20} className="sm:w-6 sm:h-6" />
           Підписки
         </h2>
@@ -403,7 +403,7 @@ export default function SubscriptionsPage() {
             })
             setModalOpen(true)
           }}
-          className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors text-sm sm:text-base"
+          className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-brand hover:bg-brand-dark text-white rounded-lg transition-colors text-sm sm:text-base"
         >
           <Plus size={16} className="sm:w-[18px] sm:h-[18px]" />
           <span className="hidden sm:inline">Додати підписку</span>
@@ -412,7 +412,7 @@ export default function SubscriptionsPage() {
       </div>
 
       {subscriptions.length === 0 ? (
-        <div className="text-center py-12 text-gray-500">
+        <div className="text-center py-12 text-white/55">
           <Repeat size={48} className="mx-auto mb-4 opacity-50" />
           <p>Немає підписок</p>
           <p className="text-sm mt-2">Додайте підписку для автоматичного додавання транзакцій</p>
@@ -423,30 +423,30 @@ export default function SubscriptionsPage() {
             <div
               key={sub.id}
               className={`p-3 sm:p-4 rounded-lg border-2 transition-all ${sub.is_active
-                ? 'border-gray-200 bg-white hover:border-indigo-300'
-                : 'border-gray-100 bg-gray-50 opacity-60'
+                ? 'border-white/10 bg-surface/90 hover:border-brand/40'
+                : 'border-white/[0.06] bg-white/[0.03] opacity-60'
                 }`}
             >
               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-2 flex-wrap">
-                    <h3 className="font-semibold text-gray-900 text-sm sm:text-base">{sub.name}</h3>
+                    <h3 className="font-semibold text-white text-sm sm:text-base">{sub.name}</h3>
                     {!sub.is_active && (
-                      <span className="text-xs px-2 py-0.5 bg-gray-200 text-gray-600 rounded">Неактивна</span>
+                      <span className="text-xs px-2 py-0.5 bg-white/10 text-white/70 rounded">Неактивна</span>
                     )}
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 text-xs sm:text-sm mb-2">
-                    <div className="flex items-center gap-1.5 text-gray-600">
+                    <div className="flex items-center gap-1.5 text-white/70">
                       <DollarSign size={16} />
-                      <span className={sub.is_expense ? 'text-red-600' : 'text-green-600'}>
+                      <span className={sub.is_expense ? 'text-red-400' : 'text-green-400'}>
                         {sub.is_expense ? '-' : '+'}{Math.abs(sub.amount).toLocaleString()} {sub.card_id ? (cards.find(c => c.id === sub.card_id)?.currency || '') : ''}
                       </span>
                     </div>
-                    <div className="flex items-center gap-1.5 text-gray-600">
+                    <div className="flex items-center gap-1.5 text-white/70">
                       <Repeat size={16} />
                       <span>{getFrequencyLabel(sub)}</span>
                     </div>
-                    <div className="flex items-center gap-1.5 text-gray-600">
+                    <div className="flex items-center gap-1.5 text-white/70">
                       <CreditCard size={16} />
                       <span>
                         {sub.card_id
@@ -458,12 +458,12 @@ export default function SubscriptionsPage() {
                         }
                       </span>
                     </div>
-                    <div className="flex items-center gap-1.5 text-gray-600">
+                    <div className="flex items-center gap-1.5 text-white/70">
                       <Calendar size={14} className="sm:w-4 sm:h-4 flex-shrink-0" />
                       <span className="break-words">Наступна: {getNextExecutionDate(sub)}</span>
                     </div>
                   </div>
-                  <div className="text-xs text-gray-500 space-y-1 mt-2">
+                  <div className="text-xs text-white/55 space-y-1 mt-2">
                     <div>Категорія: <span className="font-medium">{sub.category || 'Підписки'}</span></div>
                     {sub.note && (
                       <div>Опис: <span className="font-medium">{sub.note}</span></div>
@@ -499,7 +499,7 @@ export default function SubscriptionsPage() {
                               )}
                             </span>
                           </div>
-                          <div className="text-xs text-gray-600 pl-5">
+                          <div className="text-xs text-white/70 pl-5">
                             На місяць: <span className="font-medium">{monthlyAmount.toFixed(2)} {currency}</span> |
                             На рік: <span className="font-medium">{yearlyAmount.toFixed(2)} {currency}</span>
                           </div>
@@ -512,8 +512,8 @@ export default function SubscriptionsPage() {
                   <button
                     onClick={() => handleToggleActive(sub)}
                     className={`px-2 sm:px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${sub.is_active
-                      ? 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                      : 'bg-green-100 hover:bg-green-200 text-green-700'
+                      ? 'bg-white/[0.06] hover:bg-white/10 text-white/85'
+                      : 'bg-green-500/15 hover:bg-green-500/20 text-green-300'
                       }`}
                   >
                     <span className="hidden sm:inline">{sub.is_active ? 'Деактивувати' : 'Активувати'}</span>
@@ -521,34 +521,34 @@ export default function SubscriptionsPage() {
                   </button>
                   <button
                     onClick={() => handleCreateTransaction(sub)}
-                    className="p-1.5 sm:p-2 text-gray-600 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                    className="p-1.5 sm:p-2 text-white/70 hover:text-green-400 hover:bg-green-500/10 rounded-lg transition-colors"
                     title="Створити транзакцію"
                   >
                     <Play size={16} className="sm:w-[18px] sm:h-[18px]" />
                   </button>
                   <button
                     onClick={() => handleOpenParticipants(sub)}
-                    className="p-1.5 sm:p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                    className="p-1.5 sm:p-2 text-white/70 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors"
                     title="Учасники"
                   >
                     <Users size={16} className="sm:w-[18px] sm:h-[18px]" />
                   </button>
                   <button
                     onClick={() => handleViewTransactions(sub)}
-                    className="p-1.5 sm:p-2 text-gray-600 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                    className="p-1.5 sm:p-2 text-white/70 hover:text-brand hover:bg-brand/10 rounded-lg transition-colors"
                     title="Історія транзакцій"
                   >
                     <History size={16} className="sm:w-[18px] sm:h-[18px]" />
                   </button>
                   <button
                     onClick={() => handleEdit(sub)}
-                    className="p-1.5 sm:p-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                    className="p-1.5 sm:p-2 text-white/70 hover:text-brand hover:bg-brand/10 rounded-lg transition-colors"
                   >
                     <Edit2 size={16} className="sm:w-[18px] sm:h-[18px]" />
                   </button>
                   <button
                     onClick={() => handleDeleteClick(sub)}
-                    className="p-1.5 sm:p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    className="p-1.5 sm:p-2 text-white/70 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
                   >
                     <Trash2 size={16} className="sm:w-[18px] sm:h-[18px]" />
                   </button>
@@ -591,7 +591,7 @@ export default function SubscriptionsPage() {
           className="space-y-4"
         >
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-white/85 mb-2">
               Назва підписки *
             </label>
             <input
@@ -599,13 +599,13 @@ export default function SubscriptionsPage() {
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               placeholder="Наприклад: Netflix, Spotify"
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+              className="w-full px-4 py-2.5 border border-white/[0.14] rounded-lg focus:ring-2 focus:ring-brand focus:border-brand outline-none"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-white/85 mb-2">
                 Сума *
               </label>
               <input
@@ -614,17 +614,17 @@ export default function SubscriptionsPage() {
                 value={form.amount}
                 onChange={(e) => setForm({ ...form, amount: e.target.value })}
                 placeholder="0.00"
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                className="w-full px-4 py-2.5 border border-white/[0.14] rounded-lg focus:ring-2 focus:ring-brand focus:border-brand outline-none"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-white/85 mb-2">
                 Карта
               </label>
               <select
                 value={form.card_id}
                 onChange={(e) => setForm({ ...form, card_id: e.target.value })}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                className="w-full px-4 py-2.5 border border-white/[0.14] rounded-lg focus:ring-2 focus:ring-brand focus:border-brand outline-none"
               >
                 <option value="">Готівка</option>
                 {cards.map((card) => (
@@ -637,7 +637,7 @@ export default function SubscriptionsPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-white/85 mb-2">
               Тип
             </label>
             <div className="flex gap-2">
@@ -645,8 +645,8 @@ export default function SubscriptionsPage() {
                 type="button"
                 onClick={() => setForm({ ...form, is_expense: true })}
                 className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors ${form.is_expense
-                  ? 'bg-red-100 text-red-700 border-2 border-red-300'
-                  : 'bg-gray-100 text-gray-600 border-2 border-transparent'
+                  ? 'bg-red-500/15 text-red-300 border-2 border-red-500/35'
+                  : 'bg-white/[0.06] text-white/70 border-2 border-transparent'
                   }`}
               >
                 Витрата
@@ -655,8 +655,8 @@ export default function SubscriptionsPage() {
                 type="button"
                 onClick={() => setForm({ ...form, is_expense: false })}
                 className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors ${!form.is_expense
-                  ? 'bg-green-100 text-green-700 border-2 border-green-300'
-                  : 'bg-gray-100 text-gray-600 border-2 border-transparent'
+                  ? 'bg-green-500/15 text-green-300 border-2 border-green-500/35'
+                  : 'bg-white/[0.06] text-white/70 border-2 border-transparent'
                   }`}
               >
                 Дохід
@@ -665,7 +665,7 @@ export default function SubscriptionsPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-white/85 mb-2">
               Частота *
             </label>
             <div className="flex gap-2">
@@ -673,8 +673,8 @@ export default function SubscriptionsPage() {
                 type="button"
                 onClick={() => setForm({ ...form, frequency: 'weekly' })}
                 className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors ${form.frequency === 'weekly'
-                  ? 'bg-indigo-100 text-indigo-700 border-2 border-indigo-300'
-                  : 'bg-gray-100 text-gray-600 border-2 border-transparent'
+                  ? 'bg-brand/15 text-brand-light border-2 border-brand/40'
+                  : 'bg-white/[0.06] text-white/70 border-2 border-transparent'
                   }`}
               >
                 Тиждень
@@ -683,8 +683,8 @@ export default function SubscriptionsPage() {
                 type="button"
                 onClick={() => setForm({ ...form, frequency: 'monthly' })}
                 className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors ${form.frequency === 'monthly'
-                  ? 'bg-indigo-100 text-indigo-700 border-2 border-indigo-300'
-                  : 'bg-gray-100 text-gray-600 border-2 border-transparent'
+                  ? 'bg-brand/15 text-brand-light border-2 border-brand/40'
+                  : 'bg-white/[0.06] text-white/70 border-2 border-transparent'
                   }`}
               >
                 Місяць
@@ -694,13 +694,13 @@ export default function SubscriptionsPage() {
 
           {form.frequency === 'weekly' ? (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-white/85 mb-2">
                 День тижня *
               </label>
               <select
                 value={form.day_of_week}
                 onChange={(e) => setForm({ ...form, day_of_week: parseInt(e.target.value) })}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                className="w-full px-4 py-2.5 border border-white/[0.14] rounded-lg focus:ring-2 focus:ring-brand focus:border-brand outline-none"
               >
                 <option value={1}>Понеділок</option>
                 <option value={2}>Вівторок</option>
@@ -713,7 +713,7 @@ export default function SubscriptionsPage() {
             </div>
           ) : (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-white/85 mb-2">
                 День місяця * (1-31)
               </label>
               <input
@@ -722,13 +722,13 @@ export default function SubscriptionsPage() {
                 max="31"
                 value={form.day_of_month}
                 onChange={(e) => setForm({ ...form, day_of_month: parseInt(e.target.value) || 1 })}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                className="w-full px-4 py-2.5 border border-white/[0.14] rounded-lg focus:ring-2 focus:ring-brand focus:border-brand outline-none"
               />
             </div>
           )}
 
           <div className="relative" ref={categoryInputRef}>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-white/85 mb-2">
               Категорія
             </label>
             <input
@@ -737,7 +737,7 @@ export default function SubscriptionsPage() {
               onChange={(e) => setForm({ ...form, category: e.target.value })}
               onFocus={() => setShowCategoryDropdown(true)}
               placeholder="Категорія (напр. Підписки)"
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+              className="w-full px-4 py-2.5 border border-white/[0.14] rounded-lg focus:ring-2 focus:ring-brand focus:border-brand outline-none"
             />
 
             <AnimatePresence>
@@ -749,7 +749,7 @@ export default function SubscriptionsPage() {
                 return filteredCategories.length > 0 && (
                   <motion.div
                     ref={categoryDropdownRef}
-                    className="absolute z-10 top-full left-0 right-0 mt-1 bg-white border rounded-xl max-h-48 overflow-y-auto shadow-lg"
+                    className="absolute z-10 top-full left-0 right-0 mt-1 bg-surface/90 border rounded-xl max-h-48 overflow-y-auto shadow-lg"
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
@@ -758,7 +758,7 @@ export default function SubscriptionsPage() {
                       <button
                         key={idx}
                         type="button"
-                        className="w-full text-left px-3 py-2 hover:bg-gray-50 first:rounded-t-xl last:rounded-b-xl"
+                        className="w-full text-left px-3 py-2 hover:bg-white/[0.03] first:rounded-t-xl last:rounded-b-xl"
                         onClick={() => {
                           setForm({ ...form, category: cat })
                           setShowCategoryDropdown(false)
@@ -774,7 +774,7 @@ export default function SubscriptionsPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-white/85 mb-2">
               Опис
             </label>
             <textarea
@@ -782,7 +782,7 @@ export default function SubscriptionsPage() {
               onChange={(e) => setForm({ ...form, note: e.target.value })}
               placeholder="Опис для автоматичних транзакцій (необов'язково)"
               rows={3}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-none"
+              className="w-full px-4 py-2.5 border border-white/[0.14] rounded-lg focus:ring-2 focus:ring-brand focus:border-brand outline-none resize-none"
             />
           </div>
 
@@ -795,7 +795,7 @@ export default function SubscriptionsPage() {
                 setModalOpen(false)
                 setEditing(null)
               }}
-              className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+              className="px-4 py-2 text-white/85 hover:bg-white/[0.06] rounded-lg transition-colors"
             >
               Скасувати
             </button>
@@ -813,7 +813,7 @@ export default function SubscriptionsPage() {
 
                 e.stopPropagation()
               }}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors cursor-pointer relative z-10"
+              className="px-4 py-2 bg-brand hover:bg-brand-dark text-white rounded-lg transition-colors cursor-pointer relative z-10"
               style={{ pointerEvents: 'auto' }}
             >
               {editing ? 'Зберегти' : 'Створити'}
@@ -866,9 +866,9 @@ export default function SubscriptionsPage() {
             const yearlyAmount = monthlyAmount * 12
 
             return (
-              <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-4">
-                <h4 className="text-sm font-semibold text-indigo-900 mb-2">Розрахунок на учасника:</h4>
-                <div className="space-y-1 text-sm text-indigo-700">
+              <div className="bg-brand/10 border border-brand/25 rounded-lg p-4 mb-4">
+                <h4 className="text-sm font-semibold text-brand-light mb-2">Розрахунок на учасника:</h4>
+                <div className="space-y-1 text-sm text-brand-light">
                   <div className="flex justify-between">
                     <span>На місяць:</span>
                     <span className="font-medium">{monthlyAmount.toFixed(2)} {subscriptionForParticipants.card_id ? (cards.find(c => c.id === subscriptionForParticipants.card_id)?.currency || '') : ''}</span>
@@ -877,7 +877,7 @@ export default function SubscriptionsPage() {
                     <span>На рік:</span>
                     <span className="font-medium">{yearlyAmount.toFixed(2)} {subscriptionForParticipants.card_id ? (cards.find(c => c.id === subscriptionForParticipants.card_id)?.currency || '') : ''}</span>
                   </div>
-                  <div className="text-xs text-indigo-600 mt-2 pt-2 border-t border-indigo-200">
+                  <div className="text-xs text-brand mt-2 pt-2 border-t border-brand/25">
                     Загальна сума: {totalAmount.toLocaleString()} {subscriptionForParticipants.card_id ? (cards.find(c => c.id === subscriptionForParticipants.card_id)?.currency || '') : ''} / {frequency === 'monthly' ? 'місяць' : 'тиждень'}
                   </div>
                 </div>
@@ -886,7 +886,7 @@ export default function SubscriptionsPage() {
           })()}
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-white/85 mb-2">
               Загальна кількість учасників (включаючи вас)
             </label>
             <input
@@ -894,29 +894,29 @@ export default function SubscriptionsPage() {
               min="1"
               value={totalParticipants}
               onChange={(e) => setTotalParticipants(Math.max(1, parseInt(e.target.value) || 1))}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+              className="w-full px-4 py-2.5 border border-white/[0.14] rounded-lg focus:ring-2 focus:ring-brand focus:border-brand outline-none"
             />
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-white/55 mt-1">
               Вкажіть скільки всього людей скидається на цю підписку (включаючи вас)
             </p>
           </div>
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-gray-700">
+              <label className="block text-sm font-medium text-white/85">
                 Імена учасників (необов'язково)
               </label>
               <button
                 type="button"
                 onClick={handleAddParticipant}
-                className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                className="text-sm text-brand hover:text-brand-light font-medium"
               >
                 + Додати ім'я
               </button>
             </div>
             <div className="space-y-2 max-h-48 overflow-y-auto">
               {participants.length === 0 ? (
-                <p className="text-sm text-gray-500 italic">Немає доданих імен</p>
+                <p className="text-sm text-white/55 italic">Немає доданих імен</p>
               ) : (
                 participants.map((name, index) => (
                   <div key={index} className="flex items-center gap-2">
@@ -925,12 +925,12 @@ export default function SubscriptionsPage() {
                       value={name}
                       onChange={(e) => handleParticipantNameChange(index, e.target.value)}
                       placeholder={`Ім'я учасника ${index + 1}`}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-sm"
+                      className="flex-1 px-3 py-2 border border-white/[0.14] rounded-lg focus:ring-2 focus:ring-brand focus:border-brand outline-none text-sm"
                     />
                     <button
                       type="button"
                       onClick={() => handleRemoveParticipant(index)}
-                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      className="p-2 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
                     >
                       <Trash2 size={16} />
                     </button>
@@ -938,7 +938,7 @@ export default function SubscriptionsPage() {
                 ))
               )}
             </div>
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-white/55 mt-1">
               Додайте імена людей, які скидаються (не обов'язково вказувати всіх)
             </p>
           </div>
@@ -952,14 +952,14 @@ export default function SubscriptionsPage() {
                 setParticipants([])
                 setTotalParticipants(1)
               }}
-              className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+              className="px-4 py-2 text-white/85 hover:bg-white/[0.06] rounded-lg transition-colors"
             >
               Скасувати
             </button>
             <button
               type="button"
               onClick={handleSaveParticipants}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors"
+              className="px-4 py-2 bg-brand hover:bg-brand-dark text-white rounded-lg transition-colors"
             >
               Зберегти
             </button>

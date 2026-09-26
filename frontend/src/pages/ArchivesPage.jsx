@@ -179,7 +179,7 @@ export default function ArchivesPage() {
     <motion.div 
       initial={{ opacity: 0, y: 12 }} 
       animate={{ opacity: 1, y: 0 }} 
-      className="bg-white rounded-2xl p-5 shadow-soft min-h-[400px]"
+      className="bg-white/[0.04] backdrop-blur-xl rounded-3xl p-5 shadow-glass min-h-[400px] border border-white/10"
     >
       <div className="mb-4">
         <div className="flex items-center justify-between mb-3">
@@ -193,13 +193,13 @@ export default function ArchivesPage() {
               placeholder="Пошук по сумі, категорії, банку, опису, даті..."
               value={searchQuery}
               onChange={(e) => handleSearch(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              className="w-full px-3 py-2 border border-white/10 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => handleSearch('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/70"
               >
                 <X size={16} />
               </button>
@@ -209,9 +209,9 @@ export default function ArchivesPage() {
       </div>
 
       {loading ? (
-        <div className="text-sm text-gray-500">Завантаження...</div>
+        <div className="text-sm text-white/55">Завантаження...</div>
       ) : rows.length === 0 ? (
-        <div className="text-sm text-gray-500">Немає архівних транзакцій</div>
+        <div className="text-sm text-white/55">Немає архівних транзакцій</div>
       ) : (
         <div className="space-y-6">
           {sortedDays.map((dayKey) => {
@@ -220,11 +220,11 @@ export default function ArchivesPage() {
             
             return (
               <div key={dayKey} className="space-y-2">
-                <div className="flex items-center justify-between mb-3 sticky top-0 bg-white py-2 border-b border-gray-200">
-                  <div className="text-sm font-semibold text-gray-700">
+                <div className="flex items-baseline justify-between px-1 py-2 sticky top-0 z-10 bg-[rgba(18,18,21,0.82)] backdrop-blur-xl -mx-1 rounded-xl">
+                  <div className="text-[13px] font-bold text-white/60">
                     {dateHeader}
                   </div>
-                  <div className={`text-sm font-semibold ${total < 0 ? 'text-orange-500' : 'text-gray-900'}`}>
+                  <div className={`text-sm font-semibold ${total < 0 ? 'text-orange-400' : 'text-white'}`}>
                     {fmtAmount(total, dayCurrency)}
                   </div>
                 </div>
@@ -250,7 +250,7 @@ export default function ArchivesPage() {
                             handleUnarchive(tx)
                           }}
                           disabled={unarchivingId === tx.id}
-                          className="p-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 disabled:opacity-50"
+                          className="p-1.5 rounded-lg bg-brand/10 hover:bg-brand/15 text-brand disabled:opacity-50"
                           title="Розархівувати"
                         >
                           {unarchivingId === tx.id ? (

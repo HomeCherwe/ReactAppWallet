@@ -43,16 +43,16 @@ export default function BankSyncIndicator() {
     >
       {phase === 'syncing' ? (
         <>
-          <RefreshCw size={13} className="animate-spin text-orange-500" />
-          <span className="text-gray-500">Синхронізація банків…</span>
+          <RefreshCw size={13} className="animate-spin text-orange-400" />
+          <span className="text-white/55">Синхронізація банків…</span>
         </>
       ) : phase === 'result' ? (
         <>
-          <Check size={13} className="text-green-600" />
-          <span className="text-green-600">+{added} {pluralTx(added)}</span>
+          <Check size={13} className="text-green-400" />
+          <span className="text-green-400">+{added} {pluralTx(added)}</span>
         </>
       ) : (
-        <span className="text-gray-400">Оновлено {formatSyncTime(lastSyncAt)}</span>
+        <span className="text-white/40">Оновлено {formatSyncTime(lastSyncAt)}</span>
       )}
     </motion.span>
   )

@@ -156,22 +156,22 @@ export default function TransferModal({ open, onClose, onDone }) {
 
               <input className="border rounded px-3 py-2" placeholder="Нотатка" value={note} onChange={e=>setNote(e.target.value)} />
 
-              <div className="h-px bg-gray-200 my-1" />
-              <div className="text-xs text-gray-600">Або виберіть існуючі транзакції:</div>
+              <div className="h-px bg-white/10 my-1" />
+              <div className="text-xs text-white/70">Або виберіть існуючі транзакції:</div>
               <div className="grid grid-cols-1 gap-3">
                 <div className="max-w-full">
-                  <div className="text-[11px] text-gray-500 mb-1">From (−)</div>
+                  <div className="text-[11px] text-white/55 mb-1">From (−)</div>
                   <div className="relative">
                     <button type="button" onClick={()=>{setFromOpen(v=>!v); setToOpen(false)}} className="border rounded px-3 py-2 text-sm w-full flex items-center justify-between">
                       <span className="truncate mr-2">{fromOptions.find(o=>o.id===fromTxId)?.label || '— Оберіть вихідну —'}</span>
-                      <span className="text-gray-400">▾</span>
+                      <span className="text-white/40">▾</span>
                     </button>
                     {fromOpen && (
-                      <div className="absolute z-20 bottom-full mb-1 w-full max-h-[40vh] overflow-y-auto overflow-x-auto bg-white border border-gray-200 rounded-md shadow-soft">
-                        <div className="p-1 text-[11px] text-gray-500 sticky bottom-0 bg-white">Оберіть вихідну</div>
+                      <div className="absolute z-20 bottom-full mb-1 w-full max-h-[40vh] overflow-y-auto overflow-x-auto bg-surface/90 border border-white/10 rounded-md shadow-soft">
+                        <div className="p-1 text-[11px] text-white/55 sticky bottom-0 bg-surface/90">Оберіть вихідну</div>
                         <div className="min-w-full">
                           {fromOptions.map(o => (
-                            <button key={o.id} type="button" onClick={()=>{setFromTxId(o.id); setFromOpen(false)}} className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${fromTxId===o.id?'bg-gray-50':''}`}>
+                            <button key={o.id} type="button" onClick={()=>{setFromTxId(o.id); setFromOpen(false)}} className={`w-full text-left px-3 py-2 text-sm hover:bg-white/[0.06] ${fromTxId===o.id?'bg-white/[0.03]':''}`}>
                               <span className="inline-block">{o.label}</span>
                             </button>
                           ))}
@@ -182,18 +182,18 @@ export default function TransferModal({ open, onClose, onDone }) {
                 </div>
 
                 <div className="max-w-full">
-                  <div className="text-[11px] text-gray-500 mb-1">To (+)</div>
+                  <div className="text-[11px] text-white/55 mb-1">To (+)</div>
                   <div className="relative">
                     <button type="button" onClick={()=>{setToOpen(v=>!v); setFromOpen(false)}} className="border rounded px-3 py-2 text-sm w-full flex items-center justify-between">
                       <span className="truncate mr-2">{toOptions.find(o=>o.id===toTxId)?.label || '— Оберіть вхідну —'}</span>
-                      <span className="text-gray-400">▾</span>
+                      <span className="text-white/40">▾</span>
                     </button>
                     {toOpen && (
-                      <div className="absolute z-20 bottom-full mb-1 w-full max-w-[22rem] max-h-[40vh] overflow-y-auto overflow-x-auto bg-white border border-gray-200 rounded-md shadow-soft">
-                        <div className="p-1 text-[11px] text-gray-500 sticky bottom-0 bg-white">Оберіть вхідну</div>
+                      <div className="absolute z-20 bottom-full mb-1 w-full max-w-[22rem] max-h-[40vh] overflow-y-auto overflow-x-auto bg-surface/90 border border-white/10 rounded-md shadow-soft">
+                        <div className="p-1 text-[11px] text-white/55 sticky bottom-0 bg-surface/90">Оберіть вхідну</div>
                         <div className="min-w-full">
                           {toOptions.map(o => (
-                            <button key={o.id} type="button" onClick={()=>{setToTxId(o.id); setToOpen(false)}} className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${toTxId===o.id?'bg-gray-50':''}`}>
+                            <button key={o.id} type="button" onClick={()=>{setToTxId(o.id); setToOpen(false)}} className={`w-full text-left px-3 py-2 text-sm hover:bg-white/[0.06] ${toTxId===o.id?'bg-white/[0.03]':''}`}>
                               <span className="inline-block">{o.label}</span>
                             </button>
                           ))}

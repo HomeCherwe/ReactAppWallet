@@ -24,8 +24,8 @@ export default function Row({
   const hideAllBalances = useSettingsStore(state => state.settings.hideAllBalances ?? false)
   const isExp = Number(tx.amount) < 0
   const pad = compact ? 'p-2' : 'p-3'
-  const round = compact ? 'rounded-lg' : 'rounded-xl'
-  const titleText = compact ? 'text-[13px]' : 'text-sm'
+  const round = compact ? 'rounded-xl' : 'rounded-2xl'
+  const titleText = compact ? 'text-[13px]' : 'text-[15px]'
   const metaText = compact ? 'text-[11px]' : 'text-xs'
   const btn = compact ? 'h-8 w-8 sm:h-6 sm:w-6' : 'h-9 w-9 sm:h-7 sm:w-7'
   const icon = compact ? 12 : 14
@@ -68,8 +68,8 @@ export default function Row({
     }
   }, [swipeEnabled, swipeOpen])
 
-  const bg = isExp ? 'bg-rose-500/10' : 'bg-emerald-500/10'
-  const hover = isExp ? 'hover:bg-rose-500/20' : 'hover:bg-emerald-500/20'
+  const bg = 'bg-white/[0.035]'
+  const hover = 'hover:bg-white/[0.07]'
 
   const onRowClick = () => {
     if (wasDragged) {
@@ -84,12 +84,9 @@ export default function Row({
   }
 
   const inner = swipeEnabled ? (
-    <div className="bg-white relative z-10">
+    <div className="bg-[#141416] relative z-10">
       <div 
         className={`flex items-center justify-between ${pad} ${round} transition ${bg} ${hover} ${onDetails ? 'cursor-pointer' : ''}`}
-        style={{
-          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06)'
-        }}
         onClick={onDetails ? onRowClick : undefined}
       >
       <div className="flex items-center gap-3">
@@ -105,28 +102,28 @@ export default function Row({
               const syntheticEvent = { shiftKey }
               onSelect(tx.id, newChecked, syntheticEvent)
             }}
-            className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+            className="w-4 h-4 rounded border-white/[0.14] text-brand focus:ring-brand cursor-pointer"
           />
         )}
         <div>
           <div className={`font-semibold ${titleText} flex items-center gap-2`}>
             {tx.category || 'Без категорії'}
             {tx.is_transfer && (
-              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100/80">
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-brand/10 text-brand-light border border-brand/[0.12]">
                 ⇄ Переказ
               </span>
             )}
           </div>
-          <div className={`${metaText} text-gray-500`}>
+          <div className={`${metaText} text-white/55`}>
             {[tx.card].filter(Boolean).join(' · ') || '—'} · {fmtDate(tx.created_at)}
             {tx.is_transfer && tx.transfer_role && (
-              <span className="ml-1.5 text-indigo-500/85 font-medium">
+              <span className="ml-1.5 text-brand/85 font-medium">
                 ({tx.transfer_role === 'from' ? 'відправлено' : 'отримано'})
               </span>
             )}
             {noteSnippet && (
               <span
-                className="ml-2 text-indigo-600 inline-block align-bottom max-w-[220px] truncate"
+                className="ml-2 text-brand inline-block align-bottom max-w-[220px] truncate"
                 title={noteSnippet}
               >
                 · {noteSnippet}
@@ -139,17 +136,17 @@ export default function Row({
       <div className="flex items-center gap-2">
         {amountOverride ? (
           <div className="flex flex-col items-end leading-tight">
-            <div className={`font-semibold ${titleText} ${Number(amountOverride.primaryAmount) < 0 ? '' : 'text-emerald-600'}`}>
+            <div className={`font-semibold ${titleText} ${Number(amountOverride.primaryAmount) < 0 ? '' : 'text-green-400'}`}>
               {hideAllBalances ? '***' : `${Number(amountOverride.primaryAmount) > 0 ? '+' : ''}${fmtAmount(amountOverride.primaryAmount, amountOverride.currency || currency)}`}
             </div>
             {amountOverride.secondaryAmount != null && (
-              <div className={`${metaText} text-gray-500`}>
+              <div className={`${metaText} text-white/55`}>
                 {hideAllBalances ? '***' : `${Number(amountOverride.secondaryAmount) > 0 ? '+' : ''}${fmtAmount(amountOverride.secondaryAmount, amountOverride.currency || currency)}`}
               </div>
             )}
           </div>
         ) : (
-          <div className={`font-semibold ${titleText} ${isExp ? '' : 'text-emerald-600'}`}>
+          <div className={`font-semibold ${titleText} ${isExp ? '' : 'text-green-400'}`}>
             {hideAllBalances ? '***' : `${!isExp ? '+' : ''}${fmtAmount(tx.amount, currency)}`}
           </div>
         )}
@@ -161,7 +158,7 @@ export default function Row({
               e.stopPropagation()
               onCancelRefund(tx)
             }}
-            className={`${btn} rounded-full bg-gray-200/70 hover:bg-gray-300 grid place-items-center text-gray-700`}
+            className={`${btn} rounded-full bg-white/[0.07] hover:bg-white/15 grid place-items-center text-white/85`}
             title="Скасувати повернення"
           >
             <Link2Off size={icon} />
@@ -175,7 +172,7 @@ export default function Row({
               e.stopPropagation()
               onEdit(tx)
             }}
-            className={`${btn} rounded-full bg-amber-500/10 hover:bg-amber-500/20 grid place-items-center text-amber-600`}
+            className={`${btn} rounded-full bg-amber-500/10 hover:bg-amber-500/20 grid place-items-center text-amber-400`}
             title="Редагувати"
           >
             ✏️
@@ -189,7 +186,7 @@ export default function Row({
               e.stopPropagation()
               onRefund(tx)
             }}
-            className={`${btn} rounded-full bg-indigo-500/10 hover:bg-indigo-500/20 grid place-items-center text-indigo-600`}
+            className={`${btn} rounded-full bg-brand/10 hover:bg-brand/20 grid place-items-center text-brand`}
             title="Повернення"
           >
             <RotateCcw size={icon} />
@@ -202,7 +199,7 @@ export default function Row({
               e.stopPropagation()
               onAskDelete(tx)
             }}
-            className={`${btn} rounded-full bg-rose-500/10 hover:bg-rose-500/20 grid place-items-center text-rose-600`}
+            className={`${btn} rounded-full bg-rose-500/10 hover:bg-rose-500/20 grid place-items-center text-rose-400`}
             title="Видалити"
           >
             <Trash2 size={icon} />
@@ -214,9 +211,6 @@ export default function Row({
   ) : (
     <div 
       className={`flex items-center justify-between ${pad} ${round} transition ${bg} ${hover} ${onDetails ? 'cursor-pointer' : ''}`}
-      style={{
-        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06)'
-      }}
       onClick={onDetails ? onRowClick : undefined}
     >
       <div className="flex items-center gap-3">
@@ -232,18 +226,18 @@ export default function Row({
               const syntheticEvent = { shiftKey }
               onSelect(tx.id, newChecked, syntheticEvent)
             }}
-            className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+            className="w-4 h-4 rounded border-white/[0.14] text-brand focus:ring-brand cursor-pointer"
           />
         )}
         <div>
           <div className={`font-semibold ${titleText} flex items-center gap-2`}>
             {tx.category || 'Без категорії'}
           </div>
-          <div className={`${metaText} text-gray-500`}>
+          <div className={`${metaText} text-white/55`}>
             {[tx.card].filter(Boolean).join(' · ') || '—'} · {fmtDate(tx.created_at)}
             {noteSnippet && (
               <span
-                className="ml-2 text-indigo-600 inline-block align-bottom max-w-[220px] truncate"
+                className="ml-2 text-brand inline-block align-bottom max-w-[220px] truncate"
                 title={noteSnippet}
               >
                 · {noteSnippet}
@@ -256,17 +250,17 @@ export default function Row({
       <div className="flex items-center gap-2">
         {amountOverride ? (
           <div className="flex flex-col items-end leading-tight">
-            <div className={`font-semibold ${titleText} ${Number(amountOverride.primaryAmount) < 0 ? '' : 'text-emerald-600'}`}>
+            <div className={`font-semibold ${titleText} ${Number(amountOverride.primaryAmount) < 0 ? '' : 'text-green-400'}`}>
               {Number(amountOverride.primaryAmount) > 0 ? '+' : ''}{fmtAmount(amountOverride.primaryAmount, amountOverride.currency || currency)}
             </div>
             {amountOverride.secondaryAmount != null && (
-              <div className={`${metaText} text-gray-500`}>
+              <div className={`${metaText} text-white/55`}>
                 {Number(amountOverride.secondaryAmount) > 0 ? '+' : ''}{fmtAmount(amountOverride.secondaryAmount, amountOverride.currency || currency)}
               </div>
             )}
           </div>
         ) : (
-          <div className={`font-semibold ${titleText} ${isExp ? '' : 'text-emerald-600'}`}>
+          <div className={`font-semibold ${titleText} ${isExp ? '' : 'text-green-400'}`}>
             {!isExp ? '+' : ''}{fmtAmount(tx.amount, currency)}
           </div>
         )}
@@ -278,7 +272,7 @@ export default function Row({
               e.stopPropagation()
               onCancelRefund(tx)
             }}
-            className={`${btn} rounded-full bg-gray-200/70 hover:bg-gray-300 grid place-items-center text-gray-700`}
+            className={`${btn} rounded-full bg-white/[0.07] hover:bg-white/15 grid place-items-center text-white/85`}
             title="Скасувати повернення"
           >
             <Link2Off size={icon} />
@@ -292,7 +286,7 @@ export default function Row({
               e.stopPropagation()
               onEdit(tx)
             }}
-            className={`${btn} rounded-full bg-amber-500/10 hover:bg-amber-500/20 grid place-items-center text-amber-600`}
+            className={`${btn} rounded-full bg-amber-500/10 hover:bg-amber-500/20 grid place-items-center text-amber-400`}
             title="Редагувати"
           >
             ✏️
@@ -306,7 +300,7 @@ export default function Row({
               e.stopPropagation()
               onRefund(tx)
             }}
-            className={`${btn} rounded-full bg-indigo-500/10 hover:bg-indigo-500/20 grid place-items-center text-indigo-600`}
+            className={`${btn} rounded-full bg-brand/10 hover:bg-brand/20 grid place-items-center text-brand`}
             title="Повернення"
           >
             <RotateCcw size={icon} />
@@ -319,7 +313,7 @@ export default function Row({
               e.stopPropagation()
               onAskDelete(tx)
             }}
-            className={`${btn} rounded-full bg-rose-500/10 hover:bg-rose-500/20 grid place-items-center text-rose-600`}
+            className={`${btn} rounded-full bg-rose-500/10 hover:bg-rose-500/20 grid place-items-center text-rose-400`}
             title="Видалити"
           >
             <Trash2 size={icon} />
@@ -331,14 +325,14 @@ export default function Row({
 
   if (!swipeEnabled) {
     return (
-      <div className={`${round} ${selected ? 'ring-2 ring-indigo-500' : ''} ${className}`}>
+      <div className={`${round} ${selected ? 'ring-2 ring-brand' : ''} ${className}`}>
         {inner}
       </div>
     )
   }
 
   return (
-    <div ref={rowRef} className={`relative ${round} overflow-hidden ${selected ? 'ring-2 ring-indigo-500' : ''} ${className}`}>
+    <div ref={rowRef} className={`relative ${round} overflow-hidden ${selected ? 'ring-2 ring-brand' : ''} ${className}`}>
       <div className="absolute inset-y-0 right-0 flex items-stretch z-0">
         {onRefund && (
           <button
@@ -348,7 +342,7 @@ export default function Row({
               setSwipeOpen(false)
               onRefund(tx)
             }}
-            className="h-full grid place-items-center text-indigo-600 bg-indigo-500/10 hover:bg-indigo-500/20"
+            className="h-full grid place-items-center text-brand bg-brand/10 hover:bg-brand/20"
             style={{ width: actionW }}
             title="Повернення"
           >
@@ -363,7 +357,7 @@ export default function Row({
               setSwipeOpen(false)
               onAskDelete(tx)
             }}
-            className="h-full grid place-items-center text-rose-600 bg-rose-500/10 hover:bg-rose-500/20"
+            className="h-full grid place-items-center text-rose-400 bg-rose-500/10 hover:bg-rose-500/20"
             style={{ width: actionW }}
             title="Видалити"
           >

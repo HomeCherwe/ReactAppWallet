@@ -60,7 +60,7 @@ export default function BaseModal({
       {open && (
         <motion.div
           key="base-modal-overlay"
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm"
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm"
           style={{ zIndex }}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -85,36 +85,39 @@ export default function BaseModal({
       {open && (
         <motion.div
           key="base-modal-card"
-          className="fixed inset-0 m-auto flex items-center justify-center pointer-events-none"
-          style={{ zIndex: zIndex + 1, padding: '1rem' }}
-          initial={{ opacity: 0, y: 30, scale: 0.96 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 30, scale: 0.96 }}
+          // Phone: a sheet from the bottom like the iPhone app; wider screens: centered card
+          className="fixed inset-0 m-auto flex items-end sm:items-center justify-center pointer-events-none sm:p-4"
+          style={{ zIndex: zIndex + 1 }}
+          initial={{ opacity: 0, y: 60 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 60 }}
           transition={springTransition}
         >
           <div
-            className="rounded-2xl bg-white pointer-events-auto w-full"
+            className="relative rounded-t-[28px] sm:rounded-[28px] bg-surface-raised/95 backdrop-blur-2xl border border-white/10 border-b-0 sm:border-b pointer-events-auto w-full shadow-[0_-10px_40px_rgba(0,0,0,0.5)] sm:shadow-[0_25px_60px_rgba(0,0,0,0.6)]"
             style={{
               maxWidth: maxWidthValue,
-              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25), 0 0 15px rgba(99,102,241,0.1), 0 0 0 1px rgba(0,0,0,0.05)',
+              paddingBottom: 'env(safe-area-inset-bottom, 0px)',
             }}
             onMouseDown={(e) => e.stopPropagation()}
           >
+            {/* Sheet grabber (phone) */}
+            <div className="sm:hidden mx-auto mt-2 h-1 w-10 rounded-full bg-white/25" />
             {(title || showCloseButton) && (
               <div className="flex items-center justify-between px-5 pt-5 pb-0">
                 {title && (
                   typeof title === 'string' ? (
-                    <div className="font-semibold">{title}</div>
+                    <div className="text-lg font-bold tracking-tight">{title}</div>
                   ) : (
                     title
                   )
                 )}
                 {showCloseButton && (
                   <button
-                    className="p-2 rounded-lg hover:bg-gray-100 ml-auto"
+                    className="h-8 w-8 grid place-items-center rounded-full bg-white/[0.08] text-white/70 hover:text-white hover:bg-white/[0.14] ml-auto transition-colors"
                     onClick={onClose}
                   >
-                    <X size={18} />
+                    <X size={16} />
                   </button>
                 )}
                 {!title && showCloseButton && <div />}

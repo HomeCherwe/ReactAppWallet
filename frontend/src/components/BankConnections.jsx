@@ -56,13 +56,13 @@ function BankLogo({ src, name, size = 40 }) {
   const [failed, setFailed] = useState(false)
   return (
     <div
-      className="rounded-xl bg-white border border-gray-200 flex items-center justify-center overflow-hidden flex-shrink-0"
+      className="rounded-xl bg-surface/90 border border-white/10 flex items-center justify-center overflow-hidden flex-shrink-0"
       style={{ width: size, height: size }}
     >
       {src && !failed ? (
         <img src={src} alt="" className="w-3/4 h-3/4 object-contain" onError={() => setFailed(true)} />
       ) : (
-        <span className="font-bold text-orange-500">{(name || '?').charAt(0).toUpperCase()}</span>
+        <span className="font-bold text-orange-400">{(name || '?').charAt(0).toUpperCase()}</span>
       )}
     </div>
   )
@@ -99,7 +99,7 @@ function TokenConnectForm({ provider, onBack, onDone }) {
         href="https://api.monobank.ua/"
         target="_blank"
         rel="noreferrer"
-        className="text-orange-600 font-medium inline-flex items-center gap-0.5 hover:underline"
+        className="text-orange-400 font-medium inline-flex items-center gap-0.5 hover:underline"
       >
         api.monobank.ua <ExternalLink size={12} />
       </a>
@@ -113,7 +113,7 @@ function TokenConnectForm({ provider, onBack, onDone }) {
       <button
         type="button"
         onClick={onBack}
-        className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 w-fit"
+        className="inline-flex items-center gap-1 text-sm text-white/55 hover:text-white w-fit"
       >
         <ArrowLeft size={15} /> Назад
       </button>
@@ -121,15 +121,15 @@ function TokenConnectForm({ provider, onBack, onDone }) {
       <div className="flex items-center gap-3">
         <BankLogo src={provider.logo} name={provider.name} size={48} />
         <div>
-          <div className="font-semibold text-gray-900">{provider.name}</div>
-          <div className="text-xs text-gray-500">🇺🇦 Підключення через персональний токен</div>
+          <div className="font-semibold text-white">{provider.name}</div>
+          <div className="text-xs text-white/55">🇺🇦 Підключення через персональний токен</div>
         </div>
       </div>
 
-      <ol className="grid gap-2 text-sm text-gray-700">
+      <ol className="grid gap-2 text-sm text-white/85">
         {steps.map((text, i) => (
           <li key={i} className="flex gap-2.5">
-            <span className="w-5 h-5 rounded-full bg-orange-100 text-orange-700 text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
+            <span className="w-5 h-5 rounded-full bg-orange-500/15 text-orange-300 text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
               {i + 1}
             </span>
             <span>{text}</span>
@@ -142,7 +142,7 @@ function TokenConnectForm({ provider, onBack, onDone }) {
           type={show ? 'text' : 'password'}
           autoComplete="off"
           spellCheck={false}
-          className="w-full border border-gray-300 rounded-xl px-3 py-2.5 pr-10 font-mono text-sm focus:ring-2 focus:ring-orange-400 outline-none"
+          className="w-full border border-white/[0.14] rounded-xl px-3 py-2.5 pr-10 font-mono text-sm focus:ring-2 focus:ring-orange-400 outline-none"
           placeholder="Токен Monobank"
           value={token}
           onChange={e => setToken(e.target.value)}
@@ -150,7 +150,7 @@ function TokenConnectForm({ provider, onBack, onDone }) {
         <button
           type="button"
           onClick={() => setShow(v => !v)}
-          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/85"
           title={show ? 'Сховати' : 'Показати'}
         >
           {show ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -166,7 +166,7 @@ function TokenConnectForm({ provider, onBack, onDone }) {
         {busy ? 'Підключаємо…' : `Підключити ${provider.name}`}
       </button>
 
-      <p className="text-xs text-gray-400 flex gap-1.5">
+      <p className="text-xs text-white/40 flex gap-1.5">
         <ShieldCheck size={14} className="flex-shrink-0 mt-px" />
         Токен дає доступ лише на читання — баланс і виписка, жодних платежів. Зберігається зашифрованим; відкликати
         можна будь-коли на api.monobank.ua.
@@ -237,9 +237,9 @@ export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCo
   return (
       <div className="grid gap-3">
         <div className="relative">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" />
           <input
-            className="w-full border border-gray-300 rounded-xl pl-9 pr-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
+            className="w-full border border-white/[0.14] rounded-xl pl-9 pr-3 py-2 focus:ring-2 focus:ring-brand outline-none"
             placeholder="Пошук банку"
             value={query}
             onChange={e => setQuery(e.target.value)}
@@ -255,8 +255,8 @@ export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCo
                 onClick={() => setCountry(c)}
                 className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
                   c === country
-                    ? 'bg-orange-50 border-orange-400 text-orange-700'
-                    : 'bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100'
+                    ? 'bg-orange-500/10 border-orange-400 text-orange-300'
+                    : 'bg-white/[0.03] border-white/10 text-white/85 hover:bg-white/[0.06]'
                 }`}
               >
                 {COUNTRIES[c]}
@@ -267,18 +267,18 @@ export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCo
 
         <div className="max-h-[50vh] overflow-y-auto -mx-1">
           {error ? (
-            <div className="py-8 text-center text-sm text-gray-500">
+            <div className="py-8 text-center text-sm text-white/55">
               Не вдалося завантажити список банків.{' '}
-              <button className="text-orange-600 font-medium" onClick={() => setProviders(null)}>
+              <button className="text-orange-400 font-medium" onClick={() => setProviders(null)}>
                 Спробувати ще раз
               </button>
             </div>
           ) : !providers ? (
             <div className="py-10 flex justify-center">
-              <RefreshCw size={20} className="animate-spin text-orange-500" />
+              <RefreshCw size={20} className="animate-spin text-orange-400" />
             </div>
           ) : visible.length === 0 ? (
-            <div className="py-8 text-center text-sm text-gray-500">Нічого не знайдено</div>
+            <div className="py-8 text-center text-sm text-white/55">Нічого не знайдено</div>
           ) : (
             visible.map(p => {
               const connected = connectedIds.includes(p.provider_id)
@@ -288,13 +288,13 @@ export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCo
                   type="button"
                   disabled={connected || !!connectingId}
                   onClick={() => connect(p)}
-                  className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl text-left hover:bg-gray-50 disabled:hover:bg-transparent disabled:cursor-default"
+                  className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl text-left hover:bg-white/[0.03] disabled:hover:bg-transparent disabled:cursor-default"
                 >
                   <BankLogo src={p.logo} name={p.name} />
                   <div className="flex-1 min-w-0">
-                    <div className="font-medium text-gray-900 truncate">{p.name}</div>
+                    <div className="font-medium text-white truncate">{p.name}</div>
                     {(query || p.auth === 'token') && (
-                      <div className="text-xs text-gray-500">
+                      <div className="text-xs text-white/55">
                         {[query && (COUNTRIES[p.country] || p.country.toUpperCase()), p.auth === 'token' && 'через токен api.monobank.ua']
                           .filter(Boolean)
                           .join(' · ')}
@@ -302,11 +302,11 @@ export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCo
                     )}
                   </div>
                   {connectingId === p.provider_id ? (
-                    <RefreshCw size={16} className="animate-spin text-orange-500" />
+                    <RefreshCw size={16} className="animate-spin text-orange-400" />
                   ) : connected ? (
-                    <span className="text-xs font-semibold text-green-600">Підключено</span>
+                    <span className="text-xs font-semibold text-green-400">Підключено</span>
                   ) : (
-                    <span className="text-gray-400 text-lg">›</span>
+                    <span className="text-white/40 text-lg">›</span>
                   )}
                 </button>
               )
@@ -314,7 +314,7 @@ export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCo
           )}
         </div>
 
-        <p className="text-xs text-gray-400">
+        <p className="text-xs text-white/40">
           {country === 'ua' && !query
             ? 'Monobank підключається через персональний токен — лише читання, без терміну дії.'
             : 'Підключення через TrueLayer (Open Banking). Ви входите у свій банк напряму — застосунок не бачить ваш пароль. Доступ лише на читання, діє 90 днів.'}
@@ -456,18 +456,18 @@ export default function BankConnections({ onChanged }) {
 
   return (
     // Same card look as the other blocks on the cards page (white, rounded, soft shadow)
-    <div className="bg-white rounded-2xl shadow-soft p-4 sm:p-5 mb-4">
+    <div className="bg-white/[0.04] backdrop-blur-xl rounded-3xl shadow-glass p-4 sm:p-5 mb-4 border border-white/10">
       <div className="flex items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-400 to-orange-600 text-white flex items-center justify-center shadow-sm flex-shrink-0">
             <Landmark size={20} />
           </div>
           <div className="min-w-0">
-            <h3 className="font-semibold text-gray-900 leading-tight">Підключені банки</h3>
-            <p className="text-xs text-gray-500">Автоматична синхронізація через Open Banking</p>
+            <h3 className="font-semibold text-white leading-tight">Підключені банки</h3>
+            <p className="text-xs text-white/55">Автоматична синхронізація через Open Banking</p>
           </div>
         </div>
-        <span className="text-xs font-semibold text-orange-700 bg-orange-50 border border-orange-200 px-2.5 py-1 rounded-full whitespace-nowrap">
+        <span className="text-xs font-semibold text-orange-300 bg-orange-500/10 border border-orange-500/25 px-2.5 py-1 rounded-full whitespace-nowrap">
           {banksLabel(connections.length)}
         </span>
       </div>
@@ -482,10 +482,10 @@ export default function BankConnections({ onChanged }) {
               key={c.id}
               className={`relative flex items-center gap-3 rounded-xl border p-3 pl-4 transition-colors ${
                 expired
-                  ? 'border-amber-300 bg-amber-50/60'
+                  ? 'border-amber-500/35 bg-amber-500/[0.06]'
                   : hasError
-                  ? 'border-red-200 bg-red-50/50'
-                  : 'border-gray-200 bg-gray-50/70 hover:border-orange-300 hover:bg-orange-50/40'
+                  ? 'border-red-500/25 bg-red-500/5'
+                  : 'border-white/10 bg-white/[0.021] hover:border-orange-500/35 hover:bg-orange-500/[0.04]'
               }`}
             >
               {/* Status accent on the left edge */}
@@ -496,8 +496,8 @@ export default function BankConnections({ onChanged }) {
               />
               <BankLogo src={c.provider_logo} name={c.provider_name} />
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-gray-900 truncate">{c.provider_name}</div>
-                <div className={`text-xs truncate ${expired ? 'text-amber-700' : hasError ? 'text-red-600' : 'text-gray-500'}`}>
+                <div className="text-sm font-semibold text-white truncate">{c.provider_name}</div>
+                <div className={`text-xs truncate ${expired ? 'text-amber-300' : hasError ? 'text-red-400' : 'text-white/55'}`}>
                   {expired
                     ? c.auth === 'token' ? 'Токен відкликано' : 'Доступ (90 днів) сплив'
                     : hasError
@@ -524,7 +524,7 @@ export default function BankConnections({ onChanged }) {
                   disabled={busy}
                   onClick={() => syncOne(c)}
                   title="Синхронізувати"
-                  className="p-2 rounded-lg text-gray-600 bg-white border border-gray-200 hover:border-orange-300 hover:text-orange-600 disabled:opacity-50 transition-colors"
+                  className="p-2 rounded-lg text-white/70 bg-surface/90 border border-white/10 hover:border-orange-500/35 hover:text-orange-400 disabled:opacity-50 transition-colors"
                 >
                   <RefreshCw size={15} className={busy ? 'animate-spin' : ''} />
                 </button>
@@ -534,7 +534,7 @@ export default function BankConnections({ onChanged }) {
                 disabled={busy}
                 onClick={() => setToDisconnect(c)}
                 title="Відключити"
-                className="p-2 rounded-lg text-gray-400 bg-white border border-gray-200 hover:border-red-300 hover:text-red-500 disabled:opacity-50 transition-colors"
+                className="p-2 rounded-lg text-white/40 bg-surface/90 border border-white/10 hover:border-red-500/35 hover:text-red-400 disabled:opacity-50 transition-colors"
               >
                 <Unplug size={15} />
               </button>

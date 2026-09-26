@@ -15,13 +15,8 @@ import BaseModal from './BaseModal'
 import { useSettingsStore } from '../store/useSettingsStore'
 import CardTransactionsDrawer from './transactions/CardTransactionsDrawer'
 import AddBankChoiceModal from './AddBankChoiceModal'
+import { getCardTheme, cardBackground } from '../utils/cardTheme'
 
-const GRADS = [
-  'from-indigo-500 via-fuchsia-500 to-amber-400',
-  'from-sky-500 via-purple-500 to-pink-500',
-  'from-rose-500 via-orange-500 to-yellow-400',
-  'from-emerald-500 via-teal-500 to-cyan-400',
-]
 
 const formatCardNumber = (num, bank, name) => {
   // For Binance Spot, show without spaces
@@ -76,7 +71,9 @@ function SortableCardTile({ c, onEdit, onDelete, showActions = true, isFavorite 
 }
 
 function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false, onToggleFavorite, isDragging = false, isGrouped = false, onViewBank, onCardClick }) {
-  const g = GRADS[Math.abs((c.id || '').charCodeAt(0) || 0) % GRADS.length]
+  // Same per-bank look as the iPhone cards (dark tiles with an accent edge; Monobank White is light)
+  const theme = getCardTheme(c.bank, c.name)
+  const chip = theme.isLight ? 'bg-black/[0.06] hover:bg-black/10' : 'bg-white/15 hover:bg-white/25'
   const hideAllBalances = useSettingsStore(state => state.settings.hideAllBalances ?? false)
   const cardNumber = hideAllBalances ? '**** **** **** ****' : formatCardNumber(c.card_number, c.bank, c.name)
   
@@ -107,23 +104,23 @@ function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false,
         if (e.target.closest('button')) return
         onCardClick?.(c)
       }}
-      className={`relative overflow-hidden rounded-2xl text-white shadow-glass ${isDragging ? 'cursor-grabbing' : onCardClick ? 'cursor-pointer' : 'cursor-grab'}`}
+      className={`relative overflow-hidden rounded-[22px] shadow-glass ${isDragging ? 'cursor-grabbing' : onCardClick ? 'cursor-pointer' : 'cursor-grab'}`}
       style={{
         aspectRatio: isGrouped ? '1.586 / 1.08' : '1.586 / 1',
         backgroundImage: c?.bg_url
           ? `linear-gradient(135deg, rgba(17,17,17,.2), rgba(17,17,17,.8)), url(${c.bg_url})`
-          : undefined,
+          : cardBackground(theme),
         backgroundSize: 'cover',
         backgroundPosition: 'center',
-        backdropFilter: 'blur(10px)',
+        color: c?.bg_url ? '#fff' : theme.textColor,
+        border: `1px solid ${c?.bg_url ? 'rgba(255,255,255,0.12)' : theme.borderColor}`,
       }}
     >
-      {!c?.bg_url && <div className={`absolute inset-0 bg-gradient-to-tr ${g}`} />}
 
       <div className="relative h-full p-4 sm:p-5 flex flex-col">
         <div className="flex justify-between items-start">
           <div>
-            {!c?.bg_url && <div className="text-white/80 text-[10px] sm:text-xs">{c.bank}</div>}
+            {!c?.bg_url && <div className="text-[10px] sm:text-xs font-semibold" style={{ color: theme.subColor }}>{c.bank}</div>}
             {c?.bg_url && <div className="text-transparent text-[10px] sm:text-xs select-none">.</div>}
             <div className="text-base sm:text-lg font-extrabold mt-0.5">{c.name}</div>
           </div>
@@ -133,7 +130,7 @@ function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false,
               className={`p-1.5 sm:p-2 rounded-lg transition-colors ${
                 isFavorite 
                   ? 'bg-yellow-500/90 hover:bg-yellow-500 shadow-lg' 
-                  : 'bg-black/40 hover:bg-black/50 backdrop-blur-sm'
+                  : `${chip} backdrop-blur-sm`
               }`}
               onClick={(e) => {
                 e.stopPropagation()
@@ -145,14 +142,14 @@ function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false,
             >
               <Star 
                 size={14} 
-                className={isFavorite ? 'fill-white text-white' : 'text-white'} 
+                className={isFavorite ? 'fill-white text-white' : ''} 
               />
             </button>
           )}
         </div>
 
         <div className="mt-2 sm:mt-3">
-          <div className="text-white/80 text-[10px] sm:text-xs">Balance</div>
+          <div className="text-[10px] sm:text-xs" style={{ color: c?.bg_url ? 'rgba(255,255,255,0.8)' : theme.subColor }}>Баланс</div>
           <div className="text-lg sm:text-xl font-extrabold leading-tight">
             {hideAllBalances ? '***' : (() => {
               const currency = c.currency || 'EUR'
@@ -177,7 +174,7 @@ function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false,
                   copyCardNumber()
                 }}
                 onMouseDown={(e) => e.stopPropagation()}
-                className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors"
+                className={`p-1.5 rounded-lg ${chip} transition-colors`}
                 title="Копіювати номер картки"
               >
                 <Copy size={12} />
@@ -190,7 +187,7 @@ function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false,
         <div className="absolute bottom-2 sm:bottom-3 right-2 sm:right-3 flex gap-1.5 sm:gap-2">
           {onViewBank && c.bank_id && (
             <button 
-              className="px-1.5 sm:px-2 py-1 sm:py-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-[10px] sm:text-xs inline-flex items-center gap-1" 
+              className={`px-1.5 sm:px-2 py-1 sm:py-1.5 rounded-lg ${chip} text-[10px] sm:text-xs inline-flex items-center gap-1`} 
               onClick={(e) => {
                 e.stopPropagation()
                 e.preventDefault()
@@ -199,13 +196,13 @@ function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false,
               onMouseDown={(e) => e.stopPropagation()}
               title="Переглянути банк"
             >
-              <Eye size={12} /> <span className="hidden sm:inline">View Bank</span>
+              <Eye size={12} /> <span className="hidden sm:inline">Банк</span>
             </button>
           )}
           {showActions && (
             <>
               <button 
-                className="px-1.5 sm:px-2 py-1 sm:py-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-[10px] sm:text-xs inline-flex items-center gap-1" 
+                className={`px-1.5 sm:px-2 py-1 sm:py-1.5 rounded-lg ${chip} text-[10px] sm:text-xs inline-flex items-center gap-1`} 
                 onClick={(e) => {
                   e.stopPropagation()
                   e.preventDefault()
@@ -213,10 +210,10 @@ function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false,
                 }}
                 onMouseDown={(e) => e.stopPropagation()}
               >
-            <Pencil size={12} /> <span className="hidden sm:inline">Edit</span>
+            <Pencil size={12} /> <span className="hidden sm:inline">Змінити</span>
           </button>
               <button 
-                className="px-1.5 sm:px-2 py-1 sm:py-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-[10px] sm:text-xs inline-flex items-center gap-1" 
+                className={`px-1.5 sm:px-2 py-1 sm:py-1.5 rounded-lg ${chip} text-[10px] sm:text-xs inline-flex items-center gap-1`} 
                 onClick={(e) => {
                   e.stopPropagation()
                   e.preventDefault()
@@ -224,7 +221,7 @@ function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false,
                 }}
                 onMouseDown={(e) => e.stopPropagation()}
               >
-            <Trash2 size={12} /> <span className="hidden sm:inline">Delete</span>
+            <Trash2 size={12} /> <span className="hidden sm:inline">Видалити</span>
           </button>
             </>
           )}
@@ -239,7 +236,7 @@ function EmptyCard({ onCreate }) {
     <motion.button onClick={onCreate} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
       className="relative overflow-hidden rounded-2xl p-6 text-white shadow-glass w-full"
       style={{ aspectRatio: '1.586 / 1' }}>
-      <div className="absolute inset-0 bg-gradient-to-tr from-indigo-500 via-fuchsia-500 to-amber-400" />
+      <div className="absolute inset-0 bg-gradient-to-tr from-brand via-brand to-amber-400" />
       <div className="relative h-full w-full flex flex-col items-center justify-center">
         <div className="h-12 w-12 rounded-2xl bg-white/20 grid place-items-center mb-2"><Plus size={26} /></div>
         <div className="font-semibold">Додати картку</div>
@@ -284,14 +281,14 @@ function BankModal({ open, initial, onClose, onSubmit }) {
           onChange={(e)=>setForm({...form, name:e.target.value})}
           required
         />
-        <label className="flex items-center gap-2.5 py-1.5 text-sm cursor-pointer select-none border rounded-xl px-3 bg-gray-50/50 hover:bg-gray-50 transition-colors">
+        <label className="flex items-center gap-2.5 py-1.5 text-sm cursor-pointer select-none border rounded-xl px-3 bg-white/[0.015] hover:bg-white/[0.03] transition-colors">
           <input 
             type="checkbox"
             checked={form.exclude_from_stats}
             onChange={(e) => setForm({ ...form, exclude_from_stats: e.target.checked })}
-            className="accent-black w-4 h-4 rounded border-gray-300 focus:ring-black"
+            className="accent-brand w-4 h-4 rounded border-white/[0.14] focus:ring-brand"
           />
-          <span className="text-gray-700 font-medium">Виключити весь банк та всі його картки зі статистики</span>
+          <span className="text-white/85 font-medium">Виключити весь банк та всі його картки зі статистики</span>
         </label>
         <div className="mt-2 flex gap-2">
           <button className="btn btn-primary flex-1" type="submit">{initial ? 'Зберегти' : 'Додати'}</button>
@@ -393,8 +390,8 @@ function CardModal({ open, initial, onClose, onSubmit, banks = [] }) {
           />
           {form.name.length > 0 && (
             <div className={`flex justify-between items-center mt-1 text-xs px-1 ${
-              form.name.length > 50 ? 'text-rose-500' :
-              form.name.length > 35 ? 'text-yellow-600' : 'text-gray-400'
+              form.name.length > 50 ? 'text-rose-400' :
+              form.name.length > 35 ? 'text-yellow-400' : 'text-white/40'
             }`}>
               <span>
                 {form.name.length > 50
@@ -414,20 +411,20 @@ function CardModal({ open, initial, onClose, onSubmit, banks = [] }) {
         >
           <option>UAH</option><option>EUR</option><option>USD</option><option>GBP</option><option>PLN</option>
         </select>
-        <label className="flex items-start gap-2.5 py-2 text-sm cursor-pointer select-none border rounded-xl px-3 bg-gray-50/50 hover:bg-gray-50 transition-colors">
+        <label className="flex items-start gap-2.5 py-2 text-sm cursor-pointer select-none border rounded-xl px-3 bg-white/[0.015] hover:bg-white/[0.03] transition-colors">
           <input
             type="checkbox"
             checked={form.exclude_from_stats}
             onChange={(e) => setForm({ ...form, exclude_from_stats: e.target.checked })}
-            className="accent-black w-4 h-4 mt-0.5 rounded border-gray-300 focus:ring-black"
+            className="accent-brand w-4 h-4 mt-0.5 rounded border-white/[0.14] focus:ring-brand"
           />
           <span>
-            <span className="text-gray-700 font-medium block">Виключити картку зі статистики</span>
-            <span className="text-gray-500 text-xs">Її транзакції не враховуються в доходах, витратах і аналітиці. Баланс картки не змінюється.</span>
+            <span className="text-white/85 font-medium block">Виключити картку зі статистики</span>
+            <span className="text-white/55 text-xs">Її транзакції не враховуються в доходах, витратах і аналітиці. Баланс картки не змінюється.</span>
           </span>
         </label>
         <div>
-          <label className="text-sm text-gray-600 mb-1 block">Фонова картинка (опц.)</label>
+          <label className="text-sm text-white/70 mb-1 block">Фонова картинка (опц.)</label>
           <input type="file" accept="image/*" onChange={handleFileChange} className="text-sm"/>
           
           {previewUrl && (
@@ -900,17 +897,17 @@ return (
     <motion.div
       initial={false}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white rounded-2xl p-3 sm:p-5 shadow-soft relative flex flex-col h-auto sm:h-[calc(100vh-2rem)]"
+      className="bg-white/[0.04] backdrop-blur-xl rounded-3xl p-3 sm:p-5 shadow-glass relative flex flex-col h-auto sm:h-[calc(100vh-2rem)] border border-white/10"
     >
       <div className="flex items-center justify-between mb-4 shrink-0">
-        <div className="font-semibold">Your cards</div>
+        <div className="text-lg font-bold tracking-tight">Ваші картки</div>
         <div className="flex items-center gap-2">
           {/* Фільтри для дашборду (showActions=false) */}
           {!showActions && (
             <>
               <div className="relative">
                 <motion.button
-                  className={`btn btn-soft text-xs inline-flex items-center gap-1 ${showFavoritesOnly ? 'bg-gray-100 border-gray-300' : ''}`}
+                  className={`btn btn-soft text-xs inline-flex items-center gap-1 ${showFavoritesOnly ? 'bg-white/[0.06] border-white/[0.14]' : ''}`}
                   onClick={() => setShowFavoritesOnly(v => !v)}
                   title="Показати тільки вибрані"
                   whileHover={{ scale: 1.02 }}
@@ -928,8 +925,8 @@ return (
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               animate={{ 
-                backgroundColor: selectedBanks.length > 0 ? '#f3f4f6' : undefined,
-                borderColor: selectedBanks.length > 0 ? '#d1d5db' : undefined
+                backgroundColor: selectedBanks.length > 0 ? 'rgba(255,107,0,0.15)' : undefined,
+                borderColor: selectedBanks.length > 0 ? 'rgba(255,107,0,0.4)' : undefined
               }}
               transition={{ duration: 0.2 }}
             >
@@ -947,17 +944,17 @@ return (
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 6 }}
-                    className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-xl shadow-soft p-3 z-20"
+                    className="absolute right-0 mt-2 w-56 bg-surface/90 border border-white/10 rounded-xl shadow-soft p-3 z-20"
                   >
-                    <div className="text-xs font-semibold text-gray-600 mb-2">Банки</div>
+                    <div className="text-xs font-semibold text-white/70 mb-2">Банки</div>
                     <div className="max-h-56 overflow-auto pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                       {uniqueBanks.length === 0 ? (
-                        <div className="text-xs text-gray-500">Немає банків</div>
+                        <div className="text-xs text-white/55">Немає банків</div>
                       ) : uniqueBanks.map(b => (
                         <label key={b} className="flex items-center gap-2 py-1 text-sm">
                           <input
                             type="checkbox"
-                            className="accent-black"
+                            className="accent-brand"
                             checked={selectedBanks.includes(b)}
                             onChange={() => toggleBank(b)}
                           />
@@ -966,7 +963,7 @@ return (
                       ))}
                     </div>
                     <div className="mt-3 flex items-center justify-between">
-                      <button className="text-xs text-gray-600 hover:underline" onClick={clearFilter}>
+                      <button className="text-xs text-white/70 hover:underline" onClick={clearFilter}>
                           Показати всі
                       </button>
                       <button className="btn btn-primary text-xs py-1 px-3" onClick={() => setFilterOpen(false)}>
@@ -1003,14 +1000,14 @@ return (
       </div>
 
       {loading ? (
-        <div className="text-sm text-gray-500">Loading…</div>
+        <div className="text-sm text-white/55">Loading…</div>
       ) : groupByBank ? (
         // Режим з групуванням по банках (для сторінки з картами)
         !cardsByBank || cardsByBank.length === 0 ? (
           cards.length === 0 && banks.length === 0 ? (
             <EmptyCard onCreate={() => openCreateBank()} />
         ) : (
-          <div className="rounded-2xl border border-dashed border-gray-300 p-6 text-center text-sm text-gray-600">
+          <div className="rounded-2xl border border-dashed border-white/[0.14] p-6 text-center text-sm text-white/70">
             За обраними банками нічого не знайдено.
             <button className="ml-2 underline" onClick={clearFilter}>Показати всі банки</button>
           </div>
@@ -1022,19 +1019,19 @@ return (
                         [&::-webkit-scrollbar]:hidden">
             <div className="space-y-6 px-5 pb-5"> {/* паддінг для карточок */}
               {cardsByBank.map(({ bankId, bank, cards: bankCards, iban, bic, beneficiary, expiryDates, cvvs }) => (
-                <div key={bankId || bank} className="bg-white rounded-2xl border-2 border-gray-200 shadow-md overflow-hidden">
+                <div key={bankId || bank} className="bg-surface/90 rounded-2xl border-2 border-white/10 shadow-md overflow-hidden">
                   <div className="space-y-4 p-5">
                   {/* Заголовок банку з реквізитами */}
-                  <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-3 sm:p-5 border border-gray-200">
+                  <div className="bg-gradient-to-br from-white/[0.04] to-white/[0.04] rounded-xl p-3 sm:p-5 border border-white/10">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-3 sm:mb-4">
                       <div className="flex items-center gap-2 sm:gap-3">
-                        <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-white flex items-center justify-center shadow-sm flex-shrink-0">
-                          <Building2 size={18} className="sm:w-5 sm:h-5 text-gray-700" />
+                        <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-surface/90 flex items-center justify-center shadow-sm flex-shrink-0">
+                          <Building2 size={18} className="sm:w-5 sm:h-5 text-white/85" />
                         </div>
                         <div className="min-w-0">
-                          <div className="font-bold text-lg sm:text-xl text-gray-900 truncate">{bank}</div>
+                          <div className="font-bold text-lg sm:text-xl text-white truncate">{bank}</div>
                           {bankCards.length > 0 && (
-                            <div className="text-xs text-gray-500 mt-0.5">
+                            <div className="text-xs text-white/55 mt-0.5">
                               {bankCards.length} {bankCards.length === 1 ? 'картка' : bankCards.length < 5 ? 'картки' : 'карток'}
                             </div>
                           )}
@@ -1044,17 +1041,17 @@ return (
                         <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                           <button
                             onClick={() => openEditBank(banks.find(b => b.id === bankId))}
-                            className="p-1.5 sm:p-2 rounded-xl hover:bg-white/80 transition-colors border border-gray-200"
+                            className="p-1.5 sm:p-2 rounded-xl hover:bg-white/[0.08] transition-colors border border-white/10"
                             title="Редагувати банк"
                           >
-                            <Pencil size={14} className="sm:w-4 sm:h-4 text-gray-600" />
+                            <Pencil size={14} className="sm:w-4 sm:h-4 text-white/70" />
                           </button>
                           <button
                             onClick={() => handleDeleteBank(banks.find(b => b.id === bankId))}
-                            className="p-1.5 sm:p-2 rounded-xl hover:bg-red-50 transition-colors border border-red-200"
+                            className="p-1.5 sm:p-2 rounded-xl hover:bg-red-500/10 transition-colors border border-red-500/25"
                             title="Видалити банк"
                           >
-                            <Trash2 size={14} className="sm:w-4 sm:h-4 text-red-600" />
+                            <Trash2 size={14} className="sm:w-4 sm:h-4 text-red-400" />
                           </button>
                           <button
                             onClick={() => openCreateCard(bankId)}
@@ -1073,7 +1070,7 @@ return (
                     {/* Картки банку */}
                     {bankCards.length > 0 ? (
                       <div className="mt-2">
-                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 sm:mb-3 px-1">
+                        <div className="text-xs font-semibold text-white/55 uppercase tracking-wide mb-2 sm:mb-3 px-1">
                           Картки
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
@@ -1094,8 +1091,8 @@ return (
                       </div>
                     ) : (
                       showActions && (
-                        <div className="mt-2 rounded-xl border-2 border-dashed border-gray-300 bg-gray-50/50 p-6 text-center">
-                          <div className="text-sm text-gray-500 mb-2">
+                        <div className="mt-2 rounded-xl border-2 border-dashed border-white/[0.14] bg-white/[0.015] p-6 text-center">
+                          <div className="text-sm text-white/55 mb-2">
                             Немає карток у цьому банку
                           </div>
                           <button 
@@ -1132,7 +1129,7 @@ return (
               >
                 <div className="space-y-4 px-5 pb-5">
                   {visibleCards.length === 0 ? (
-                    <div className="text-center text-sm text-gray-500 py-8">
+                    <div className="text-center text-sm text-white/55 py-8">
                       {showFavoritesOnly ? 'Немає вибраних карток' : 'Немає карток'}
                     </div>
                   ) : (
@@ -1176,7 +1173,7 @@ return (
           ) : (
             <div className="space-y-4 px-5 pb-5">
               {visibleCards.length === 0 ? (
-                <div className="text-center text-sm text-gray-500 py-8">
+                <div className="text-center text-sm text-white/55 py-8">
                   {showFavoritesOnly ? 'Немає вибраних карток' : 'Немає карток'}
                 </div>
               ) : (
@@ -1239,16 +1236,16 @@ return (
     >
       {viewingBank && (
         <div className="space-y-4">
-          <div className="pb-3 border-b border-gray-200">
-            <h3 className="text-xl font-bold text-gray-900">{viewingBank.name}</h3>
+          <div className="pb-3 border-b border-white/10">
+            <h3 className="text-xl font-bold text-white">{viewingBank.name}</h3>
           </div>
           
           {(viewingBank.iban || viewingBank.bic || viewingBank.beneficiary) ? (
             <div className="space-y-4">
               {viewingBank.iban && (
                 <div>
-                  <div className="text-sm text-gray-600 font-medium mb-1.5">IBAN</div>
-                  <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                  <div className="text-sm text-white/70 font-medium mb-1.5">IBAN</div>
+                  <div className="flex items-center gap-2 p-3 bg-white/[0.03] rounded-lg border border-white/10">
                     <span className="font-mono text-sm break-all flex-1">{viewingBank.iban}</span>
                     <button
                       onClick={async () => {
@@ -1259,10 +1256,10 @@ return (
                           toast.error('Не вдалося скопіювати')
                         }
                       }}
-                      className="p-2 rounded-lg hover:bg-gray-200 transition-colors flex-shrink-0"
+                      className="p-2 rounded-lg hover:bg-white/10 transition-colors flex-shrink-0"
                       title="Копіювати IBAN"
                     >
-                      <Copy size={16} className="text-gray-600" />
+                      <Copy size={16} className="text-white/70" />
                     </button>
                   </div>
                 </div>
@@ -1270,8 +1267,8 @@ return (
               
               {viewingBank.bic && (
                 <div>
-                  <div className="text-sm text-gray-600 font-medium mb-1.5">BIC/SWIFT/ЄДРПОУ</div>
-                  <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                  <div className="text-sm text-white/70 font-medium mb-1.5">BIC/SWIFT/ЄДРПОУ</div>
+                  <div className="flex items-center gap-2 p-3 bg-white/[0.03] rounded-lg border border-white/10">
                     <span className="font-mono text-sm break-all flex-1">{viewingBank.bic}</span>
                     <button
                       onClick={async () => {
@@ -1282,10 +1279,10 @@ return (
                           toast.error('Не вдалося скопіювати')
                         }
                       }}
-                      className="p-2 rounded-lg hover:bg-gray-200 transition-colors flex-shrink-0"
+                      className="p-2 rounded-lg hover:bg-white/10 transition-colors flex-shrink-0"
                       title="Копіювати BIC"
                     >
-                      <Copy size={16} className="text-gray-600" />
+                      <Copy size={16} className="text-white/70" />
                     </button>
                   </div>
                 </div>
@@ -1293,8 +1290,8 @@ return (
               
               {viewingBank.beneficiary && (
                 <div>
-                  <div className="text-sm text-gray-600 font-medium mb-1.5">Бенефіціар</div>
-                  <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                  <div className="text-sm text-white/70 font-medium mb-1.5">Бенефіціар</div>
+                  <div className="flex items-center gap-2 p-3 bg-white/[0.03] rounded-lg border border-white/10">
                     <span className="text-sm break-all flex-1">{viewingBank.beneficiary}</span>
                     <button
                       onClick={async () => {
@@ -1305,17 +1302,17 @@ return (
                           toast.error('Не вдалося скопіювати')
                         }
                       }}
-                      className="p-2 rounded-lg hover:bg-gray-200 transition-colors flex-shrink-0"
+                      className="p-2 rounded-lg hover:bg-white/10 transition-colors flex-shrink-0"
                       title="Копіювати бенефіціар"
                     >
-                      <Copy size={16} className="text-gray-600" />
+                      <Copy size={16} className="text-white/70" />
                     </button>
                   </div>
                 </div>
               )}
             </div>
           ) : (
-            <div className="text-sm text-gray-500 text-center py-8">
+            <div className="text-sm text-white/55 text-center py-8">
               Реквізити не додано
             </div>
           )}

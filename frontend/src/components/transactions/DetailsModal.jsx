@@ -13,33 +13,33 @@ export default function DetailsModal({ open, tx, currency, onClose, onEdit, onSp
     >
       <div className="space-y-2 text-sm">
               <div className="flex justify-between">
-                <span className="text-gray-500">Тип</span>
-                <span className={Number(tx?.amount) < 0 ? 'text-rose-600' : 'text-emerald-600'}>
+                <span className="text-white/55">Тип</span>
+                <span className={Number(tx?.amount) < 0 ? 'text-rose-400' : 'text-emerald-400'}>
                   {Number(tx?.amount) < 0 ? 'Витрата' : 'Дохід'}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">Сума</span>
-                <span className={Number(tx?.amount) < 0 ? '' : 'text-emerald-600'}>
+                <span className="text-white/55">Сума</span>
+                <span className={Number(tx?.amount) < 0 ? '' : 'text-emerald-400'}>
                   {fmtAmount(tx?.amount, currency)}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">Категорія</span>
+                <span className="text-white/55">Категорія</span>
                 <span>{tx?.category || '—'}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">Карта</span>
+                <span className="text-white/55">Карта</span>
                 <span>{tx?.card || '—'}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">Дата</span>
+                <span className="text-white/55">Дата</span>
                 <span>{fmtDate(tx?.created_at)}</span>
               </div>
               
               <div>
-                <div className="text-gray-500 mb-1">Нотатки</div>
-                <div className="rounded-xl border p-3 bg-gray-50 min-h-[50px] whitespace-pre-line">
+                <div className="text-white/55 mb-1">Нотатки</div>
+                <div className="rounded-xl border p-3 bg-white/[0.03] min-h-[50px] whitespace-pre-line">
                   {tx?.note || '—'}
                 </div>
               </div>
@@ -49,7 +49,7 @@ export default function DetailsModal({ open, tx, currency, onClose, onEdit, onSp
                   <button
                     type="button"
                     onClick={() => onEdit(tx)}
-                    className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium transition"
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-brand hover:bg-brand-dark text-white font-medium transition"
                   >
                     <Pencil size={16} />
                     Редагувати
@@ -61,7 +61,7 @@ export default function DetailsModal({ open, tx, currency, onClose, onEdit, onSp
                         onClose?.()
                         onSplit(tx)
                       }}
-                      className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 font-medium border border-purple-200 transition"
+                      className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-brand/10 hover:bg-brand/15 text-brand-light font-medium border border-brand/25 transition"
                     >
                       ✂️ Розділити
                     </button>

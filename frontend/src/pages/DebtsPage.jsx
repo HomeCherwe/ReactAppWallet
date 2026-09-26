@@ -149,23 +149,23 @@ export default function DebtsPage() {
 
   return (
     <div className="space-y-4">
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-2xl p-5 shadow-soft">
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="bg-white/[0.04] backdrop-blur-xl rounded-3xl p-5 shadow-glass border border-white/10">
         <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
           <div className="text-xl font-semibold">Борги</div>
         </div>
 
         {loading ? (
-          <div className="text-sm text-gray-500">Loading…</div>
+          <div className="text-sm text-white/55">Loading…</div>
         ) : rows.length === 0 ? (
-          <div className="text-sm text-gray-500">Немає боргів</div>
+          <div className="text-sm text-white/55">Немає боргів</div>
         ) : (
           <div className="space-y-6">
             {sortedDays.map((dayKey) => {
               const day = groupedByDay[dayKey]
               return (
                 <div key={dayKey} className="space-y-2">
-                  <div className="flex items-center justify-between mb-3 sticky top-0 bg-white py-2 border-b border-gray-200 z-10">
-                    <div className="text-sm font-semibold text-gray-700">
+                  <div className="flex items-baseline justify-between px-1 py-2 sticky top-0 z-10 bg-[rgba(18,18,21,0.82)] backdrop-blur-xl -mx-1 rounded-xl">
+                    <div className="text-[13px] font-bold text-white/60">
                       {day.dateHeader}
                     </div>
                   </div>
@@ -200,7 +200,7 @@ export default function DebtsPage() {
 
                           {/* Nested refunds like on dashboard */}
                           {Number(tx.amount || 0) < 0 && refundTxs.length > 0 && (
-                            <div className="mt-1 ml-6 pl-3 border-l-2 border-gray-200 space-y-1">
+                            <div className="mt-1 ml-6 pl-3 border-l-2 border-white/10 space-y-1">
                               {refundTxs.map((rtx) => {
                                 const rCurrency = (rtx.currency || cardMap[rtx.card_id] || 'EUR')
                                 return (

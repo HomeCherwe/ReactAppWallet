@@ -10,7 +10,7 @@ export default function DeleteSubscriptionModal({ open, subscription, onDelete, 
       onClose={onCancel}
       title={
         <div className="flex items-center gap-2 text-lg">
-          <Trash2 className="text-rose-600" size={20} />
+          <Trash2 className="text-rose-400" size={20} />
           <span>Видалити підписку?</span>
         </div>
       }
@@ -18,11 +18,11 @@ export default function DeleteSubscriptionModal({ open, subscription, onDelete, 
       maxWidth="sm"
     >
       {/* Body */}
-      <div className="text-sm text-gray-600 mb-5">
+      <div className="text-sm text-white/70 mb-5">
         <p className="mb-2">
           Ви справді хочете видалити підписку <strong>{subscription.name}</strong>?
         </p>
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-white/55">
           Ця дія незворотна. Автоматичні транзакції більше не будуть створюватись.
         </p>
       </div>
@@ -37,7 +37,7 @@ export default function DeleteSubscriptionModal({ open, subscription, onDelete, 
           Видалити назавжди
         </button>
         <button
-          className="rounded-xl border border-gray-300 py-2.5 text-sm hover:bg-gray-100 transition-colors"
+          className="rounded-xl border border-white/[0.14] py-2.5 text-sm hover:bg-white/[0.06] transition-colors"
           onClick={onCancel}
         >
           Скасувати

@@ -30,10 +30,10 @@ function CurrencySelect({ value, onChange, options }) {
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50/80 border border-gray-200/80 rounded-lg shadow-sm transition-all duration-200 focus:outline-none select-none hover:border-gray-300"
+        className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-white/85 bg-surface/90 hover:bg-white/[0.024] border border-white/[0.08] rounded-lg shadow-sm transition-all duration-200 focus:outline-none select-none hover:border-white/[0.14]"
       >
         <span>{selectedOption?.label}</span>
-        <ChevronDown size={12} className={`text-gray-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDown size={12} className={`text-white/40 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
       <AnimatePresence>
@@ -43,7 +43,7 @@ function CurrencySelect({ value, onChange, options }) {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 4, scale: 0.95 }}
             transition={{ duration: 0.1 }}
-            className="absolute right-0 mt-1 min-w-[120px] bg-white/95 backdrop-blur-md border border-gray-200/60 rounded-xl shadow-xl overflow-hidden py-1 z-30"
+            className="absolute right-0 mt-1 min-w-[120px] bg-surface/95 backdrop-blur-md border border-white/[0.06] rounded-xl shadow-xl overflow-hidden py-1 z-30"
           >
             {options.map((opt) => {
               const isSelected = opt.value === value
@@ -57,12 +57,12 @@ function CurrencySelect({ value, onChange, options }) {
                   }}
                   className={`w-full flex items-center justify-between px-3 py-1.5 text-xs text-left transition-colors duration-150 ${
                     isSelected 
-                      ? 'bg-indigo-50 text-indigo-600 font-semibold' 
-                      : 'text-gray-700 hover:bg-gray-50'
+                      ? 'bg-brand/10 text-brand font-semibold' 
+                      : 'text-white/85 hover:bg-white/[0.03]'
                   }`}
                 >
                   <span>{opt.label}</span>
-                  {isSelected && <Check size={12} className="text-indigo-600 flex-shrink-0" />}
+                  {isSelected && <Check size={12} className="text-brand flex-shrink-0" />}
                 </button>
               )
             })}
@@ -368,7 +368,7 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
     }
   }, [mode, selectedCurrency, rates ? Object.keys(rates).join(',') : ''])
 
-  const badge = delta >= 0 ? 'text-emerald-600' : 'text-rose-600'
+  const badge = delta >= 0 ? 'text-emerald-400' : 'text-rose-400'
   const displayValue = loading ? '-' : Math.round(total).toLocaleString()
   const prevDisplayValue = loading ? '-' : Math.round(prevTotal).toLocaleString()
   
@@ -397,7 +397,7 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
   const currencySymbol = getCurrencySymbol()
   
   // Determine color and sign based on mode
-  const amountColor = mode === 'earning' ? 'text-emerald-600' : 'text-rose-600'
+  const amountColor = mode === 'earning' ? 'text-emerald-400' : 'text-rose-400'
   const amountSign = mode === 'earning' ? '+' : '-'
   
   return (
@@ -405,10 +405,10 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4 }}
-      className="rounded-2xl bg-white shadow-soft p-4 sm:p-5"
+      className="rounded-3xl bg-white/[0.04] backdrop-blur-xl shadow-glass p-4 sm:p-5 border border-white/10"
     >
       <div className="flex items-center justify-between mb-2">
-        <div className="text-sm text-gray-500">{title}</div>
+        <div className="text-sm text-white/55">{title}</div>
         <CurrencySelect
           value={selectedCurrency || 'ALL_UAH'}
           onChange={(val) => setSelectedCurrency(val || 'ALL_UAH')}
@@ -421,7 +421,7 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
       </div>
       
       {/* Current month label */}
-      <div className="text-xs text-gray-400 mb-1">
+      <div className="text-xs text-white/40 mb-1">
         {currentMonth} {currentYear}
       </div>
       
@@ -430,7 +430,7 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
         <div className={`text-[28px] sm:text-3xl font-bold ${amountColor}`}>
           {loading ? '-' : `${amountSign}${displayValue}`}
         </div>
-        <div className="text-lg text-gray-500">{currencySymbol}</div>
+        <div className="text-lg text-white/55">{currencySymbol}</div>
       </div>
       
       {/* Delta percentage */}
@@ -442,15 +442,15 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
       
       {/* Previous month result */}
       {!loading && prevTotal !== 0 && (
-        <div className="mt-2 pt-2 border-t border-gray-100">
-          <div className="text-xs text-gray-400 mb-1">
+        <div className="mt-2 pt-2 border-t border-white/[0.06]">
+          <div className="text-xs text-white/40 mb-1">
             {prevMonth} {prevYear}
           </div>
           <div>
             <div className={`text-lg font-semibold ${amountColor}`}>
               {amountSign}{prevDisplayValue}
             </div>
-            <div className="text-lg text-gray-500">{currencySymbol}</div>
+            <div className="text-lg text-white/55">{currencySymbol}</div>
           </div>
         </div>
       )}

@@ -11,6 +11,7 @@ import useMonoRates from '../../hooks/useMonoRates'
 import { usePreferences } from '../../context/PreferencesContext'
 import { updatePreferencesSection } from '../../api/preferences'
 import Row from './Row'
+import { getCardTheme, cardBackground } from '../../utils/cardTheme'
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -62,12 +63,6 @@ function groupByDay(txs) {
   return Object.values(map).sort((a, b) => b.key.localeCompare(a.key))
 }
 
-const GRADS = [
-  'from-indigo-500 via-fuchsia-500 to-amber-400',
-  'from-sky-500 via-purple-500 to-pink-500',
-  'from-rose-500 via-orange-500 to-yellow-400',
-  'from-emerald-500 via-teal-500 to-cyan-400',
-]
 
 
 // ─── period presets ───────────────────────────────────────────────────────────
@@ -267,7 +262,8 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
   const days = useMemo(() => groupByDay(txs), [txs])
 
   // ── gradient ──────────────────────────────────────────────────────────────
-  const grad = GRADS[Math.abs((card?.id || '').charCodeAt(0) || 0) % GRADS.length]
+  const theme = getCardTheme(card?.bank, card?.name)
+  const sub = card?.bg_url ? 'rgba(255,255,255,0.75)' : theme.subColor
 
   // ── lock body scroll when open (no layout shift) ─────────────────────────
   useEffect(() => {
@@ -328,7 +324,7 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
         exit={{ y: 30, opacity: 0, scale: 0.96 }}
         transition={{ type: 'spring', stiffness: 380, damping: 34 }}
         className={[
-          'fixed bg-white shadow-2xl flex flex-col z-[1000] overflow-hidden',
+          'fixed bg-surface/90 shadow-2xl flex flex-col z-[1000] overflow-hidden',
           // Mobile: bottom sheet
           'bottom-0 left-0 right-0 h-[92dvh] rounded-t-3xl',
           // Desktop: centered modal (sm:inset-0 overrides mobile bottom/left/right)
@@ -337,28 +333,29 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
       >
         {/* Mobile drag handle */}
         <div className="flex justify-center pt-3 pb-1 sm:hidden flex-shrink-0">
-          <div className="w-10 h-1 rounded-full bg-gray-300" />
+          <div className="w-10 h-1 rounded-full bg-white/15" />
         </div>
 
         {/* ── Card Header ───────────────────────────────────────────────── */}
         <div
-          className={`relative overflow-hidden flex-shrink-0 mx-3 mt-1 sm:mt-3 rounded-2xl text-white`}
+          className="relative overflow-hidden flex-shrink-0 mx-3 mt-1 sm:mt-3 rounded-[22px]"
           style={{
             backgroundImage: card?.bg_url
               ? `linear-gradient(135deg, rgba(17,17,17,.2), rgba(17,17,17,.8)), url(${card.bg_url})`
-              : undefined,
+              : cardBackground(theme),
             backgroundSize: 'cover',
             backgroundPosition: 'center',
+            color: card?.bg_url ? '#fff' : theme.textColor,
+            border: `1px solid ${card?.bg_url ? 'rgba(255,255,255,0.12)' : theme.borderColor}`,
           }}
         >
-          {!card?.bg_url && <div className={`absolute inset-0 bg-gradient-to-tr ${grad}`} />}
           <div className="relative p-4 sm:p-5 flex items-start justify-between">
             <div>
-              <div className="text-white/70 text-xs">{card?.bank || 'Картка'}</div>
+              <div className="text-xs font-semibold" style={{ color: sub }}>{card?.bank || 'Картка'}</div>
               <div className="text-lg font-extrabold mt-0.5">{card?.name}</div>
-              <div className="text-white/80 text-xs mt-1">{card?.card_number ? `•••• ${String(card.card_number).slice(-4)}` : ''}</div>
+              <div className="text-xs mt-1" style={{ color: sub }}>{card?.card_number ? `•••• ${String(card.card_number).slice(-4)}` : ''}</div>
               <div className="mt-2">
-                <div className="text-white/70 text-[10px]">Баланс</div>
+                <div className="text-[10px]" style={{ color: sub }}>Баланс</div>
                 <div className="text-xl font-extrabold leading-tight">
                   {fmtCur(card?._balance ?? 0)}
                 </div>
@@ -366,7 +363,7 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
             </div>
             <button
               onClick={onClose}
-              className="p-2 rounded-xl bg-black/30 hover:bg-black/50 transition-colors"
+              className={`p-2 rounded-full transition-colors ${theme.isLight && !card?.bg_url ? 'bg-black/[0.06] hover:bg-black/10' : 'bg-white/15 hover:bg-white/25'}`}
               aria-label="Закрити"
             >
               <X size={18} />
@@ -390,8 +387,8 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
                 className={[
                   'text-xs px-3 py-1.5 rounded-full font-medium transition-all duration-200',
                   preset === p.id && !showCustom && !showMonthNav
-                    ? 'bg-indigo-600 text-white shadow-sm'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200',
+                    ? 'bg-brand text-white shadow-sm'
+                    : 'bg-white/[0.06] text-white/70 hover:bg-white/10',
                 ].join(' ')}
               >
                 {p.label}
@@ -404,8 +401,8 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
               className={[
                 'text-xs px-3 py-1.5 rounded-full font-medium transition-all duration-200 inline-flex items-center gap-1',
                 preset === 'month_nav'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200',
+                  ? 'bg-brand text-white shadow-sm'
+                  : 'bg-white/[0.06] text-white/70 hover:bg-white/10',
               ].join(' ')}
             >
               <Calendar size={12} /> Місяць
@@ -417,8 +414,8 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
               className={[
                 'text-xs px-3 py-1.5 rounded-full font-medium transition-all duration-200 inline-flex items-center gap-1',
                 preset === 'custom'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200',
+                  ? 'bg-brand text-white shadow-sm'
+                  : 'bg-white/[0.06] text-white/70 hover:bg-white/10',
               ].join(' ')}
             >
               <ChevronDown size={12} /> Діапазон
@@ -435,18 +432,18 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
                 transition={{ duration: 0.2 }}
                 className="overflow-hidden"
               >
-                <div className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2">
+                <div className="flex items-center justify-between bg-white/[0.03] rounded-xl px-3 py-2">
                   <button
                     onClick={() => {
                       const nm = navMonth === 0 ? 11 : navMonth - 1
                       const ny = navMonth === 0 ? navYear - 1 : navYear
                       setNavMonth(nm); setNavYear(ny)
                     }}
-                    className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors"
+                    className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
                   >
                     <ChevronLeft size={16} />
                   </button>
-                  <span className="text-sm font-semibold text-gray-800">
+                  <span className="text-sm font-semibold text-white">
                     {UA_MONTHS[navMonth]} {navYear}
                   </span>
                   <button
@@ -455,12 +452,12 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
                       const ny = navMonth === 11 ? navYear + 1 : navYear
                       setNavMonth(nm); setNavYear(ny)
                     }}
-                    className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors"
+                    className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
                     disabled={navYear === now.getFullYear() && navMonth === now.getMonth()}
                   >
                     <ChevronRight size={16} className={
                       navYear === now.getFullYear() && navMonth === now.getMonth()
-                        ? 'text-gray-300' : ''
+                        ? 'text-white/30' : ''
                     } />
                   </button>
                 </div>
@@ -478,19 +475,19 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
                 transition={{ duration: 0.2 }}
                 className="overflow-hidden"
               >
-                <div className="flex gap-2 items-center bg-gray-50 rounded-xl p-2">
+                <div className="flex gap-2 items-center bg-white/[0.03] rounded-xl p-2">
                   <input
                     type="date"
                     value={customFrom}
                     onChange={e => setCustomFrom(e.target.value)}
-                    className="flex-1 text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="flex-1 text-xs border border-white/10 rounded-lg px-2 py-1.5 bg-surface/90 focus:outline-none focus:ring-2 focus:ring-brand"
                   />
-                  <span className="text-gray-400 text-xs">—</span>
+                  <span className="text-white/40 text-xs">—</span>
                   <input
                     type="date"
                     value={customTo}
                     onChange={e => setCustomTo(e.target.value)}
-                    className="flex-1 text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="flex-1 text-xs border border-white/10 rounded-lg px-2 py-1.5 bg-surface/90 focus:outline-none focus:ring-2 focus:ring-brand"
                   />
                 </div>
               </motion.div>
@@ -502,34 +499,34 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
         <div className="px-3 pt-2 pb-1 flex-shrink-0">
           <div className="grid grid-cols-3 gap-2">
             {/* Income */}
-            <div className="bg-emerald-50 rounded-2xl p-3 flex flex-col gap-1">
-              <div className="flex items-center gap-1 text-emerald-600">
+            <div className="bg-emerald-500/10 rounded-2xl p-3 flex flex-col gap-1">
+              <div className="flex items-center gap-1 text-emerald-400">
                 <TrendingUp size={13} />
                 <span className="text-[10px] font-semibold uppercase tracking-wide">Доходи</span>
               </div>
-              <div className="text-sm font-extrabold text-emerald-700 leading-tight">
+              <div className="text-sm font-extrabold text-emerald-300 leading-tight">
                 {loading ? '…' : fmtCur(stats.income)}
               </div>
             </div>
 
             {/* Expense */}
-            <div className="bg-rose-50 rounded-2xl p-3 flex flex-col gap-1">
-              <div className="flex items-center gap-1 text-rose-500">
+            <div className="bg-rose-500/10 rounded-2xl p-3 flex flex-col gap-1">
+              <div className="flex items-center gap-1 text-rose-400">
                 <TrendingDown size={13} />
                 <span className="text-[10px] font-semibold uppercase tracking-wide">Витрати</span>
               </div>
-              <div className="text-sm font-extrabold text-rose-600 leading-tight">
+              <div className="text-sm font-extrabold text-rose-400 leading-tight">
                 {loading ? '…' : fmtCur(Math.abs(stats.expense))}
               </div>
             </div>
 
             {/* Net */}
-            <div className={`rounded-2xl p-3 flex flex-col gap-1 ${stats.net >= 0 ? 'bg-indigo-50' : 'bg-orange-50'}`}>
-              <div className={`flex items-center gap-1 ${stats.net >= 0 ? 'text-indigo-500' : 'text-orange-500'}`}>
+            <div className={`rounded-2xl p-3 flex flex-col gap-1 ${stats.net >= 0 ? 'bg-brand/10' : 'bg-orange-500/10'}`}>
+              <div className={`flex items-center gap-1 ${stats.net >= 0 ? 'text-brand' : 'text-orange-400'}`}>
                 <BarChart2 size={13} />
                 <span className="text-[10px] font-semibold uppercase tracking-wide">Баланс</span>
               </div>
-              <div className={`text-sm font-extrabold leading-tight ${stats.net >= 0 ? 'text-indigo-700' : 'text-orange-600'}`}>
+              <div className={`text-sm font-extrabold leading-tight ${stats.net >= 0 ? 'text-brand-light' : 'text-orange-400'}`}>
                 {loading ? '…' : (stats.net >= 0 ? '+' : '') + fmtCur(stats.net).replace('-', '')}
               </div>
             </div>
@@ -537,7 +534,7 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
 
           {/* Period label + includeAll toggle */}
           <div className="mt-2 flex items-center justify-between">
-            <div className="text-[10px] text-gray-400 pl-1">{periodLabel}</div>
+            <div className="text-[10px] text-white/40 pl-1">{periodLabel}</div>
 
             {/* Toggle: враховувати всі / тільки враховані */}
             <button
@@ -546,8 +543,8 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
               className={[
                 'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all duration-200 select-none',
                 includeAll
-                  ? 'bg-violet-100 text-violet-700 ring-1 ring-violet-300'
-                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200',
+                  ? 'bg-brand/15 text-brand-light ring-1 ring-brand/40'
+                  : 'bg-white/[0.06] text-white/55 hover:bg-white/10',
               ].join(' ')}
               title={includeAll ? 'Зараз: всі транзакції (включно з трансферами та виключеними). Натисніть щоб показати лише враховані.' : 'Зараз: тільки враховані транзакції. Натисніть щоб показати всі.'}
             >
@@ -560,7 +557,7 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
         </div>
 
         {/* Divider */}
-        <div className="mx-3 h-px bg-gray-100 flex-shrink-0" />
+        <div className="mx-3 h-px bg-white/[0.06] flex-shrink-0" />
 
         {/* ── Transaction list ───────────────────────────────────────────── */}
         <div
@@ -568,18 +565,18 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
           style={{ WebkitOverflowScrolling: 'touch' }}
         >
           {loading && txs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-3 text-gray-400">
+            <div className="flex flex-col items-center justify-center py-16 gap-3 text-white/40">
               <div className="relative w-10 h-10">
-                <div className="absolute inset-0 border-2 border-indigo-200 rounded-full" />
-                <div className="absolute inset-0 border-2 border-indigo-500 rounded-full border-t-transparent animate-spin" />
+                <div className="absolute inset-0 border-2 border-brand/25 rounded-full" />
+                <div className="absolute inset-0 border-2 border-brand rounded-full border-t-transparent animate-spin" />
               </div>
               <span className="text-sm">Завантаження…</span>
             </div>
           ) : txs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-2 text-gray-400">
-              <CreditCard size={36} className="text-gray-200" />
+            <div className="flex flex-col items-center justify-center py-16 gap-2 text-white/40">
+              <CreditCard size={36} className="text-white/60" />
               <div className="text-sm font-medium">Транзакцій немає</div>
-              <div className="text-xs text-gray-300">
+              <div className="text-xs text-white/30">
                 {preset === 'all' ? 'По цій картці ще немає транзакцій' : `За вибраний період (${periodLabel})`}
               </div>
             </div>
@@ -597,11 +594,11 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
                 return (
                   <div key={key}>
                     {/* Sticky date header — full width, no padding on parent needed */}
-                    <div className="sticky top-0 z-20 bg-white border-b border-gray-100 px-3 pt-3 pb-1.5 flex items-center justify-between">
-                      <div className="text-xs font-semibold text-gray-500">
+                    <div className="sticky top-0 z-20 bg-surface/90 border-b border-white/[0.06] px-3 pt-3 pb-1.5 flex items-center justify-between">
+                      <div className="text-xs font-semibold text-white/55">
                         {formatDateHeader(dateStr)}
                       </div>
-                      <div className={`text-xs font-semibold ${dayTotal < 0 ? 'text-rose-500' : dayTotal > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
+                      <div className={`text-xs font-semibold ${dayTotal < 0 ? 'text-rose-400' : dayTotal > 0 ? 'text-emerald-400' : 'text-white/40'}`}>
                         {!ratesReady
                           ? `… ${cur}`
                           : dayTotal > 0
@@ -634,14 +631,14 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
               {loadingMore && (
                 <div className="flex justify-center py-4">
                   <div className="relative w-6 h-6">
-                    <div className="absolute inset-0 border-2 border-indigo-200 rounded-full" />
-                    <div className="absolute inset-0 border-2 border-indigo-500 rounded-full border-t-transparent animate-spin" />
+                    <div className="absolute inset-0 border-2 border-brand/25 rounded-full" />
+                    <div className="absolute inset-0 border-2 border-brand rounded-full border-t-transparent animate-spin" />
                   </div>
                 </div>
               )}
 
               {!hasMore && txs.length > 0 && (
-                <div className="text-center text-xs text-gray-300 py-4">
+                <div className="text-center text-xs text-white/30 py-4">
                   Всі транзакції завантажено · {txs.length} шт.
                 </div>
               )}
