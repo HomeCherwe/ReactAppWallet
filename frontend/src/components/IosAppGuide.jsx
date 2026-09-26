@@ -1,7 +1,15 @@
 import { CheckCircle2, Download, ExternalLink, Laptop, Smartphone, Wallet } from 'lucide-react'
 import toast from 'react-hot-toast'
 import BaseModal from './BaseModal'
-import { IOS_BUILDS_URL, SIDELOADLY_URL, isIPhoneBrowser, markIosAppInstalled, useIosApp } from '../utils/iosApp'
+import {
+  IOS_BUILDS_URL,
+  IOS_IPA_URL,
+  SIDELOADLY_URL,
+  isIPhoneBrowser,
+  markIosAppInstalled,
+  useIosApp,
+  useLatestIosBuild,
+} from '../utils/iosApp'
 
 const link = 'text-brand font-semibold inline-flex items-center gap-0.5 hover:underline'
 
@@ -10,8 +18,7 @@ const STEPS = [
     title: 'Завантажте файл додатку',
     text: (
       <>
-        Кнопка вище → остання збірка → <b>Artifacts</b> → <b>WalletMobile-iOS</b>. Розпакуйте zip — всередині{' '}
-        <b>WalletMobile.ipa</b>.
+        Кнопка вище — файл <b>MyWallet.ipa</b> на комп’ютер. Там завжди найновіша збірка.
       </>
     ),
   },
@@ -53,6 +60,17 @@ export default function IosAppGuide({ open, onClose }) {
   const iosApp = useIosApp()
   const installed = !!iosApp?.installed
   const onIPhone = isIPhoneBrowser()
+  // undefined while checking, null until the first build is published to the release
+  const build = useLatestIosBuild(open)
+  const buildInfo = build
+    ? [
+        build.title,
+        `оновлено ${new Date(build.updatedAt).toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })}`,
+        `${(build.size / 1024 / 1024).toFixed(0)} МБ`,
+      ].join(' · ')
+    : build === null
+    ? 'Збірка ще публікується — поки що: остання збірка → Artifacts (потрібен акаунт GitHub)'
+    : 'Перевіряємо останню збірку…'
 
   return (
     <BaseModal
@@ -94,17 +112,15 @@ export default function IosAppGuide({ open, onClose }) {
 
         <div>
           <a
-            href={IOS_BUILDS_URL}
-            target="_blank"
+            href={build === null ? IOS_BUILDS_URL : IOS_IPA_URL}
+            target={build === null ? '_blank' : undefined}
             rel="noreferrer"
             className="btn-primary h-12 rounded-2xl font-bold flex items-center justify-center gap-2"
           >
             <Download size={18} />
-            Завантажити останню збірку
+            Завантажити MyWallet.ipa
           </a>
-          <p className="text-[11px] text-white/40 text-center mt-1.5">
-            GitHub · потрібен акаунт GitHub · кожна збірка зберігається 30 днів
-          </p>
+          <p className="text-[11px] text-white/40 text-center mt-1.5">{buildInfo}</p>
         </div>
 
         <ol className="rounded-2xl overflow-hidden border border-white/[0.08] bg-white/[0.03] divide-y divide-white/[0.06]">
