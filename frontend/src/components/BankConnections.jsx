@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ArrowLeft, CheckCircle2, ExternalLink, Eye, EyeOff, Landmark, RefreshCw, Search, ShieldCheck, Unplug } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowLeft, CheckCircle2, ExternalLink, Eye, EyeOff, RefreshCw, Search, ShieldCheck } from 'lucide-react'
 import toast from 'react-hot-toast'
 import BaseModal from './BaseModal'
 import ConfirmModal from './ConfirmModal'
 import { txBus } from '../utils/txBus'
+import { formatMoney } from '../utils/cardTheme'
 import {
   connectBankWithToken,
   disconnectBankConnection,
+  linkBankAccountToCard,
   listBankConnections,
   listBankProviders,
   startBankConnection,
@@ -535,15 +537,222 @@ export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCo
   )
 }
 
+function accountsLabel(n) {
+  if (n === 0) return ''
+  const mod10 = n % 10
+  const mod100 = n % 100
+  const word = mod10 === 1 && mod100 !== 11 ? 'рахунок' : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) ? 'рахунки' : 'рахунків'
+  return `${n} ${word}`
+}
+
+// Status under a bank's name (same wording as the iPhone)
+function statusLine(c) {
+  if (c.auth === 'binance') return { text: 'Криптобіржа · баланс через API', color: 'rgba(255,255,255,0.55)' }
+  if (c.status === 'expired') {
+    return {
+      text: c.auth === 'token' ? 'Токен відкликано — підключіть знову' : 'Термін доступу сплив — підключіть знову',
+      color: '#FF8C3A',
+    }
+  }
+  if (c.last_error) return { text: 'Помилка останньої синхронізації', color: '#FF6B6B' }
+  const parts = [c.last_sync_at ? `Синхронізовано ${timeAgo(c.last_sync_at)}` : 'Ще не синхронізовано', accountsLabel(c.accounts?.length || 0)]
+  return { text: parts.filter(Boolean).join(' · '), color: 'rgba(255,255,255,0.55)' }
+}
+
+const fmtBalance = (v, currency) => `${v < 0 ? '−' : ''}${formatMoney(v, currency)}`
+
+/** Tap on a connected bank: which accounts it brings in, their cards and balances (iPhone BankAccountsSheet). */
+function BankAccountsModal({ connection, cards, balances, busy, onClose, onSync, onReconnect, onDisconnect, onOpenCard, onLinkCard }) {
+  const [linking, setLinking] = useState(null) // account being linked to one of the cards
+  const [confirmLink, setConfirmLink] = useState(null) // card picked for it
+  const [linkBusy, setLinkBusy] = useState(false)
+  useEffect(() => {
+    setLinking(null)
+    setConfirmLink(null)
+  }, [connection?.id])
+
+  // Keep showing the last bank while the modal closes
+  const last = useRef(null)
+  if (connection) last.current = connection
+  const c = connection || last.current
+  if (!c) return null
+
+  const cardsById = Object.fromEntries(cards.map(card => [card.id, card]))
+  const balanceOf = (card) => balances[card.id] ?? Number(card.initial_balance || 0)
+  const status = statusLine(c)
+  const expired = c.status === 'expired'
+  const accountLabel = (a) => a.display_name || (a.kind === 'card' ? 'Картка' : 'Рахунок')
+  // Accounts with a card first; the ones without a card yet after
+  const accounts = [...(c.accounts || [])].sort((a, b) => Number(!!b.card_id) - Number(!!a.card_id))
+
+  const group = 'rounded-[18px] overflow-hidden border border-white/[0.08] bg-white/[0.05] divide-y divide-white/10'
+  const row = 'w-full flex items-center gap-3 px-3.5 py-3 text-left transition-colors hover:bg-white/[0.05] disabled:hover:bg-transparent'
+  const iconTile = (active) =>
+    `h-[38px] w-[38px] shrink-0 rounded-xl grid place-items-center text-lg ${active ? 'bg-brand/[0.14]' : 'bg-white/[0.06] opacity-60'}`
+
+  const logo = c.auth === 'binance' ? <BinanceMark size={48} /> : <BankLogo src={c.provider_logo} name={c.provider_name} size={48} />
+
+  let body
+  if (linking) {
+    // Cards already filled by this bank's other accounts can't take a second one; same currency first
+    const taken = new Set((c.accounts || []).map(a => a.card_id).filter(Boolean))
+    const options = cards
+      .filter(card => !taken.has(card.id))
+      .sort((x, y) => Number(y.currency === linking.currency) - Number(x.currency === linking.currency) || String(x.name).localeCompare(String(y.name)))
+    body = (
+      <>
+        <button type="button" onClick={() => setLinking(null)} className="text-[15px] font-semibold text-brand mb-1">
+          ‹ Назад
+        </button>
+        <div className="mb-3">
+          <div className="text-[17px] font-extrabold text-white">Прив’язати до картки</div>
+          <div className="text-xs text-white/45 mt-0.5">{c.provider_name} · {accountLabel(linking)}</div>
+        </div>
+        {options.length === 0 ? (
+          <div className="py-6 text-center text-sm text-white/55">Немає вільних карток. Створіть картку через «+ Додати».</div>
+        ) : (
+          <div className={`${group} max-h-[50vh] overflow-y-auto`}>
+            {options.map(card => {
+              const sameCur = card.currency === linking.currency
+              return (
+                <button key={card.id} type="button" disabled={linkBusy} onClick={() => setConfirmLink(card)} className={row}>
+                  <span className={iconTile(sameCur)}>💳</span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-[15px] font-bold text-white truncate">{card.name}</span>
+                    <span className={`block text-xs truncate mt-0.5 ${sameCur ? 'text-white/45' : 'text-[#FF8C3A]'}`}>
+                      {[card.bank, sameCur ? card.currency : `${card.currency} ≠ ${linking.currency}`].filter(Boolean).join(' · ')}
+                    </span>
+                  </span>
+                  <span className="text-[15px] font-bold tabular-nums text-white">{fmtBalance(balanceOf(card), card.currency)}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </>
+    )
+  } else {
+    body = (
+      <>
+        <div className="text-xs font-bold uppercase tracking-[0.04em] text-white/60 mb-2 px-1">Рахунки · {accounts.length}</div>
+        {accounts.length === 0 ? (
+          <div className="py-6 text-center text-sm text-white/55">Рахунки з’являться після першої синхронізації</div>
+        ) : (
+          <div className={`${group} max-h-[45vh] overflow-y-auto`}>
+            {accounts.map(a => {
+              const card = a.card_id ? cardsById[a.card_id] : null
+              const bal = card ? balanceOf(card) : null
+              return (
+                <button
+                  key={a.account_id}
+                  type="button"
+                  disabled={card ? !onOpenCard : !onLinkCard || c.auth === 'binance'}
+                  onClick={() => (card ? onOpenCard(card) : setLinking(a))}
+                  className={row}
+                >
+                  <span className={iconTile(!!card)}>{a.kind === 'card' ? '💳' : '🏦'}</span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-[15px] font-bold text-white truncate">{card?.name || accountLabel(a)}</span>
+                    <span className="block text-xs text-white/45 truncate mt-0.5">
+                      {card
+                        ? [a.display_name && a.display_name !== card.name ? a.display_name : null, a.currency].filter(Boolean).join(' · ')
+                        : `${a.currency ?? ''} · картку ще не створено`}
+                    </span>
+                  </span>
+                  {!card && onLinkCard && c.auth !== 'binance' && (
+                    <span className="px-2.5 py-1 rounded-full bg-brand/[0.16] text-xs font-bold text-brand">Прив’язати</span>
+                  )}
+                  {bal != null && (
+                    <span className="flex items-center gap-1.5">
+                      <span className={`text-[15px] font-bold tabular-nums ${bal < 0 ? 'text-[#FF6B6B]' : 'text-white'}`}>
+                        {fmtBalance(bal, card?.currency || a.currency)}
+                      </span>
+                      <span className="text-xl leading-none text-white/35">›</span>
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        <div className="grid gap-2.5 mt-4">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => (expired ? onReconnect(c) : onSync(c))}
+            className="h-[50px] rounded-2xl bg-brand text-white text-base font-extrabold flex items-center justify-center gap-2 hover:brightness-110 disabled:opacity-75"
+          >
+            {busy ? <RefreshCw size={18} className="animate-spin" /> : expired ? '🔑 Підключити знову' : '🔄 Синхронізувати зараз'}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onDisconnect(c)}
+            className="h-[46px] rounded-2xl bg-red-500/[0.12] text-[#FF6B6B] text-[15px] font-bold hover:bg-red-500/[0.18] disabled:opacity-75"
+          >
+            {c.auth === 'binance' ? 'Відключити Binance' : 'Відключити банк'}
+          </button>
+        </div>
+      </>
+    )
+  }
+
+  return (
+    <BaseModal
+      open={!!connection}
+      onClose={onClose}
+      maxWidth="md"
+      zIndex={100}
+      title={
+        <div className="flex items-center gap-3 min-w-0">
+          {logo}
+          <div className="min-w-0">
+            <div className="text-xl font-extrabold text-white truncate">{c.provider_name}</div>
+            <div className="text-xs mt-0.5 line-clamp-2" style={{ color: status.color }}>{status.text}</div>
+          </div>
+        </div>
+      }
+    >
+      {body}
+      <ConfirmModal
+        open={!!confirmLink}
+        title={confirmLink ? `Прив’язати до «${confirmLink.name}»?` : ''}
+        message={
+          linking && confirmLink
+            ? `Транзакції рахунку «${accountLabel(linking)}» підтягуватимуться в цю картку. Якщо ви вже вносили їх вручну, можуть з’явитися дублікати.`
+            : ''
+        }
+        confirmLabel="Прив’язати"
+        onCancel={() => setConfirmLink(null)}
+        onConfirm={async () => {
+          const card = confirmLink
+          setConfirmLink(null)
+          setLinkBusy(true)
+          try {
+            await onLinkCard(c, linking.account_id, card)
+            setLinking(null)
+          } catch {
+            // the toast explains it; stay on the picker
+          } finally {
+            setLinkBusy(false)
+          }
+        }}
+      />
+    </BaseModal>
+  )
+}
+
 /**
- * Cards page block: banks connected through TrueLayer (status, sync, reconnect, disconnect).
- * Also finishes a connection when the user comes back from the bank login.
- * `onChanged` is called when cards/transactions may have changed (to reload the cards list).
+ * Cards page: "🔄 Підключені банки" like on the iPhone — one row per bank (TrueLayer, Monobank, Binance);
+ * a tap opens the bank's accounts and the cards they fill. Also finishes a connection when the user
+ * comes back from the bank login. `onChanged` is called when cards/transactions may have changed.
  */
-export default function BankConnections({ onChanged }) {
+export default function BankConnections({ onChanged, reloadKey = 0, cards = [], balances = {}, onOpenCard }) {
   const [connections, setConnections] = useState(null)
   const [binance, setBinance] = useState(false)
   const [busyId, setBusyId] = useState(null)
+  const [openId, setOpenId] = useState(null)
   const [toDisconnect, setToDisconnect] = useState(null)
   const [reconnectToken, setReconnectToken] = useState(null)
 
@@ -556,6 +765,10 @@ export default function BankConnections({ onChanged }) {
       setConnections([])
     }
   }, [])
+
+  useEffect(() => {
+    if (reloadKey) load()
+  }, [reloadKey, load])
 
   const syncBinanceNow = useCallback(async () => {
     setBusyId('binance')
@@ -573,7 +786,7 @@ export default function BankConnections({ onChanged }) {
     }
   }, [onChanged])
 
-  // Binance connected or disconnected from the "Додати банк" catalog
+  // Binance connected or disconnected from the "Додати" catalog
   useEffect(() => {
     const onCrypto = (e) => {
       setBinance(!!e.detail?.connected)
@@ -587,20 +800,21 @@ export default function BankConnections({ onChanged }) {
   }, [onChanged])
 
   const syncOne = useCallback(async (c) => {
+    if (c.auth === 'binance') return syncBinanceNow()
     setBusyId(c.id)
     try {
       const { added, results } = await syncBankConnections(c.id)
       const failed = results.find(r => r.error)
       if (failed) throw new Error(failed.error === 'consent_expired' ? 'термін доступу сплив' : failed.error)
-      toast.success(added > 0 ? `${c.provider_name}: додано ${added} транзакцій` : `${c.provider_name}: нових транзакцій немає`)
+      toast.success(added > 0 ? `${c.provider_name}: +${added}` : `${c.provider_name}: нових транзакцій немає`)
       if (added > 0) onChanged?.()
     } catch (e) {
-      toast.error(`${c.provider_name}: ${e.message}`)
+      toast.error(`Не вдалося синхронізувати ${c.provider_name}: ${e.message}`)
     } finally {
       setBusyId(null)
       load()
     }
-  }, [load, onChanged])
+  }, [load, onChanged, syncBinanceNow])
 
   // Just connected: first sync right away (pulls the history), then refresh the lists
   const afterConnected = useCallback((name) => {
@@ -657,6 +871,7 @@ export default function BankConnections({ onChanged }) {
 
   const reconnect = async (c) => {
     if (c.auth === 'token') {
+      setOpenId(null)
       setReconnectToken(c) // a new token instead of a bank login
       return
     }
@@ -669,14 +884,28 @@ export default function BankConnections({ onChanged }) {
     }
   }
 
+  // Account without a card → one of the user's cards; then pull its transactions there
+  const linkCard = async (c, accountId, card) => {
+    try {
+      await linkBankAccountToCard(c.id, accountId, card.id)
+      toast.success(`Прив’язано до «${card.name}». Підтягуємо транзакції…`)
+      await load()
+      syncOne(c)
+    } catch (e) {
+      toast.error(`Не вдалося прив’язати: ${e.message}`)
+      throw e
+    }
+  }
+
   const confirmDisconnect = async () => {
     const c = toDisconnect
     setToDisconnect(null)
     setBusyId(c.id)
     try {
-      if (c.id === 'binance') await disconnectBinance()
+      if (c.auth === 'binance') await disconnectBinance()
       else await disconnectBankConnection(c.id)
-      toast.success(`${c.provider_name} відключено`)
+      setOpenId(null)
+      toast.success(`${c.provider_name} відключено. Картки й транзакції залишились`)
       await load()
       onChanged?.()
     } catch (e) {
@@ -686,136 +915,80 @@ export default function BankConnections({ onChanged }) {
     }
   }
 
-  // Hidden while loading and when nothing is connected (connecting starts from "Додати банк"),
-  // so the cards page doesn't jump for users without connected banks
-  if (!connections || (connections.length === 0 && !binance)) return null
-  const total = connections.length + (binance ? 1 : 0)
+  // Binance shows up as one more "bank": its accounts are the Binance cards
+  const rows = useMemo(() => {
+    const list = [...(connections || [])]
+    if (binance) {
+      const binanceCards = cards.filter(card => String(card.bank || '').toLowerCase().includes('binance'))
+      list.push({
+        id: 'binance',
+        provider_id: 'binance',
+        provider_name: 'Binance',
+        auth: 'binance',
+        status: 'active',
+        accounts: binanceCards.map(card => ({ account_id: card.id, kind: 'card', display_name: card.name, currency: card.currency, card_id: card.id })),
+      })
+    }
+    return list
+  }, [connections, binance, cards])
 
-  const banksLabel = (n) => {
-    const mod10 = n % 10
-    const mod100 = n % 100
-    if (mod10 === 1 && mod100 !== 11) return `${n} банк`
-    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} банки`
-    return `${n} банків`
-  }
+  const opened = rows.find(r => r.id === openId) || null
+
+  // Hidden while loading and when nothing is connected (connecting starts from "+ Додати")
+  if (!connections || rows.length === 0) return null
 
   return (
-    // Same card look as the other blocks on the cards page (white, rounded, soft shadow)
-    <div className="bg-gradient-to-b from-white/[0.075] to-white/[0.025] backdrop-blur-xl rounded-3xl shadow-glass p-4 sm:p-5 mb-4 border border-white/10">
-      <div className="flex items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-400 to-orange-600 text-white flex items-center justify-center shadow-sm flex-shrink-0">
-            <Landmark size={20} />
-          </div>
-          <div className="min-w-0">
-            <h3 className="font-semibold text-white leading-tight">Підключені банки</h3>
-            <p className="text-xs text-white/55">Транзакції й баланс підтягуються автоматично</p>
-          </div>
-        </div>
-        <span className="text-xs font-semibold text-orange-300 bg-orange-500/10 border border-orange-500/25 px-2.5 py-1 rounded-full whitespace-nowrap">
-          {banksLabel(total)}
-        </span>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {connections.map(c => {
-          const expired = c.status === 'expired'
-          const hasError = !expired && !!c.last_error
-          const busy = busyId === c.id
+    <div className="mb-6">
+      <h3 className="text-[15px] font-bold text-white/80 mb-2.5 px-1">🔄 Підключені банки</h3>
+      <div className="rounded-[20px] overflow-hidden border border-white/[0.14] bg-white/[0.04] backdrop-blur-xl divide-y divide-white/10">
+        {rows.map(c => {
+          const status = statusLine(c)
+          const ok = c.status === 'active' && !c.last_error
           return (
-            <div
+            <button
               key={c.id}
-              className={`relative flex items-center gap-3 rounded-xl border p-3 pl-4 transition-colors ${
-                expired
-                  ? 'border-amber-500/35 bg-amber-500/[0.06]'
-                  : hasError
-                  ? 'border-red-500/25 bg-red-500/5'
-                  : 'border-white/10 bg-white/[0.021] hover:border-orange-500/35 hover:bg-orange-500/[0.04]'
-              }`}
+              type="button"
+              onClick={() => setOpenId(c.id)}
+              className="w-full flex items-center gap-3 px-3.5 py-3 text-left hover:bg-white/[0.05] transition-colors"
             >
-              {/* Status accent on the left edge */}
-              <span
-                className={`absolute left-0 top-3 bottom-3 w-1 rounded-r ${
-                  expired ? 'bg-amber-400' : hasError ? 'bg-red-400' : 'bg-green-500'
-                }`}
-              />
-              <BankLogo src={c.provider_logo} name={c.provider_name} />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-white truncate">{c.provider_name}</div>
-                <div className={`text-xs truncate ${expired ? 'text-amber-300' : hasError ? 'text-red-400' : 'text-white/55'}`}>
-                  {expired
-                    ? c.auth === 'token' ? 'Токен відкликано' : 'Доступ (90 днів) сплив'
-                    : hasError
-                    ? 'Помилка синхронізації'
-                    : [c.last_sync_at ? `Синхр. ${timeAgo(c.last_sync_at)}` : 'Ще не синхронізовано',
-                        c.accounts?.length ? `рахунків: ${c.accounts.length}` : null].filter(Boolean).join(' · ')}
-                </div>
-              </div>
-
-              {expired ? (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => reconnect(c)}
-                  title="Підключити знову"
-                  className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold rounded-lg shadow-sm disabled:opacity-60"
-                >
-                  <AlertTriangle size={13} />
-                  Знову
-                </button>
+              {c.auth === 'binance' ? <BinanceMark size={38} /> : <BankLogo src={c.provider_logo} name={c.provider_name} size={38} />}
+              <span className="flex-1 min-w-0">
+                <span className="block text-base font-bold text-white truncate">{c.provider_name}</span>
+                <span className="block text-xs truncate mt-0.5" style={{ color: status.color }}>{status.text}</span>
+              </span>
+              {busyId === c.id ? (
+                <RefreshCw size={18} className="animate-spin text-brand" />
               ) : (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => syncOne(c)}
-                  title="Синхронізувати"
-                  className="p-2 rounded-lg text-white/70 bg-surface/90 border border-white/10 hover:border-orange-500/35 hover:text-orange-400 disabled:opacity-50 transition-colors"
-                >
-                  <RefreshCw size={15} className={busy ? 'animate-spin' : ''} />
-                </button>
+                <span className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full" style={{ background: ok ? '#34C759' : '#FF8C3A' }} />
+                  <span className="text-xl leading-none text-white/35">›</span>
+                </span>
               )}
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => setToDisconnect(c)}
-                title="Відключити"
-                className="p-2 rounded-lg text-white/40 bg-surface/90 border border-white/10 hover:border-red-500/35 hover:text-red-400 disabled:opacity-50 transition-colors"
-              >
-                <Unplug size={15} />
-              </button>
-            </div>
+            </button>
           )
         })}
-
-        {binance && (
-          <div className="relative flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.021] p-3 pl-4 hover:border-orange-500/35 hover:bg-orange-500/[0.04] transition-colors">
-            <span className="absolute left-0 top-3 bottom-3 w-1 rounded-r bg-green-500" />
-            <BinanceMark />
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-white truncate">Binance</div>
-              <div className="text-xs text-white/55 truncate">Криптобіржа · баланс через API</div>
-            </div>
-            <button
-              type="button"
-              disabled={busyId === 'binance'}
-              onClick={syncBinanceNow}
-              title="Синхронізувати"
-              className="p-2 rounded-lg text-white/70 bg-surface/90 border border-white/10 hover:border-orange-500/35 hover:text-orange-400 disabled:opacity-50 transition-colors"
-            >
-              <RefreshCw size={15} className={busyId === 'binance' ? 'animate-spin' : ''} />
-            </button>
-            <button
-              type="button"
-              disabled={busyId === 'binance'}
-              onClick={() => setToDisconnect({ id: 'binance', provider_name: 'Binance' })}
-              title="Відключити"
-              className="p-2 rounded-lg text-white/40 bg-surface/90 border border-white/10 hover:border-red-500/35 hover:text-red-400 disabled:opacity-50 transition-colors"
-            >
-              <Unplug size={15} />
-            </button>
-          </div>
-        )}
       </div>
+      <p className="text-[11px] text-white/40 text-center mt-2">Натисніть — рахунки банку й картки</p>
+
+      <BankAccountsModal
+        connection={opened}
+        cards={cards}
+        balances={balances}
+        busy={!!opened && busyId === opened.id}
+        onClose={() => setOpenId(null)}
+        onSync={syncOne}
+        onReconnect={reconnect}
+        onDisconnect={setToDisconnect}
+        onLinkCard={linkCard}
+        onOpenCard={
+          onOpenCard
+            ? (card) => {
+                setOpenId(null)
+                onOpenCard(card)
+              }
+            : undefined
+        }
+      />
 
       <BaseModal
         open={!!reconnectToken}

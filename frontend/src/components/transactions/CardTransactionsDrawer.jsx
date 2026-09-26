@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   X, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, BarChart2,
-  CreditCard, Calendar, ChevronDown, Eye, EyeOff
+  CreditCard, Calendar, ChevronDown, Eye, EyeOff, Settings
 } from 'lucide-react'
 import { listTransactionsByCard } from '../../api/transactions'
 import { listCards } from '../../api/cards'
@@ -11,7 +11,7 @@ import useMonoRates from '../../hooks/useMonoRates'
 import { usePreferences } from '../../context/PreferencesContext'
 import { updatePreferencesSection } from '../../api/preferences'
 import Row from './Row'
-import { getCardTheme, cardBackground } from '../../utils/cardTheme'
+import { formatMoney } from '../../utils/cardTheme'
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -91,7 +91,14 @@ function buildPreset(id) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function CardTransactionsDrawer({ card, onClose, cardMap: externalCardMap }) {
+const HEADER_GRADIENTS = [
+  ['#FF7A1A', '#B83A00'],
+  ['#6D5DFC', '#2A1E9C'],
+  ['#1FB6A6', '#0B5E63'],
+  ['#E0457B', '#7A1540'],
+]
+
+export default function CardTransactionsDrawer({ card, onClose, onOpenSettings, cardMap: externalCardMap }) {
   const rates = useMonoRates()
   const ratesReady = rates && Object.keys(rates).length > 0
   const { preferences } = usePreferences()
@@ -261,9 +268,8 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
   // ── day groups ────────────────────────────────────────────────────────────
   const days = useMemo(() => groupByDay(txs), [txs])
 
-  // ── gradient ──────────────────────────────────────────────────────────────
-  const theme = getCardTheme(card?.bank, card?.name)
-  const sub = card?.bg_url ? 'rgba(255,255,255,0.75)' : theme.subColor
+  // ── header color: one of the iPhone sheet's gradients, picked by the card id ──
+  const headerGrad = HEADER_GRADIENTS[(String(card?.id || '').charCodeAt(0) || 0) % HEADER_GRADIENTS.length]
 
   // ── lock body scroll when open (no layout shift) ─────────────────────────
   useEffect(() => {
@@ -336,39 +342,43 @@ export default function CardTransactionsDrawer({ card, onClose, cardMap: externa
           <div className="w-10 h-1 rounded-full bg-white/15" />
         </div>
 
-        {/* ── Card Header ───────────────────────────────────────────────── */}
+        {/* ── Title + card, like the iPhone "Транзакції картки" sheet ─────── */}
+        <div className="flex items-center justify-between px-5 pt-1 sm:pt-4 pb-1.5 flex-shrink-0">
+          <div className="text-xl font-extrabold tracking-tight">Транзакції картки</div>
+          <button
+            onClick={onClose}
+            className="h-8 w-8 grid place-items-center rounded-full bg-white/10 hover:bg-white/15 text-white/80 transition-colors"
+            aria-label="Закрити"
+          >
+            <X size={16} />
+          </button>
+        </div>
         <div
-          className="relative overflow-hidden flex-shrink-0 mx-3 mt-1 sm:mt-3 rounded-[22px]"
-          style={{
-            backgroundImage: card?.bg_url
-              ? `linear-gradient(135deg, rgba(17,17,17,.2), rgba(17,17,17,.8)), url(${card.bg_url})`
-              : cardBackground(theme),
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            color: card?.bg_url ? '#fff' : theme.textColor,
-            border: `1px solid ${card?.bg_url ? 'rgba(255,255,255,0.12)' : theme.borderColor}`,
-          }}
+          className="flex-shrink-0 mx-4 mt-2 rounded-[22px] p-[18px] text-white"
+          style={{ background: `linear-gradient(135deg, ${headerGrad[0]}, ${headerGrad[1]})` }}
         >
-          <div className="relative p-4 sm:p-5 flex items-start justify-between">
-            <div>
-              <div className="text-xs font-semibold" style={{ color: sub }}>{card?.bank || 'Картка'}</div>
-              <div className="text-lg font-extrabold mt-0.5">{card?.name}</div>
-              <div className="text-xs mt-1" style={{ color: sub }}>{card?.card_number ? `•••• ${String(card.card_number).slice(-4)}` : ''}</div>
-              <div className="mt-2">
-                <div className="text-[10px]" style={{ color: sub }}>Баланс</div>
-                <div className="text-xl font-extrabold leading-tight">
-                  {fmtCur(card?._balance ?? 0)}
-                </div>
-              </div>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-xs font-bold uppercase tracking-[0.05em] text-white/75 truncate">{card?.bank || 'Рахунок'}</div>
+              <div className="text-lg font-extrabold truncate mt-0.5">{card?.name}</div>
             </div>
-            <button
-              onClick={onClose}
-              className={`p-2 rounded-full transition-colors ${theme.isLight && !card?.bg_url ? 'bg-black/[0.06] hover:bg-black/10' : 'bg-white/15 hover:bg-white/25'}`}
-              aria-label="Закрити"
-            >
-              <X size={18} />
-            </button>
+            {onOpenSettings && (
+              <button
+                onClick={() => onOpenSettings(card)}
+                className="h-[34px] w-[34px] shrink-0 grid place-items-center rounded-full bg-black/20 hover:bg-black/30 transition-colors"
+                title="Налаштування картки"
+              >
+                <Settings size={17} />
+              </button>
+            )}
           </div>
+          <div className="text-xs text-white/75 mt-[18px]">Баланс</div>
+          <div className="text-[28px] font-extrabold tracking-tight tabular-nums leading-tight">
+            {Number(card?._balance ?? 0) < 0 ? '−' : ''}{formatMoney(card?._balance ?? 0, card?.currency)}
+          </div>
+          {(card?.exclude_from_stats || card?.bank_exclude_from_stats) && (
+            <div className="text-[11px] text-white/75 mt-1">Не враховується в статистиці</div>
+          )}
         </div>
 
         {/* ── Period Selector ────────────────────────────────────────────── */}

@@ -1,1319 +1,302 @@
-import { supabase } from '../lib/supabase'
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { listCards, createCard, updateCard, deleteCard } from '../api/cards'
-import { listBanks, createBank, updateBank, deleteBank } from '../api/banks'
+import { Filter, Star } from 'lucide-react'
+import { listCards } from '../api/cards'
 import { sumTransactionsByCard } from '../api/transactions'
 import { invalidateSumByCardCache } from '../utils/dataCache'
-import { CreditCard, Plus, X, Pencil, Trash2, Filter, Copy, Building2, Star, Eye } from 'lucide-react'
 import { txBus } from '../utils/txBus'
-import toast from 'react-hot-toast'
-import BaseModal from './BaseModal'
 import { useSettingsStore } from '../store/useSettingsStore'
+import useMonoRates from '../hooks/useMonoRates'
+import { usePrimaryCurrency } from '../utils/primaryCurrency'
 import CardTransactionsDrawer from './transactions/CardTransactionsDrawer'
-import AddBankChoiceModal from './AddBankChoiceModal'
-import { getCardTheme, cardBackground } from '../utils/cardTheme'
+import WalletCard from './cards/WalletCard'
 
-
-const formatCardNumber = (num, bank, name) => {
-  // For Binance Spot, show without spaces
-  if (bank === 'Binance' && name === 'Spot') {
-    return num || '****************'
-  }
-  
-  if (!num) return '**** **** **** ****'
-  const clean = String(num).replace(/\D/g, '')
-  const groups = clean.match(/.{1,4}/g) || []
-  const g = [groups[0] || '****', groups[1] || '****', groups[2] || '****', groups[3] || '****']
-  return `${g[0]} ${g[1]} ${g[2]} ${g[3]}`
-}
-
-function SortableCardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false, onToggleFavorite, onViewBank, onCardClick }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: c.id })
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  }
-
+function SortableWalletCard({ id, ...props }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
   return (
-    <div 
-      ref={setNodeRef} 
-      style={style} 
-      {...attributes} 
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }}
+      {...attributes}
       {...listeners}
-      className={isDragging ? 'cursor-grabbing' : 'cursor-grab'}
+      className={isDragging ? 'cursor-grabbing' : ''}
     >
-      <CardTile 
-        c={c} 
-        onEdit={onEdit} 
-        onDelete={onDelete} 
-        showActions={showActions}
-        isFavorite={isFavorite}
-        onToggleFavorite={onToggleFavorite}
-        isDragging={isDragging}
-        onViewBank={onViewBank}
-        onCardClick={onCardClick}
-      />
+      <WalletCard {...props} />
     </div>
   )
 }
 
-function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false, onToggleFavorite, isDragging = false, isGrouped = false, onViewBank, onCardClick }) {
-  // Every card: a colored gradient by bank with white text (see utils/cardTheme)
-  const theme = getCardTheme(c.bank, c.name)
-  const chip = 'bg-black/25 hover:bg-black/40'
-  const hideAllBalances = useSettingsStore(state => state.settings.hideAllBalances ?? false)
-  const cardNumber = hideAllBalances ? '**** **** **** ****' : formatCardNumber(c.card_number, c.bank, c.name)
-  
-  const copyCardNumber = async () => {
-    if (hideAllBalances) {
-      toast.error('Неможливо скопіювати приховані дані')
-      return
-    }
-    try {
-      await navigator.clipboard.writeText(c.card_number || cardNumber)
-      toast.success('Номер картки скопійовано', {
-        duration: 2000,
-        position: 'bottom-center'
-      })
-    } catch (err) {
-      console.error('Failed to copy:', err)
-      toast.error('Не вдалося скопіювати')
-    }
-  }
-
-  const skin = !!c?.bg_url
-  const balanceText = hideAllBalances ? '***' : (() => {
-    const currency = c.currency || 'EUR'
-    const valid = ['USD','EUR','UAH','PLN','GBP','CHF','CZK','HUF'].includes(currency)
-    const v = Number(c._balance ?? 0)
-    if (valid) return new Intl.NumberFormat('uk-UA', { style: 'currency', currency }).format(v)
-    return `${v.toLocaleString('uk-UA', { minimumFractionDigits: 2 })} ${currency}`
-  })()
-  const stop = (fn) => (e) => {
-    e.stopPropagation()
-    e.preventDefault()
-    fn()
-  }
-  const actionBtn = `h-7 px-2 rounded-full ${chip} backdrop-blur-sm text-[11px] font-semibold inline-flex items-center gap-1 transition-colors`
-
-  return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: isDragging ? 0.5 : 1, y: 0 }}
-      onClick={(e) => {
-        // Don't open drawer if clicking on buttons
-        if (e.target.closest('button')) return
-        onCardClick?.(c)
-      }}
-      className={`relative overflow-hidden rounded-[22px] shadow-[0_10px_28px_rgba(0,0,0,0.45)] text-white ${isDragging ? 'cursor-grabbing' : onCardClick ? 'cursor-pointer' : 'cursor-grab'}`}
-      style={{
-        aspectRatio: isGrouped ? '1.586 / 1.08' : '1.586 / 1',
-        // A skin keeps its own picture; the dark fade at the bottom keeps the balance readable
-        backgroundImage: skin
-          ? `linear-gradient(180deg, rgba(0,0,0,0) 30%, rgba(0,0,0,0.72)), url(${c.bg_url})`
-          : cardBackground(theme),
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        border: `1px solid ${theme.borderColor}`,
-      }}
-    >
-      <div className="relative h-full p-4 sm:p-5 flex flex-col">
-        <div className="flex justify-between items-start gap-2">
-          {/* The skin already shows the bank and the card, so no name on top of it */}
-          {skin ? <span /> : (
-            <div className="min-w-0">
-              <div className="text-[11px] sm:text-xs font-semibold truncate" style={{ color: theme.subColor }}>{c.bank}</div>
-              <div className="text-base sm:text-lg font-bold tracking-tight truncate">{c.name}</div>
-            </div>
-          )}
-          {onToggleFavorite && (
-            <button
-              className={`h-8 w-8 grid place-items-center rounded-full shrink-0 transition-colors ${
-                isFavorite ? 'bg-yellow-400 text-black' : `${chip} backdrop-blur-sm`
-              }`}
-              onClick={stop(() => onToggleFavorite(c.id))}
-              onMouseDown={(e) => e.stopPropagation()}
-              title={isFavorite ? 'Прибрати з вибраних' : 'Додати до вибраних'}
-            >
-              <Star size={14} className={isFavorite ? 'fill-black' : ''} />
-            </button>
-          )}
-        </div>
-
-        <div className="mt-auto">
-          <div className="text-[11px] sm:text-xs" style={{ color: theme.subColor }}>Баланс</div>
-          <div className="text-xl sm:text-2xl font-bold tracking-tight tabular-nums leading-tight">{balanceText}</div>
-
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="font-mono tracking-wider text-[11px] sm:text-xs truncate" style={{ color: theme.subColor }}>
-                {cardNumber}
-              </span>
-              {!hideAllBalances && (
-                <button
-                  onClick={stop(copyCardNumber)}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  className={`h-6 w-6 grid place-items-center rounded-full ${chip} shrink-0 transition-colors`}
-                  title="Копіювати номер картки"
-                >
-                  <Copy size={11} />
-                </button>
-              )}
-            </div>
-
-            <div className="flex gap-1.5 shrink-0">
-              {onViewBank && c.bank_id && (
-                <button
-                  className={actionBtn}
-                  onClick={stop(() => onViewBank(c.bank_id))}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  title="Переглянути банк"
-                >
-                  <Eye size={12} /> <span className="hidden sm:inline">Банк</span>
-                </button>
-              )}
-              {showActions && (
-                <>
-                  <button
-                    className={actionBtn}
-                    onClick={stop(() => onEdit(c))}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    title="Змінити"
-                  >
-                    <Pencil size={12} />
-                  </button>
-                  <button
-                    className={actionBtn}
-                    onClick={stop(() => onDelete(c))}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    title="Видалити"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    </motion.div>
-  )
-}
-
-function EmptyCard({ onCreate }) {
-  return (
-    <motion.button onClick={onCreate} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-      className="relative overflow-hidden rounded-2xl p-6 text-white shadow-glass w-full"
-      style={{ aspectRatio: '1.586 / 1' }}>
-      <div className="absolute inset-0 bg-gradient-to-tr from-brand via-brand to-amber-400" />
-      <div className="relative h-full w-full flex flex-col items-center justify-center">
-        <div className="h-12 w-12 rounded-2xl bg-white/20 grid place-items-center mb-2"><Plus size={26} /></div>
-        <div className="font-semibold">Додати картку</div>
-        <div className="text-white/75 text-xs">Натисніть, щоб створити</div>
-      </div>
-    </motion.button>
-  )
-}
-
-function BankModal({ open, initial, onClose, onSubmit }) {
-  const [form, setForm] = useState({ name: '', exclude_from_stats: false })
-
-  useEffect(() => {
-    setForm(initial ? {
-      name: initial.name || '',
-      exclude_from_stats: !!initial.exclude_from_stats
-    } : { name: '', exclude_from_stats: false })
-  }, [initial, open])
-
-  const submit = async (e) => {
-    e?.preventDefault?.()
-    if (!form.name.trim()) {
-      toast.error('Введіть назву банку')
-      return
-    }
-    await onSubmit(form)
-  }
-
-  return (
-    <BaseModal
-      open={open}
-      onClose={onClose}
-      title={initial ? 'Редагувати банк' : 'Новий банк'}
-      zIndex={100}
-      maxWidth="md"
-    >
-      <form onSubmit={submit} className="grid gap-3">
-        <input 
-          className="border rounded-xl px-3 py-2" 
-          placeholder="Назва банку *" 
-          value={form.name}
-          onChange={(e)=>setForm({...form, name:e.target.value})}
-          required
-        />
-        <label className="flex items-center gap-2.5 py-1.5 text-sm cursor-pointer select-none border rounded-xl px-3 bg-white/[0.015] hover:bg-white/[0.03] transition-colors">
-          <input 
-            type="checkbox"
-            checked={form.exclude_from_stats}
-            onChange={(e) => setForm({ ...form, exclude_from_stats: e.target.checked })}
-            className="accent-brand w-4 h-4 rounded border-white/[0.14] focus:ring-brand"
-          />
-          <span className="text-white/85 font-medium">Виключити весь банк та всі його картки зі статистики</span>
-        </label>
-        <div className="mt-2 flex gap-2">
-          <button className="btn btn-primary flex-1" type="submit">{initial ? 'Зберегти' : 'Додати'}</button>
-          <button type="button" className="btn btn-soft" onClick={onClose}>Скасувати</button>
-        </div>
-      </form>
-    </BaseModal>
-  )
-}
-
-function CardModal({ open, initial, onClose, onSubmit, banks = [] }) {
-  const [form, setForm] = useState({ bank_id: '', name: '', currency: 'EUR', exclude_from_stats: false })
-  const [file, setFile] = useState(null)
-  const [previewUrl, setPreviewUrl] = useState(null)
-
-  useEffect(() => {
-    setForm(initial ? {
-      bank_id: initial.bank_id || '',
-      name: initial.name || '',
-      currency: initial.currency || 'EUR',
-      exclude_from_stats: !!initial.exclude_from_stats
-    } : { bank_id: '', name: '', currency: 'EUR', exclude_from_stats: false })
-    setFile(null)
-    setPreviewUrl(initial?.bg_url || null)
-  }, [initial, open])
-
-  // Handle file selection and preview
-  const handleFileChange = (e) => {
-    const selectedFile = e.target.files?.[0] || null
-    setFile(selectedFile)
-    
-    if (selectedFile) {
-      const reader = new FileReader()
-      reader.onload = (ev) => setPreviewUrl(ev.target.result)
-      reader.readAsDataURL(selectedFile)
-    }
-  }
-
-  const removeImage = () => {
-    setFile(null)
-    setPreviewUrl(null)
-  }
-
-  const submit = async (e) => {
-    e?.preventDefault?.()
-    
-    // Валідація форми
-    if (!form.name || !form.name.trim()) {
-      toast.error('Введіть назву картки')
-      return
-    }
-    
-    try {
-      let fileToSubmit = null
-      if (previewUrl === null && initial) {
-        fileToSubmit = 'REMOVE'
-      } else if (file && file instanceof File) {
-        fileToSubmit = file
-      }
-      
-      await onSubmit(form, fileToSubmit)
-    } catch (error) {
-      console.error('[CardModal] Error in submit:', error)
-      toast.error(error?.message || 'Помилка збереження картки')
-    }
-  }
-
-  return (
-    <BaseModal
-      open={open}
-      onClose={onClose}
-      title={initial ? 'Редагувати картку' : 'Нова картка'}
-      zIndex={100}
-      maxWidth="md"
-    >
-      <form onSubmit={submit} className="grid gap-3">
-        {banks.length > 0 && (
-          <select 
-            className="border rounded-xl px-3 py-2" 
-            value={form.bank_id} 
-            onChange={(e)=>setForm({...form, bank_id:e.target.value})}
-          >
-            <option value="">Виберіть банк (опц.)</option>
-            {banks.map(b => (
-              <option key={b.id} value={b.id}>{b.name}</option>
-            ))}
-          </select>
-        )}
-        <div>
-          <input 
-            className={`border rounded-xl px-3 py-2 w-full ${
-              form.name.length > 50 ? 'border-rose-400 focus:ring-rose-400' :
-              form.name.length > 35 ? 'border-yellow-400 focus:ring-yellow-400' : ''
-            }`}
-            placeholder="Назва картки *" 
-            value={form.name}
-            onChange={(e)=>setForm({...form, name:e.target.value})}
-            required
-          />
-          {form.name.length > 0 && (
-            <div className={`flex justify-between items-center mt-1 text-xs px-1 ${
-              form.name.length > 50 ? 'text-rose-400' :
-              form.name.length > 35 ? 'text-yellow-400' : 'text-white/40'
-            }`}>
-              <span>
-                {form.name.length > 50
-                  ? '⚠ Назва занадто довга — спробуйте скоротити'
-                  : form.name.length > 35
-                  ? '⚠ Назва досить довга'
-                  : ''}
-              </span>
-              <span>{form.name.length} символів</span>
-            </div>
-          )}
-        </div>
-        <select 
-          className="border rounded-xl px-3 py-2" 
-          value={form.currency} 
-          onChange={(e)=>setForm({...form, currency:e.target.value})}
-        >
-          <option>UAH</option><option>EUR</option><option>USD</option><option>GBP</option><option>PLN</option>
-        </select>
-        <label className="flex items-start gap-2.5 py-2 text-sm cursor-pointer select-none border rounded-xl px-3 bg-white/[0.015] hover:bg-white/[0.03] transition-colors">
-          <input
-            type="checkbox"
-            checked={form.exclude_from_stats}
-            onChange={(e) => setForm({ ...form, exclude_from_stats: e.target.checked })}
-            className="accent-brand w-4 h-4 mt-0.5 rounded border-white/[0.14] focus:ring-brand"
-          />
-          <span>
-            <span className="text-white/85 font-medium block">Виключити картку зі статистики</span>
-            <span className="text-white/55 text-xs">Її транзакції не враховуються в доходах, витратах і аналітиці. Баланс картки не змінюється.</span>
-          </span>
-        </label>
-        <div>
-          <label className="text-sm text-white/70 mb-1 block">Фонова картинка (опц.)</label>
-          <input type="file" accept="image/*" onChange={handleFileChange} className="text-sm"/>
-          
-          {previewUrl && (
-            <div className="mt-2 relative">
-              <img 
-                src={previewUrl} 
-                alt="Preview" 
-                className="w-full h-32 object-cover rounded-xl"
-              />
-              <button
-                type="button"
-                onClick={removeImage}
-                className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1.5 hover:bg-red-600"
-                title="Видалити зображення"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="mt-2 flex gap-2">
-          <button className="btn btn-primary flex-1" type="submit">{initial ? 'Зберегти' : 'Додати'}</button>
-          <button type="button" className="btn btn-soft" onClick={onClose}>Скасувати</button>
-        </div>
-      </form>
-    </BaseModal>
-  )
-}
-
-export default function CardsManager({ groupByBank = false, showActions = true, reloadKey = 0 }) {
-  // Використовуємо новий store
+/**
+ * Home, right column: "Ваші картки" — the cards drawn like on the iPhone Home carousel.
+ * Favorites, a bank filter and the drag-to-reorder order are kept in the settings (settings.cards).
+ */
+export default function CardsManager() {
   const settings = useSettingsStore((state) => state.settings)
   const updateNestedSetting = useSettingsStore((state) => state.updateNestedSetting)
   const initialized = useSettingsStore((state) => state.initialized)
-  const [cards, setCards] = useState([])
-  const [banks, setBanks] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [cardModalOpen, setCardModalOpen] = useState(false)
-  const [bankModalOpen, setBankModalOpen] = useState(false)
-  // "Додати банк": choose between connecting a real bank (sync) and your own account
-  const [addBankChoiceOpen, setAddBankChoiceOpen] = useState(false)
-  const [editingCard, setEditingCard] = useState(null)
-  const [editingBank, setEditingBank] = useState(null)
+  const hidden = useSettingsStore((state) => state.settings?.hideAllBalances ?? false)
+  const primary = usePrimaryCurrency()
+  const rates = useMonoRates()
 
+  const [cards, setCards] = useState([])
+  const [loading, setLoading] = useState(true)
   const [filterOpen, setFilterOpen] = useState(false)
   const [selectedBanks, setSelectedBanks] = useState([])
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
   const [favoriteCardIds, setFavoriteCardIds] = useState([])
   const [cardOrder, setCardOrder] = useState([])
   const [activeId, setActiveId] = useState(null)
-  const [bankViewModalOpen, setBankViewModalOpen] = useState(false)
-  const [viewingBank, setViewingBank] = useState(null)
   const [selectedCard, setSelectedCard] = useState(null) // for CardTransactionsDrawer
-  
-  // Зберігаємо останні збережені значення для порівняння
+
+  // Last saved values, so unchanged prefs aren't written again
   const lastSavedCardsPrefsRef = useRef(null)
   const [prefsLoaded, setPrefsLoaded] = useState(false)
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
 
-  // load persisted filter from settings store
+  // Load the saved filter, favorites and order
   useEffect(() => {
     if (!initialized || !settings) return
-      try {
+    try {
       const banks = settings?.cards?.selectedBanks
-          if (Array.isArray(banks)) setSelectedBanks(banks)
-      
+      if (Array.isArray(banks)) setSelectedBanks(banks)
       const favorites = settings?.cards?.favoriteCardIds
       if (Array.isArray(favorites)) setFavoriteCardIds(favorites)
-      
       const order = settings?.cards?.cardOrder
       if (Array.isArray(order)) setCardOrder(order)
-      
       const showFavorites = settings?.cards?.showFavoritesOnly
       if (typeof showFavorites === 'boolean') setShowFavoritesOnly(showFavorites)
-      
-      // Зберігаємо початкові значення для порівняння
+
       lastSavedCardsPrefsRef.current = {
         selectedBanks: Array.isArray(banks) ? banks : [],
         favoriteCardIds: Array.isArray(favorites) ? favorites : [],
         cardOrder: Array.isArray(order) ? order : [],
-        showFavoritesOnly: typeof showFavorites === 'boolean' ? showFavorites : false
+        showFavoritesOnly: typeof showFavorites === 'boolean' ? showFavorites : false,
       }
-      } catch (e) {
-        console.error('Failed to load cards preferences:', e)
+    } catch (e) {
+      console.error('Failed to load cards preferences:', e)
     } finally {
-        setPrefsLoaded(true)
-      }
+      setPrefsLoaded(true)
+    }
   }, [initialized, settings])
 
-  // persist filter changes to DB (з debounce) - тільки якщо значення дійсно змінилося
+  // Save them when they really change (the store debounces the write)
   useEffect(() => {
     if (!prefsLoaded || !lastSavedCardsPrefsRef.current) return
-    
-    // Перевіряємо, чи значення дійсно змінилося від збереженого
-    const currentPrefs = {
-      selectedBanks,
-      favoriteCardIds,
-      cardOrder,
-      showFavoritesOnly
-    }
-    
-    const lastSaved = lastSavedCardsPrefsRef.current
-    
-    // Порівнюємо масиви та булеві значення
-    const arraysEqual = (a, b) => {
-      if (a.length !== b.length) return false
-      return a.every((val, idx) => val === b[idx])
-    }
-    
+    const current = { selectedBanks, favoriteCardIds, cardOrder, showFavoritesOnly }
+    const last = lastSavedCardsPrefsRef.current
+    const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i])
     if (
-      arraysEqual(currentPrefs.selectedBanks, lastSaved.selectedBanks) &&
-      arraysEqual(currentPrefs.favoriteCardIds, lastSaved.favoriteCardIds) &&
-      arraysEqual(currentPrefs.cardOrder, lastSaved.cardOrder) &&
-      currentPrefs.showFavoritesOnly === lastSaved.showFavoritesOnly
-    ) {
-      return // Нічого не змінилося, не записуємо
-    }
-    
-    // Оновлюємо збережені значення
+      same(current.selectedBanks, last.selectedBanks) &&
+      same(current.favoriteCardIds, last.favoriteCardIds) &&
+      same(current.cardOrder, last.cardOrder) &&
+      current.showFavoritesOnly === last.showFavoritesOnly
+    ) return
     lastSavedCardsPrefsRef.current = {
-      selectedBanks: [...currentPrefs.selectedBanks],
-      favoriteCardIds: [...currentPrefs.favoriteCardIds],
-      cardOrder: [...currentPrefs.cardOrder],
-      showFavoritesOnly: currentPrefs.showFavoritesOnly
+      selectedBanks: [...selectedBanks],
+      favoriteCardIds: [...favoriteCardIds],
+      cardOrder: [...cardOrder],
+      showFavoritesOnly,
     }
-    
-    // Оновлюємо через store (автоматично зберігається через debounce)
-    updateNestedSetting('cards', currentPrefs)
+    updateNestedSetting('cards', current)
   }, [selectedBanks, favoriteCardIds, cardOrder, showFavoritesOnly, prefsLoaded, updateNestedSetting])
 
-  const load = async () => {
-    setLoading(true)
-    try {
-      const [baseCards, baseBanks] = await Promise.all([
-        listCards(),
-        listBanks() // Завжди завантажуємо банки, щоб можна було показувати інформацію на дашборді
-      ])
-      
-      setBanks(baseBanks || [])
-      
-      // fetch transaction sums grouped by card and merge into card objects as _balance
-      let sums = {}
-      try {
-        sums = await sumTransactionsByCard()
-      } catch (e) {
-        console.error('sumTransactionsByCard error', e)
-      }
-
-      const withBalances = (baseCards || []).map(c => {
-        const initial = Number(c.initial_balance || 0)
-        const txSum = Number(sums[c.id] || 0)
-        const balance = initial + txSum
-        return { ...c, _balance: balance }
-      })
-
-      setCards(withBalances)
-    } catch(e) {
-      console.error('load error', e)
-    } finally {
-      setLoading(false)
-    }
-  }
-  useEffect(() => { load() }, [groupByBank])
-  // Reload when connected banks add cards/transactions (see BankConnections on the cards page)
-  useEffect(() => { if (reloadKey) load() }, [reloadKey])
+  const withBalances = (list, sums) =>
+    (list || []).map(c => ({ ...c, _balance: Number(c.initial_balance || 0) + Number(sums[c.id] || 0) }))
 
   useEffect(() => {
-    const off = txBus.subscribe(async ({ card_id, delta, type }) => {
-      // Якщо є delta і card_id - оновлюємо баланс через delta (швидко для оптимістичного оновлення)
-      if (card_id && delta) {
-      setCards(prev => prev.map(c => c.id === card_id ? { ...c, _balance: Number(c._balance || 0) + Number(delta || 0) } : c))
+    const load = async () => {
+      try {
+        const list = await listCards()
+        let sums = {}
+        try {
+          sums = await sumTransactionsByCard()
+        } catch (e) {
+          console.error('sumTransactionsByCard error', e)
+        }
+        setCards(withBalances(list, sums))
+      } catch (e) {
+        console.error('load error', e)
+      } finally {
+        setLoading(false)
       }
-      
-      // Після змін транзакцій перезавантажуємо баланси з сервера для точності
-      // Це гарантує, що баланси завжди правильні, навіть якщо delta був неправильним
-      if (type === 'CREATE' || type === 'UPDATE' || type === 'DELETE') {
-        // Невелика затримка, щоб дати серверу час обробити зміни
+    }
+    load()
+  }, [])
+
+  // Balances follow transaction changes: a quick delta first, then the server's numbers
+  useEffect(() => {
+    const off = txBus.subscribe(({ card_id, delta, type }) => {
+      if (card_id && delta) {
+        setCards(prev => prev.map(c => (c.id === card_id ? { ...c, _balance: Number(c._balance || 0) + Number(delta || 0) } : c)))
+      }
+      if (type === 'CREATE' || type === 'UPDATE' || type === 'DELETE' || type === 'SYNC') {
         setTimeout(async () => {
           try {
-            // Інвалідуємо кеш перед завантаженням нових даних
             invalidateSumByCardCache()
-            
             const sums = await sumTransactionsByCard()
-            setCards(prev => prev.map(c => {
-              const initial = Number(c.initial_balance || 0)
-              const txSum = Number(sums[c.id] || 0)
-              const balance = initial + txSum
-              return { ...c, _balance: balance }
-            }))
+            setCards(prev => withBalances(prev, sums))
           } catch (e) {
             console.error('Failed to reload balances after transaction change:', e)
           }
-        }, 500) // 500ms затримка для синхронізації з сервером
+        }, 500)
       }
     })
     return off
   }, [])
 
-  // Для дашборду - унікальні банки з карток
-  const uniqueBanks = useMemo(
-    () => Array.from(new Set(cards.map(c => c.bank).filter(Boolean))).sort(),
-    [cards]
-  )
-  
-  // Для сторінки з картами - банки з таблиці banks
-  const banksForCards = useMemo(() => {
-    if (!groupByBank) return []
-    return banks
-  }, [banks, groupByBank])
+  const uniqueBanks = useMemo(() => Array.from(new Set(cards.map(c => c.bank).filter(Boolean))).sort(), [cards])
 
   const visibleCards = useMemo(() => {
     let filtered = cards
-    
-    // Фільтр по банках
     if (selectedBanks.length > 0) {
-    const s = new Set(selectedBanks)
+      const s = new Set(selectedBanks)
       filtered = filtered.filter(c => s.has(c.bank))
     }
-    
-    // Фільтр "Вибрані"
     if (showFavoritesOnly) {
-      const favoritesSet = new Set(favoriteCardIds)
-      filtered = filtered.filter(c => favoritesSet.has(c.id))
+      const favorites = new Set(favoriteCardIds)
+      filtered = filtered.filter(c => favorites.has(c.id))
     }
-    
-    // Сортування за збереженим порядком
-    if (cardOrder.length > 0 && !showActions) {
+    if (cardOrder.length > 0) {
       const orderMap = new Map(cardOrder.map((id, index) => [id, index]))
-      filtered.sort((a, b) => {
-        const aIndex = orderMap.get(a.id) ?? Infinity
-        const bIndex = orderMap.get(b.id) ?? Infinity
-        return aIndex - bIndex
-      })
+      filtered = [...filtered].sort((a, b) => (orderMap.get(a.id) ?? Infinity) - (orderMap.get(b.id) ?? Infinity))
     }
-    
     return filtered
-  }, [cards, selectedBanks, showFavoritesOnly, favoriteCardIds, cardOrder, showActions])
+  }, [cards, selectedBanks, showFavoritesOnly, favoriteCardIds, cardOrder])
 
-  // Групуємо карти по банках (тільки для режиму groupByBank)
-  const cardsByBank = useMemo(() => {
-    if (!groupByBank) return []
-    
-    // Групуємо карти по bank_id
-    const grouped = {}
-    const cardsToShow = selectedBanks.length 
-      ? cards.filter(c => {
-          const bankName = banks.find(b => b.id === c.bank_id)?.name || c.bank
-          return selectedBanks.includes(bankName)
-        })
-      : cards
-    
-    // Спочатку додаємо всі банки з таблиці banks
-    banks.forEach(bank => {
-      grouped[bank.id] = {
-        bankId: bank.id,
-        bank: bank.name,
-        cards: [],
-        iban: bank.iban,
-        bic: bank.bic,
-        beneficiary: bank.beneficiary,
-        expiryDates: [],
-        cvvs: []
-      }
-    })
-    
-    // Потім додаємо карти до відповідних банків
-    cardsToShow.forEach(card => {
-      const bankId = card.bank_id
-      if (bankId && grouped[bankId]) {
-        grouped[bankId].cards.push(card)
-        if (card.expiry_date) grouped[bankId].expiryDates.push(card.expiry_date)
-        if (card.cvv) grouped[bankId].cvvs.push(card.cvv)
-      } else {
-        // Карти без bank_id
-        const bankName = card.bank || 'Інші'
-        if (!grouped[bankName]) {
-          grouped[bankName] = {
-            bankId: null,
-            bank: bankName,
-            cards: [],
-            iban: null,
-            bic: null,
-            beneficiary: null,
-            expiryDates: [],
-            cvvs: []
-          }
-        }
-        grouped[bankName].cards.push(card)
-        if (card.expiry_date) grouped[bankName].expiryDates.push(card.expiry_date)
-        if (card.cvv) grouped[bankName].cvvs.push(card.cvv)
-      }
-    })
-    
-    const result = Object.values(grouped)
-      .filter(g => g.cards.length > 0 || groupByBank) // Показуємо банки навіть без карток на сторінці з картами
-    
-    // Сортуємо: спочатку банки з картками (по алфавіту), потім без карток (по алфавіту)
-    return result.sort((a, b) => {
-      const aHasCards = a.cards.length > 0
-      const bHasCards = b.cards.length > 0
-      
-      if (aHasCards && !bHasCards) return -1
-      if (!aHasCards && bHasCards) return 1
-      
-      // Якщо обидва з картками або обидва без - сортуємо по алфавіту
-      return a.bank.localeCompare(b.bank)
-    })
-  }, [cards, banks, selectedBanks, groupByBank])
-
-  const openCreateCard = (bankId = null) => { 
-    setEditingCard({ bank_id: bankId }); 
-    setCardModalOpen(true) 
-  }
-  const openEditCard = (c) => { 
-    setEditingCard(c); 
-    setCardModalOpen(true) 
-  }
-  const openCreateBank = () => {
-    setAddBankChoiceOpen(true)
-  }
-  // "Власний рахунок" in the choice: the manual bank form
-  const openManualBank = () => {
-    setAddBankChoiceOpen(false)
-    setEditingBank(null)
-    setBankModalOpen(true)
-  }
-  const openEditBank = (b) => { 
-    setEditingBank(b); 
-    setBankModalOpen(true) 
-  }
-
-  const handleCardSubmit = async (form, file) => {
-    if (!form || !form.name || !form.name.trim()) {
-      toast.error('Введіть назву картки')
-      return
-    }
-    
-    const payload = {
-      bank_id: form.bank_id || null, 
-      name: form.name, 
-      currency: form.currency || 'EUR',
-      exclude_from_stats: !!form.exclude_from_stats
-    }
-    
-    try {
-      if (editingCard?.id) { 
-        await updateCard(editingCard.id, payload, file) 
-      }
-      else { 
-        await createCard({ ...payload, file }) 
-      }
-      setCardModalOpen(false); setEditingCard(null); await load()
-      toast.success(editingCard?.id ? 'Картку оновлено' : 'Картку створено')
-    } catch (e) {
-      console.error('[CardsManager] handleCardSubmit error:', e)
-      toast.error(e?.message || 'Помилка збереження картки')
-      throw e // Прокидаємо помилку далі, щоб CardModal міг її обробити
-    }
-  }
-
-  const handleBankSubmit = async (form) => {
-    const payload = {
-      name: form.name,
-      exclude_from_stats: form.exclude_from_stats || false
-    }
-    try {
-      if (editingBank?.id) { 
-        await updateBank(editingBank.id, payload) 
-      }
-      else { 
-        await createBank(payload) 
-      }
-      setBankModalOpen(false); setEditingBank(null); await load()
-      toast.success(editingBank?.id ? 'Банк оновлено' : 'Банк створено')
-    } catch (e) {
-      console.error('handleBankSubmit error', e)
-      toast.error(e?.message || 'Помилка збереження банку')
-    }
-  }
-
-  const handleDeleteCard = async (c) => {
-    if (!confirm(`Видалити картку «${c.name}»?`)) return
-    try {
-      await deleteCard(c.id)
-      await load()
-      toast.success('Картку видалено')
-    } catch (e) {
-      console.error('Delete card error:', e)
-      toast.error(`Не вдалося видалити картку: ${e.message || e}`)
-    }
-  }
-
-  const handleDeleteBank = async (b) => {
-    if (!b?.id) return
-    const n = cards.filter(c => c.bank_id === b.id).length
-    const message = n > 0
-      ? `Видалити банк «${b.name}» разом з ${n === 1 ? '1 карткою' : `${n} картками`} і всіма їхніми транзакціями?\n\nЯкщо банк синхронізується, синхронізацію буде відключено. Це не можна скасувати.`
-      : `Видалити банк «${b.name}»?`
-    if (!confirm(message)) return
-    try {
-      await deleteBank(b.id)
-      await load()
-      try { txBus.emit({ type: 'SYNC' }) } catch {} // totals/transactions elsewhere reload
-      toast.success('Банк видалено')
-    } catch (e) {
-      console.error('Delete bank error:', e)
-      toast.error(e?.message || 'Не вдалося видалити банк')
-    }
-  }
-
-  const toggleBank = (bank) => setSelectedBanks(prev => prev.includes(bank) ? prev.filter(b => b !== bank) : [...prev, bank])
+  const toggleBank = (bank) => setSelectedBanks(prev => (prev.includes(bank) ? prev.filter(b => b !== bank) : [...prev, bank]))
   const clearFilter = () => {
     setSelectedBanks([])
     setShowFavoritesOnly(false)
   }
-  
-  const toggleFavorite = (cardId) => {
-    setFavoriteCardIds(prev => {
-      const newFavorites = prev.includes(cardId) 
-        ? prev.filter(id => id !== cardId)
-        : [...prev, cardId]
-      return newFavorites
-    })
-  }
-  
-  const handleViewBank = (bankId) => {
-    const bank = banks.find(b => b.id === bankId)
-    if (bank) {
-      setViewingBank(bank)
-      setBankViewModalOpen(true)
-    }
-  }
-  
-  const handleDragStart = (event) => {
-    setActiveId(event.active.id)
-  }
-  
-  const handleDragEnd = (event) => {
-    const { active, over } = event
-    
+  const toggleFavorite = (cardId) =>
+    setFavoriteCardIds(prev => (prev.includes(cardId) ? prev.filter(id => id !== cardId) : [...prev, cardId]))
+
+  const handleDragEnd = ({ active, over }) => {
     if (over && active.id !== over.id) {
       const oldIndex = visibleCards.findIndex(c => c.id === active.id)
       const newIndex = visibleCards.findIndex(c => c.id === over.id)
-      
-      const reorderedCards = arrayMove(visibleCards, oldIndex, newIndex)
-      const newOrder = reorderedCards.map(c => c.id)
-      setCardOrder(newOrder)
+      setCardOrder(arrayMove(visibleCards, oldIndex, newIndex).map(c => c.id))
     }
-    
-    setActiveId(null)
-  }
-  
-  const handleDragCancel = () => {
     setActiveId(null)
   }
 
-return (
-  <>
-    <motion.div
-      initial={false}
-      animate={{ opacity: 1, y: 0 }}
-      className="bg-gradient-to-b from-white/[0.075] to-white/[0.025] backdrop-blur-xl rounded-3xl p-3 sm:p-5 shadow-glass relative flex flex-col h-auto sm:h-[calc(100vh-2rem)] border border-white/10"
-    >
-      <div className="flex items-center justify-between mb-4 shrink-0">
-        <div className="text-lg font-bold tracking-tight">Ваші картки</div>
-        <div className="flex items-center gap-2">
-          {/* Фільтри для дашборду (showActions=false) */}
-          {!showActions && (
-            <>
-              <div className="relative">
-                <motion.button
-                  className={`btn btn-soft text-xs inline-flex items-center gap-1 ${showFavoritesOnly ? 'bg-white/[0.06] border-white/[0.14]' : ''}`}
-                  onClick={() => setShowFavoritesOnly(v => !v)}
-                  title="Показати тільки вибрані"
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  <Star size={14} className={showFavoritesOnly ? 'fill-yellow-400 text-yellow-400' : ''} />
-                  Вибрані
-                </motion.button>
-              </div>
-          <div className="relative">
-            <motion.button
-              className="btn btn-soft text-xs inline-flex items-center gap-1"
-              onClick={() => setFilterOpen(v => !v)}
-              title="Фільтр за банком"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              animate={{ 
-                backgroundColor: selectedBanks.length > 0 ? 'rgba(255,107,0,0.15)' : undefined,
-                borderColor: selectedBanks.length > 0 ? 'rgba(255,107,0,0.4)' : undefined
-              }}
-              transition={{ duration: 0.2 }}
+  const cardProps = (c) => ({
+    card: c,
+    balance: Number(c._balance || 0),
+    primaryCurrency: primary,
+    rates,
+    hidden,
+    excluded: !!(c.exclude_from_stats || c.bank_exclude_from_stats),
+    isFavorite: favoriteCardIds.includes(c.id),
+    onToggleFavorite: toggleFavorite,
+  })
+  const activeCard = activeId ? visibleCards.find(c => c.id === activeId) : null
+
+  return (
+    <>
+      <motion.div
+        initial={false}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-gradient-to-b from-white/[0.075] to-white/[0.025] backdrop-blur-xl rounded-3xl p-3 sm:p-5 shadow-glass relative flex flex-col h-auto sm:h-[calc(100vh-2rem)] border border-white/10"
+      >
+        <div className="flex items-center justify-between mb-4 shrink-0">
+          <div className="text-lg font-bold tracking-tight">Ваші картки</div>
+          <div className="flex items-center gap-2">
+            <button
+              className={`btn btn-soft text-xs inline-flex items-center gap-1 ${showFavoritesOnly ? 'bg-white/[0.06] border-white/[0.14]' : ''}`}
+              onClick={() => setShowFavoritesOnly(v => !v)}
+              title="Показати тільки вибрані"
             >
-              <motion.div
-                animate={{ rotate: filterOpen ? 180 : 0 }}
-                transition={{ duration: 0.3, ease: "easeInOut" }}
+              <Star size={14} className={showFavoritesOnly ? 'fill-yellow-400 text-yellow-400' : ''} />
+              Вибрані
+            </button>
+            <div className="relative">
+              <button
+                className={`btn btn-soft text-xs inline-flex items-center gap-1 ${selectedBanks.length > 0 ? 'bg-brand/15 border-brand/40' : ''}`}
+                onClick={() => setFilterOpen(v => !v)}
+                title="Фільтр за банком"
               >
                 <Filter size={16} />
-              </motion.div>
-              Фільтр
-              </motion.button>
+                Фільтр
+              </button>
               <AnimatePresence>
                 {filterOpen && (
                   <motion.div
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 6 }}
-                    className="absolute right-0 mt-2 w-56 bg-surface/90 border border-white/10 rounded-xl shadow-soft p-3 z-20"
+                    className="absolute right-0 mt-2 w-56 bg-surface/90 border border-white/10 rounded-xl shadow-soft p-3 z-20 backdrop-blur-xl"
                   >
                     <div className="text-xs font-semibold text-white/70 mb-2">Банки</div>
-                    <div className="max-h-56 overflow-auto pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                    <div className="max-h-56 overflow-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                       {uniqueBanks.length === 0 ? (
                         <div className="text-xs text-white/55">Немає банків</div>
                       ) : uniqueBanks.map(b => (
                         <label key={b} className="flex items-center gap-2 py-1 text-sm">
-                          <input
-                            type="checkbox"
-                            className="accent-brand"
-                            checked={selectedBanks.includes(b)}
-                            onChange={() => toggleBank(b)}
-                          />
+                          <input type="checkbox" className="accent-brand" checked={selectedBanks.includes(b)} onChange={() => toggleBank(b)} />
                           <span>{b}</span>
                         </label>
                       ))}
                     </div>
                     <div className="mt-3 flex items-center justify-between">
-                      <button className="text-xs text-white/70 hover:underline" onClick={clearFilter}>
-                          Показати всі
-                      </button>
-                      <button className="btn btn-primary text-xs py-1 px-3" onClick={() => setFilterOpen(false)}>
-                        Готово
-                      </button>
+                      <button className="text-xs text-white/70 hover:underline" onClick={clearFilter}>Показати всі</button>
+                      <button className="btn btn-primary text-xs py-1 px-3" onClick={() => setFilterOpen(false)}>Готово</button>
                     </div>
                   </motion.div>
                 )}
               </AnimatePresence>
-          </div>
-            </>
-          )}
-          
-          {/* Кнопки для сторінки з картами (showActions=true) */}
-          {showActions && (
-            <>
-              {groupByBank && (
-                <button 
-                  onClick={openCreateBank} 
-                  className="btn btn-primary text-xs inline-flex items-center gap-1.5 px-3 py-1.5" 
-                  title="Додати банк"
-                >
-                  <Building2 size={16} /> Додати банк
-                </button>
-              )}
-              {!groupByBank && (
-                <button onClick={() => openCreateCard()} className="btn btn-soft text-xs inline-flex items-center gap-1" title="Додати картку">
-            <Plus size={16} /> Додати
-          </button>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="text-sm text-white/55">Loading…</div>
-      ) : groupByBank ? (
-        // Режим з групуванням по банках (для сторінки з картами)
-        !cardsByBank || cardsByBank.length === 0 ? (
-          cards.length === 0 && banks.length === 0 ? (
-            <EmptyCard onCreate={() => openCreateBank()} />
-        ) : (
-          <div className="rounded-2xl border border-dashed border-white/[0.14] p-6 text-center text-sm text-white/70">
-            За обраними банками нічого не знайдено.
-            <button className="ml-2 underline" onClick={clearFilter}>Показати всі банки</button>
-          </div>
-        )
-      ) : (
-        // ← робимо скрольним ТІЛЬКИ список карточок
-        <div className="flex-1 overflow-y-auto overflow-x-hidden -mx-5 -mb-5
-                        [scrollbar-width:none] [-ms-overflow-style:none]
-                        [&::-webkit-scrollbar]:hidden">
-            <div className="space-y-6 px-5 pb-5"> {/* паддінг для карточок */}
-              {cardsByBank.map(({ bankId, bank, cards: bankCards, iban, bic, beneficiary, expiryDates, cvvs }) => (
-                <div key={bankId || bank} className="bg-surface/90 rounded-2xl border-2 border-white/10 shadow-md overflow-hidden">
-                  <div className="space-y-4 p-5">
-                  {/* Заголовок банку з реквізитами */}
-                  <div className="bg-gradient-to-br from-white/[0.04] to-white/[0.04] rounded-xl p-3 sm:p-5 border border-white/10">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-3 sm:mb-4">
-                      <div className="flex items-center gap-2 sm:gap-3">
-                        <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-surface/90 flex items-center justify-center shadow-sm flex-shrink-0">
-                          <Building2 size={18} className="sm:w-5 sm:h-5 text-white/85" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="font-bold text-lg sm:text-xl text-white truncate">{bank}</div>
-                          {bankCards.length > 0 && (
-                            <div className="text-xs text-white/55 mt-0.5">
-                              {bankCards.length} {bankCards.length === 1 ? 'картка' : bankCards.length < 5 ? 'картки' : 'карток'}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      {showActions && bankId && (
-                        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                          <button
-                            onClick={() => openEditBank(banks.find(b => b.id === bankId))}
-                            className="p-1.5 sm:p-2 rounded-xl hover:bg-white/[0.08] transition-colors border border-white/10"
-                            title="Редагувати банк"
-                          >
-                            <Pencil size={14} className="sm:w-4 sm:h-4 text-white/70" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteBank(banks.find(b => b.id === bankId))}
-                            className="p-1.5 sm:p-2 rounded-xl hover:bg-red-500/10 transition-colors border border-red-500/25"
-                            title="Видалити банк"
-                          >
-                            <Trash2 size={14} className="sm:w-4 sm:h-4 text-red-400" />
-                          </button>
-                          <button
-                            onClick={() => openCreateCard(bankId)}
-                            className="btn btn-primary text-xs inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 sm:py-2 shadow-sm"
-                            title="Додати картку"
-                          >
-                            <Plus size={14} className="sm:w-4 sm:h-4" />
-                            <span className="hidden sm:inline">Додати картку</span>
-                            <span className="sm:hidden">Додати</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                    </div>
-                    
-                    {/* Картки банку */}
-                    {bankCards.length > 0 ? (
-                      <div className="mt-2">
-                        <div className="text-xs font-semibold text-white/55 uppercase tracking-wide mb-2 sm:mb-3 px-1">
-                          Картки
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                          {bankCards.map(c => (
-                            <CardTile 
-                              key={c.id} 
-                              c={c} 
-                              onEdit={openEditCard} 
-                              onDelete={handleDeleteCard} 
-                              showActions={showActions}
-                              isFavorite={favoriteCardIds.includes(c.id)}
-                              onToggleFavorite={undefined}
-                              isGrouped={true}
-                              onCardClick={setSelectedCard}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      showActions && (
-                        <div className="mt-2 rounded-xl border-2 border-dashed border-white/[0.14] bg-white/[0.015] p-6 text-center">
-                          <div className="text-sm text-white/55 mb-2">
-                            Немає карток у цьому банку
-                          </div>
-                          <button 
-                            onClick={() => openCreateCard(bankId)} 
-                            className="btn btn-soft text-xs inline-flex items-center gap-1.5 px-3 py-1.5"
-                          >
-                            <Plus size={14} /> Додати картку
-                          </button>
-                        </div>
-                      )
-                    )}
-                  </div>
-                </div>
-              ))}
             </div>
           </div>
-        )
-      ) : (
-        // Стандартний режим (для дашборду) - без групування
-        <div className="flex-1 overflow-y-auto overflow-x-hidden -mx-5 -mb-5
-                        [scrollbar-width:none] [-ms-overflow-style:none]
-                        [&::-webkit-scrollbar]:hidden">
-          {!showActions ? (
+        </div>
+
+        <div className="flex-1 overflow-y-auto overflow-x-hidden -mx-5 -mb-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {loading ? (
+            <div className="text-sm text-white/55 px-5">Завантаження…</div>
+          ) : (
             <DndContext
               sensors={sensors}
               collisionDetection={closestCenter}
-              onDragStart={handleDragStart}
+              onDragStart={({ active }) => setActiveId(active.id)}
               onDragEnd={handleDragEnd}
-              onDragCancel={handleDragCancel}
+              onDragCancel={() => setActiveId(null)}
             >
-              <SortableContext
-                items={visibleCards.map(c => c.id)}
-                strategy={verticalListSortingStrategy}
-              >
-                <div className="space-y-4 px-5 pb-5">
+              <SortableContext items={visibleCards.map(c => c.id)} strategy={verticalListSortingStrategy}>
+                <div className="space-y-3 px-5 pb-5">
                   {visibleCards.length === 0 ? (
                     <div className="text-center text-sm text-white/55 py-8">
                       {showFavoritesOnly ? 'Немає вибраних карток' : 'Немає карток'}
                     </div>
                   ) : (
                     visibleCards.map(c => (
-                      <SortableCardTile
-                        key={c.id}
-                        c={c}
-                        onEdit={openEditCard}
-                        onDelete={handleDeleteCard}
-                        showActions={showActions}
-                        isFavorite={favoriteCardIds.includes(c.id)}
-                        onToggleFavorite={toggleFavorite}
-                        onViewBank={handleViewBank}
-                        onCardClick={setSelectedCard}
-                      />
+                      <SortableWalletCard key={c.id} id={c.id} {...cardProps(c)} onClick={setSelectedCard} />
                     ))
                   )}
                 </div>
               </SortableContext>
               <DragOverlay>
-                {activeId ? (() => {
-                  const activeCard = visibleCards.find(c => c.id === activeId)
-                  if (!activeCard) return null
-                  return (
-                    <div className="opacity-90 scale-105">
-                      <CardTile
-                        c={activeCard}
-                        onEdit={openEditCard}
-                        onDelete={handleDeleteCard}
-                        showActions={showActions}
-                        isFavorite={favoriteCardIds.includes(activeId)}
-                        onToggleFavorite={toggleFavorite}
-                        isDragging={true}
-                        onViewBank={handleViewBank}
-                      />
-                    </div>
-                  )
-                })() : null}
+                {activeCard ? <WalletCard {...cardProps(activeCard)} className="scale-[1.02] shadow-[0_20px_50px_rgba(0,0,0,0.6)]" /> : null}
               </DragOverlay>
             </DndContext>
-          ) : (
-            <div className="space-y-4 px-5 pb-5">
-              {visibleCards.length === 0 ? (
-                <div className="text-center text-sm text-white/55 py-8">
-                  {showFavoritesOnly ? 'Немає вибраних карток' : 'Немає карток'}
-                </div>
-              ) : (
-                visibleCards.map(c => (
-                    <CardTile
-                      key={c.id}
-                      c={c}
-                      onEdit={openEditCard}
-                      onDelete={handleDeleteCard}
-                      showActions={showActions}
-                      isFavorite={favoriteCardIds.includes(c.id)}
-                      onToggleFavorite={undefined}
-                      onViewBank={handleViewBank}
-                      onCardClick={setSelectedCard}
-                    />
-                  ))
-              )}
-            </div>
           )}
         </div>
-      )}
-    </motion.div>
+      </motion.div>
 
-    <CardModal
-      open={cardModalOpen}
-      initial={editingCard}
-      banks={banksForCards}
-      onClose={() => { setCardModalOpen(false); setEditingCard(null) }}
-      onSubmit={handleCardSubmit}
-    />
-    
-    {groupByBank && (
-      <AddBankChoiceModal
-        open={addBankChoiceOpen}
-        onClose={() => setAddBankChoiceOpen(false)}
-        onManual={openManualBank}
-      />
-    )}
-
-    {groupByBank && (
-      <BankModal
-        open={bankModalOpen}
-        initial={editingBank}
-        onClose={() => { setBankModalOpen(false); setEditingBank(null) }}
-        onSubmit={handleBankSubmit}
-      />
-    )}
-    
-    {/* Модалка для перегляду банку */}
-    <BaseModal
-      open={bankViewModalOpen}
-      onClose={() => { setBankViewModalOpen(false); setViewingBank(null) }}
-      title={
-        <div className="flex items-center gap-2">
-          <Building2 size={20} />
-          <span>Інформація про банк</span>
-        </div>
-      }
-      maxWidth="md"
-    >
-      {viewingBank && (
-        <div className="space-y-4">
-          <div className="pb-3 border-b border-white/10">
-            <h3 className="text-xl font-bold text-white">{viewingBank.name}</h3>
-          </div>
-          
-          {(viewingBank.iban || viewingBank.bic || viewingBank.beneficiary) ? (
-            <div className="space-y-4">
-              {viewingBank.iban && (
-                <div>
-                  <div className="text-sm text-white/70 font-medium mb-1.5">IBAN</div>
-                  <div className="flex items-center gap-2 p-3 bg-white/[0.03] rounded-lg border border-white/10">
-                    <span className="font-mono text-sm break-all flex-1">{viewingBank.iban}</span>
-                    <button
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(viewingBank.iban)
-                          toast.success('IBAN скопійовано')
-                        } catch (e) {
-                          toast.error('Не вдалося скопіювати')
-                        }
-                      }}
-                      className="p-2 rounded-lg hover:bg-white/10 transition-colors flex-shrink-0"
-                      title="Копіювати IBAN"
-                    >
-                      <Copy size={16} className="text-white/70" />
-                    </button>
-                  </div>
-                </div>
-              )}
-              
-              {viewingBank.bic && (
-                <div>
-                  <div className="text-sm text-white/70 font-medium mb-1.5">BIC/SWIFT/ЄДРПОУ</div>
-                  <div className="flex items-center gap-2 p-3 bg-white/[0.03] rounded-lg border border-white/10">
-                    <span className="font-mono text-sm break-all flex-1">{viewingBank.bic}</span>
-                    <button
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(viewingBank.bic)
-                          toast.success('BIC скопійовано')
-                        } catch (e) {
-                          toast.error('Не вдалося скопіювати')
-                        }
-                      }}
-                      className="p-2 rounded-lg hover:bg-white/10 transition-colors flex-shrink-0"
-                      title="Копіювати BIC"
-                    >
-                      <Copy size={16} className="text-white/70" />
-                    </button>
-                  </div>
-                </div>
-              )}
-              
-              {viewingBank.beneficiary && (
-                <div>
-                  <div className="text-sm text-white/70 font-medium mb-1.5">Бенефіціар</div>
-                  <div className="flex items-center gap-2 p-3 bg-white/[0.03] rounded-lg border border-white/10">
-                    <span className="text-sm break-all flex-1">{viewingBank.beneficiary}</span>
-                    <button
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(viewingBank.beneficiary)
-                          toast.success('Бенефіціар скопійовано')
-                        } catch (e) {
-                          toast.error('Не вдалося скопіювати')
-                        }
-                      }}
-                      className="p-2 rounded-lg hover:bg-white/10 transition-colors flex-shrink-0"
-                      title="Копіювати бенефіціар"
-                    >
-                      <Copy size={16} className="text-white/70" />
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="text-sm text-white/55 text-center py-8">
-              Реквізити не додано
-            </div>
-          )}
-        </div>
-      )}
-    </BaseModal>
-
-    {/* Card Transactions Drawer */}
-    <AnimatePresence>
-      {selectedCard && (
-        <CardTransactionsDrawer
-          key={selectedCard.id}
-          card={selectedCard}
-          onClose={() => setSelectedCard(null)}
-        />
-      )}
-    </AnimatePresence>
-  </>
-)
-
+      <AnimatePresence>
+        {selectedCard && (
+          <CardTransactionsDrawer
+            key={selectedCard.id}
+            card={cards.find(c => c.id === selectedCard.id) || selectedCard}
+            onClose={() => setSelectedCard(null)}
+          />
+        )}
+      </AnimatePresence>
+    </>
+  )
 }

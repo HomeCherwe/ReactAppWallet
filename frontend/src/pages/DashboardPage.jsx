@@ -22,7 +22,7 @@ export default function DashboardPage() {
 
       {/* Right column - тільки для десктопу */}
       <div className="space-y-4 sticky top-6 self-start hidden sm:block">
-        <CardsManager showActions={false} />
+        <CardsManager />
       </div>
     </>
   )
