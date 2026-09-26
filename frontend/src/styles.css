@@ -44,6 +44,11 @@ body::before {
     linear-gradient(180deg, #180A02 0%, #0A0A0E 45%, #060608 100%);
 }
 
+/* No visible page scrollbar (like the iPhone app): it showed up as a light stripe on the right
+   while scrolling. Wheel / touch / keyboard scrolling still work. */
+html { scrollbar-width: none; }
+html::-webkit-scrollbar { display: none; }
+
 /* Головний контейнер додатку враховує Safe Area */
 #root {
   padding-top: var(--safe-top);

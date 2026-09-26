@@ -4,16 +4,17 @@ import { fmtDate, fmtAmount } from '../../utils/format'
 import { Trash2, RotateCcw, Link2Off } from 'lucide-react'
 
 import { useSettingsStore } from '../../store/useSettingsStore'
-import { getCategoryIcon } from '../../utils/categoryIcon'
+import { getCategoryVisual } from '../../utils/categoryIcon'
 
-/** Category emoji in a tinted square, like the iPhone list: orange = expense, green = income */
+/** iOS-Settings-style icon: a white glyph on a colored rounded square */
 function CategoryIcon({ tx, compact }) {
-  const amount = Number(tx.amount || 0)
-  const tint = tx.is_transfer ? 'bg-sky-500/15' : amount > 0 ? 'bg-green-500/15' : 'bg-brand/15'
-  const size = compact ? 'h-8 w-8 text-[15px] rounded-[10px]' : 'h-10 w-10 text-[19px] rounded-xl'
+  const { Icon, color } = getCategoryVisual(tx.category, Number(tx.amount || 0), tx.is_transfer)
   return (
-    <div className={`${size} ${tint} shrink-0 grid place-items-center select-none`}>
-      {tx.is_transfer ? '🔄' : getCategoryIcon(tx.category, amount)}
+    <div
+      className={`${compact ? 'h-8 w-8 rounded-[9px]' : 'h-10 w-10 rounded-[11px]'} shrink-0 grid place-items-center shadow-[inset_0_1px_0_rgba(255,255,255,0.25)]`}
+      style={{ background: `linear-gradient(180deg, ${color}, ${color}d9)` }}
+    >
+      <Icon size={compact ? 16 : 20} strokeWidth={2.2} className="text-white" />
     </div>
   )
 }
