@@ -16,202 +16,27 @@ import { txBus } from '../utils/txBus'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { listCards } from '../api/cards'
 import useMonoRates from '../hooks/useMonoRates'
+import { usePrimaryCurrency, convertAmount, currencySymbol } from '../utils/primaryCurrency'
 
-// Кольори для різних валют
-const CURRENCY_COLORS = {
-  'UAH': '#60A5FA',   // синій
-  'USD': '#22C55E',    // зелений
-  'EUR': '#FF6B00',    // помаранчевий (бренд)
-  'USDT': '#A78BFA',   // фіолетовий
-  'DEFAULT': 'rgba(255,255,255,0.4)' // сірий
-}
+const INCOME_COLOR = '#22C55E'
+const EXPENSE_COLOR = '#FF453A'
 
-const getCurrencyColor = (currency) => {
-  return CURRENCY_COLORS[currency] || CURRENCY_COLORS.DEFAULT
-}
+const fmtMoney = (v, currency) =>
+  `${Number(v || 0).toLocaleString('uk-UA', { maximumFractionDigits: 0 })} ${currencySymbol(currency)}`
 
-// Функція для конвертації валюти
-const convertCurrency = (amount, fromCurrency, toCurrency, rates) => {
-  if (!fromCurrency || fromCurrency === toCurrency) return amount
-  if (!rates || Object.keys(rates).length === 0) return null
-  
-  const codeMap = { UAH: 980, USD: 840, EUR: 978, GBP: 826, PLN: 985, USDT: 840 }
-  const fromCode = codeMap[fromCurrency] || 980
-  const toCode = codeMap[toCurrency] || 980
-  
-  if (fromCode === toCode) return amount
-  
-  // Конвертуємо через UAH як проміжну валюту
-  let inUAH = amount
-  if (fromCode !== 980) {
-    const rateToUAH = rates[`${fromCode}->980`]
-    if (!rateToUAH) return null
-    inUAH = amount * rateToUAH
-  }
-  
-  // Конвертуємо з UAH в цільову валюту
-  if (toCode === 980) return inUAH
-  const rateFromUAH = rates[`${toCode}->980`]
-  if (!rateFromUAH) return null
-  return inUAH / rateFromUAH
-}
-
-const CustomTooltip = ({ active, payload, label, onPointClick, isMobile, currency, mode, rates }) => {
-  if (active && payload && payload.length) {
-    const isSpending = mode === 'spending'
-    const sign = isSpending ? '-' : '+'
-    
-    // Якщо currency === 'ALL', показуємо всі валюти з payload
-    if (currency === 'ALL') {
-      // Фільтруємо тільки ненульові значення
-      const nonZeroPayloads = payload.filter(p => p.value && p.value !== 0)
-      if (nonZeroPayloads.length === 0) {
-        return <div style={{ opacity: 0, pointerEvents: 'none' }} />
-      }
-      
-      // Рахуємо конвертовані суми в EUR і UAH
-      let totalEURConverted = 0
-      let totalUAHConverted = 0
-      
-      nonZeroPayloads.forEach(p => {
-        const cur = p.dataKey || 'UAH'
-        const amount = p.value || 0
-        
-        // Конвертовані суми
-        const inEUR = convertCurrency(amount, cur, 'EUR', rates)
-        const inUAH = convertCurrency(amount, cur, 'UAH', rates)
-        if (inEUR !== null) totalEURConverted += inEUR
-        if (inUAH !== null) totalUAHConverted += inUAH
-      })
-      
-      const iso = payload[0]?.payload?._iso
-      const handleActivate = (e) => {
-        try {
-          if (e && typeof e.preventDefault === 'function') e.preventDefault()
-          if (e && typeof e.stopPropagation === 'function') e.stopPropagation()
-        } catch (err) {}
-        if (onPointClick && iso) onPointClick(iso)
-      }
-
-      return (
-        <div
-          role={isMobile ? "button" : undefined}
-          tabIndex={isMobile ? 0 : undefined}
-          className={`bg-surface/90 shadow-soft rounded-lg px-3 py-2 text-sm ${isMobile ? 'cursor-pointer select-none active:scale-95 transition-transform' : ''}`}
-          style={{ pointerEvents: isMobile ? 'auto' : 'none', touchAction: 'manipulation' }}
-          onClick={isMobile ? handleActivate : undefined}
-          onTouchEnd={isMobile ? handleActivate : undefined}
-          title={isMobile ? "Натисніть, щоб побачити транзакції цього дня" : undefined}
-        >
-          <div className="text-xs text-white/55 mb-1">{label}</div>
-          
-          {/* Окремі валюти */}
-          {nonZeroPayloads.map((p, idx) => {
-            const cur = p.dataKey || 'UAH'
-            const amountColor = isSpending ? 'text-red-400' : 'text-green-400'
-            return (
-              <div key={idx} className="flex items-center gap-2">
-                <div 
-                  className="w-3 h-3 rounded" 
-                  style={{ backgroundColor: getCurrencyColor(cur) }}
-                />
-                <div className={`font-semibold ${amountColor}`}>
-                  {sign}{p.value.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {cur}
-                </div>
-              </div>
-            )
-          })}
-          
-          {/* Конвертовані суми */}
-          {(totalEURConverted > 0 || totalUAHConverted > 0) && (
-            <div className="border-t border-white/10 mt-2 pt-2">
-              <div className="text-xs text-white/40 mb-0.5">Конвертовано:</div>
-              {totalEURConverted > 0 && (
-                <div className={`text-xs font-semibold ${isSpending ? 'text-red-400' : 'text-green-400'}`}>
-                  {sign}{totalEURConverted.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR
-                </div>
-              )}
-              {totalUAHConverted > 0 && (
-                <div className={`text-xs font-semibold ${isSpending ? 'text-red-400' : 'text-green-400'}`}>
-                  {sign}{totalUAHConverted.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} UAH
-                </div>
-              )}
-            </div>
-          )}
-          
-          {isMobile ? (
-            <div className="text-xs text-white/40 mt-1">👆 Детальніше</div>
-          ) : (
-            <div className="text-xs text-white/40 mt-1">🖱️ Клік для деталей</div>
-          )}
-        </div>
-      )
-    }
-    
-    // Стандартний tooltip для однієї валюти
-    const value = payload[0]?.value
-    if (!value || value === 0) {
-      return <div style={{ opacity: 0, pointerEvents: 'none' }} />
-    }
-    
-    const currentCurrency = currency || 'UAH'
-    
-    // Конвертуємо в EUR і UAH
-    const inEUR = convertCurrency(value, currentCurrency, 'EUR', rates)
-    const inUAH = convertCurrency(value, currentCurrency, 'UAH', rates)
-    
-    const iso = payload[0]?.payload?._iso
-    const handleActivate = (e) => {
-      try {
-        if (e && typeof e.preventDefault === 'function') e.preventDefault()
-        if (e && typeof e.stopPropagation === 'function') e.stopPropagation()
-      } catch (err) {}
-      if (onPointClick && iso) onPointClick(iso)
-    }
-
-    const amountColor = isSpending ? 'text-red-400' : 'text-green-400'
-
-    return (
-      <div
-        role={isMobile ? "button" : undefined}
-        tabIndex={isMobile ? 0 : undefined}
-        className={`bg-surface/90 shadow-soft rounded-lg px-3 py-2 text-sm ${isMobile ? 'cursor-pointer select-none active:scale-95 transition-transform' : ''}`}
-        style={{ pointerEvents: isMobile ? 'auto' : 'none', touchAction: 'manipulation' }}
-        onClick={isMobile ? handleActivate : undefined}
-        onTouchEnd={isMobile ? handleActivate : undefined}
-        title={isMobile ? "Натисніть, щоб побачити транзакції цього дня" : undefined}
-      >
-        <div className={`font-semibold ${amountColor}`}>
-          {sign}{value.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {currentCurrency}
-        </div>
-        <div className="text-xs text-white/55 mb-1">{label}</div>
-        
-        {/* Конвертовані суми */}
-        {(inEUR !== null || inUAH !== null) && (
-          <div className="border-t border-white/10 pt-1 mt-1">
-            <div className="text-xs text-white/40 mb-0.5">Конвертовано:</div>
-            {inEUR !== null && currentCurrency !== 'EUR' && (
-              <div className={`text-xs font-semibold ${amountColor}`}>
-                {sign}{inEUR.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR
-              </div>
-            )}
-            {inUAH !== null && currentCurrency !== 'UAH' && (
-              <div className={`text-xs font-semibold ${amountColor}`}>
-                {sign}{inUAH.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} UAH
-              </div>
-            )}
-          </div>
-        )}
-        
-        {isMobile ? (
-          <div className="text-xs text-white/40 mt-1">👆 Детальніше</div>
-        ) : (
-          <div className="text-xs text-white/40 mt-1">🖱️ Клік для деталей</div>
-        )}
-      </div>
-    )
-  }
-  return null
+/** Hover card for a day: income and spending in the main currency */
+const FlowTooltip = ({ active, payload, label, currency }) => {
+  if (!active || !payload?.length) return null
+  const day = payload[0]?.payload || {}
+  if (!day.income && !day.expense) return null
+  return (
+    <div className="rounded-2xl bg-[rgba(30,30,35,0.95)] backdrop-blur-xl border border-white/10 px-3 py-2 shadow-[0_10px_30px_rgba(0,0,0,0.5)] text-xs">
+      <div className="font-bold text-white/80 mb-1">{label}</div>
+      {day.income > 0 && <div className="font-bold text-green-400 tabular-nums">+{fmtMoney(day.income, currency)}</div>}
+      {day.expense > 0 && <div className="font-bold text-[#FF6B6B] tabular-nums">-{fmtMoney(day.expense, currency)}</div>}
+      <div className="text-[10px] text-white/40 mt-1">Натисніть, щоб побачити транзакції</div>
+    </div>
+  )
 }
 
 function dayKey(dt) {
@@ -370,85 +195,55 @@ function getIncludedTxIds(txsArg = [], modeArg = 'earning', currencyArg) {
   return included
 }
 
-function computeChartData(txsArg, modeArg, fromArg, toArg, currencyArg) {
+// Transactions counted as income or spending (same rules as before: savings, internal
+// transfers, refunds and switched-off cards are left out)
+function includedTxIds(txsArg) {
+  return new Set([...getIncludedTxIds(txsArg, 'earning', null), ...getIncludedTxIds(txsArg, 'spending', null)])
+}
+
+// Crypto (USDT, Binance balance sync) stays out of income and spending, like the cards above the chart
+function isCryptoTx(t) {
+  return String(t.currency || '').toUpperCase() === 'USDT' ||
+    t.category === 'Binance Sync' ||
+    String(t.card || '').toLowerCase().includes('binance')
+}
+
+function computeFlowData(txsArg, fromArg, toArg, primary, rates) {
   const amountForStats = (t) => {
     const v = t?.amount_stat
     if (v === null || v === undefined || v === '') return Number(t?.amount || 0)
     return Number(v || 0)
   }
+  const income = getIncludedTxIds(txsArg, 'earning', null)
+  const spending = getIncludedTxIds(txsArg, 'spending', null)
 
-  // Якщо вибрано ALL, групуємо по валютах
-  if (currencyArg === 'ALL') {
-    const included = getIncludedTxIds(txsArg, modeArg, null) // null = всі валюти
-    const currencyMaps = new Map() // currency -> Map(day -> amount)
-
-    for (const t of txsArg || []) {
-      if (!included.has(t.id)) continue
-      const txCur = (t.currency || 'UAH').toUpperCase()
-      if (!currencyMaps.has(txCur)) {
-        currencyMaps.set(txCur, new Map())
-      }
-      const curMap = currencyMaps.get(txCur)
-      const key = dayKey(t.created_at)
-      const amt = Number(amountForStats(t) || 0)
-      if (modeArg === 'spending') {
-        if (amt >= 0) continue
-        curMap.set(key, (curMap.get(key) || 0) + Math.abs(amt))
-        continue
-      }
-      if (amt > 0) curMap.set(key, (curMap.get(key) || 0) + amt)
-    }
-
-    const start = new Date(fromArg)
-    const end = new Date(toArg)
-    end.setDate(end.getDate() + 1)
-    const out = []
-    const currencies = Array.from(currencyMaps.keys()).sort()
-    
-    for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
-      const iso = dayKey(d)  // local date key
-      const dayData = { name: fmtLabel(iso), _iso: iso }
-      
-      // Додаємо значення для кожної валюти
-      for (const cur of currencies) {
-        const curMap = currencyMaps.get(cur)
-        const value = Number((curMap.get(iso) || 0).toFixed(2))
-        dayData[cur] = value
-      }
-      
-      out.push(dayData)
-    }
-    return out
-  }
-  
-  // Стандартна логіка для однієї валюти
-  const included = getIncludedTxIds(txsArg, modeArg, currencyArg)
-  const map = new Map()
-
+  const byDay = new Map() // iso -> { income, expense } in the main currency
   for (const t of txsArg || []) {
-    if (!included.has(t.id)) continue
+    const isIncome = income.has(t.id)
+    if (!isIncome && !spending.has(t.id)) continue
+    if (isCryptoTx(t)) continue
+    const cur = String(t.currency || 'UAH').toUpperCase()
+    const value = convertAmount(Math.abs(amountForStats(t)), cur, primary, rates)
+    if (value == null) continue // rate not loaded yet — recomputed when it is
     const key = dayKey(t.created_at)
-    const amt = Number(amountForStats(t) || 0)
-    if (modeArg === 'spending') {
-      if (amt >= 0) continue
-      map.set(key, (map.get(key) || 0) + Math.abs(amt))
-      continue
-    }
-    if (amt > 0) map.set(key, (map.get(key) || 0) + amt)
+    const day = byDay.get(key) || { income: 0, expense: 0 }
+    if (isIncome) day.income += value
+    else day.expense += value
+    byDay.set(key, day)
   }
 
   const start = new Date(fromArg)
   const end = new Date(toArg)
   end.setDate(end.getDate() + 1)
-  
   const out = []
   for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
-    const iso = dayKey(d)  // local date key
-    const value = Number((map.get(iso) || 0).toFixed(2))
-    out.push({ 
-      name: fmtLabel(iso), 
-      value, 
-      _iso: iso
+    const iso = dayKey(d) // local date key
+    const day = byDay.get(iso) || { income: 0, expense: 0 }
+    out.push({
+      name: fmtLabel(iso),
+      _iso: iso,
+      income: Number(day.income.toFixed(2)),
+      expense: Number(day.expense.toFixed(2)),
     })
   }
   return out
@@ -459,14 +254,12 @@ export default function EarningsChart(){
   // Використовуємо новий store
   const settings = useSettingsStore((state) => state.settings)
   const updateNestedSetting = useSettingsStore((state) => state.updateNestedSetting)
-  const getNestedSetting = useSettingsStore((state) => state.getNestedSetting)
-  const initialized = useSettingsStore((state) => state.initialized)
+const initialized = useSettingsStore((state) => state.initialized)
   const rates = useMonoRates()
-  const [mode, setMode] = useState('earning') // 'earning' | 'spending'
-  
-  // Dashboard settings
-  const showUsdtInChart = getNestedSetting('dashboard.showUsdtInChart', true)
-  // Period: the current week/month (offset 0) or one of the previous ones
+  // Everything is shown in the main currency from the settings (like the iPhone app)
+  const primary = usePrimaryCurrency()
+
+// Period: the current week/month (offset 0) or one of the previous ones
   const [period, setPeriod] = useState('month') // 'week' | 'month'
   const [offset, setOffset] = useState(0)
   // Today's date, so offset 0 moves on by itself when a new week / month starts
@@ -480,9 +273,6 @@ export default function EarningsChart(){
   const loadedOnceRef = useRef(false)
 const [loading, setLoading] = useState(false)
   const [txs, setTxs] = useState([])
-  const [currency, setCurrency] = useState(() => {
-    try { return localStorage.getItem('wallet:chart:currency') || 'UAH' } catch { return 'UAH' }
-  })
   const [hasTxCurrency, setHasTxCurrency] = useState(() => {
     try {
       const v = localStorage.getItem('wallet:hasTxCurrency')
@@ -510,9 +300,7 @@ const [loading, setLoading] = useState(false)
   useEffect(() => {
     if (!initialized || !settings) return
     const chart = settings?.chart || {}
-    if (chart.currency) setCurrency(chart.currency)
-    if (chart.mode) setMode(chart.mode)
-    if (chart.period === 'week' || chart.period === 'month') setPeriod(chart.period)
+if (chart.period === 'week' || chart.period === 'month') setPeriod(chart.period)
 setPrefsLoaded(true)
   }, [initialized, settings])
 
@@ -538,57 +326,14 @@ setPrefsLoaded(true)
   // Захист від дублювання через AbortController
   const abortControllerRef = useRef(null)
 
-  // Total for visible period (sum of bars)
-  const periodTotal = useMemo(() => {
-    try {
-      if (currency === 'ALL') {
-        // Для ALL рахуємо суму всіх валют
-        return (displayData || []).reduce((acc, d) => {
-          let dayTotal = 0
-          // Сумуємо всі поля крім name та _iso
-          for (const key in d) {
-            if (key !== 'name' && key !== '_iso' && typeof d[key] === 'number') {
-              dayTotal += d[key]
-            }
-          }
-          return acc + dayTotal
-        }, 0)
-      }
-      return (displayData || []).reduce((acc, d) => acc + Number(d.value || 0), 0)
-    } catch { return 0 }
-  }, [displayData, currency])
-
-  // Totals by currency for ALL mode
-  const periodTotalsByCurrency = useMemo(() => {
-    if (currency !== 'ALL') return null
-    
-    try {
-      const totals = {}
-      ;(displayData || []).forEach(d => {
-        for (const key in d) {
-          if (key !== 'name' && key !== '_iso' && typeof d[key] === 'number') {
-            // Фільтруємо USDT якщо налаштування вимкнено
-            if (key === 'USDT' && !showUsdtInChart) continue
-            if (!totals[key]) totals[key] = 0
-            totals[key] += d[key]
-          }
-        }
-      })
-      
-      // Сортуємо валюти: спочатку UAH, потім інші в алфавітному порядку
-      const sorted = Object.entries(totals)
-        .map(([cur, sum]) => ({ currency: cur, total: Number(sum.toFixed(2)) }))
-        .sort((a, b) => {
-          if (a.currency === 'UAH') return -1
-          if (b.currency === 'UAH') return 1
-          return a.currency.localeCompare(b.currency)
-        })
-      
-      return sorted
-    } catch {
-      return null
-    }
-  }, [displayData, currency, showUsdtInChart])
+  // Income and spending over the visible period
+  const totals = useMemo(
+    () => (displayData || []).reduce(
+      (acc, d) => ({ income: acc.income + (d.income || 0), expense: acc.expense + (d.expense || 0) }),
+      { income: 0, expense: 0 }
+    ),
+    [displayData]
+  )
 
 
   // Enable touch move for chart tooltip on mobile
@@ -622,12 +367,12 @@ setPrefsLoaded(true)
 
   // initialize displayData when component mounts
   useEffect(() => {
-    setDisplayData(computeChartData(txs, mode, range.from, range.to, currency))
+    setDisplayData(computeFlowData(txs, range.from, range.to, primary, rates))
   }, [])
 
   // keep display in sync; when animKey changes, the hook will update
   // displayData and bump chartKey to retrigger Recharts animation once.
-  useChartSync(txs, mode, range.from, range.to, currency, animKey, setDisplayData, prevAnimKeyRef, setChartKey)
+  useChartSync(txs, range.from, range.to, primary, rates, animKey, setDisplayData, prevAnimKeyRef, setChartKey)
 
   useEffect(() => {
     const tick = () => setToday(localIso(new Date()))
@@ -767,25 +512,21 @@ setPrefsLoaded(true)
     
     // Оновлюємо через store (автоматично зберігається через debounce)
     // The period type is saved; the chart always opens on the current week / month
-    updateNestedSetting('chart', { currency, mode, period })
-  }, [currency, mode, period, prefsLoaded, updateNestedSetting])
+    updateNestedSetting('chart', { period })
+  }, [period, prefsLoaded, updateNestedSetting])
 
   // handler for clicking a bar (desktop) — open day modal for clicked iso
   const handleBarClick = (data) => {
     try {
       const iso = data?.payload?._iso || data?._iso
       if (!iso) return
-      const included = getIncludedTxIds(txs || [], mode, currency === 'ALL' ? null : currency)
+      const included = includedTxIds(txs || [])
       const txsForDay = (txs || []).filter(t => {
         try { 
           if (dayKey(t.created_at) !== iso) return false
           if (!included.has(t.id)) return false
-          // Фільтруємо USDT якщо налаштування вимкнено
-          if (currency === 'ALL' && !showUsdtInChart) {
-            const txCur = (t.currency || 'UAH').toUpperCase()
-            if (txCur === 'USDT') return false
-          }
-          return true
+          if (isCryptoTx(t)) return false
+return true
         } catch { return false }
       })
       setDayTxs(txsForDay)
@@ -813,74 +554,10 @@ setPrefsLoaded(true)
   }, [])
 
 
-  // computeChartData is used by both the component and the sync hook. Keep it
-  // at module scope so hooks and effects can reference it without hoisting
-  // issues when the component is mounted.
-  function computeChartData(txsArg, modeArg, fromArg, toArg, currencyArg) {
-    const map = new Map()
-    const amountForStats = (t) => {
-      const v = t?.amount_stat
-      if (v === null || v === undefined || v === '') return Number(t?.amount || 0)
-      return Number(v || 0)
-    }
-
-    for (const t of txsArg || []) {
-      // skip refunds
-      if (t.exclude_from_stats === true || t.exclude_from_stats === 'true' || t.exclude_from_stats === 1 || t.refund_for || String(t.note || '').includes('[refund_for:')) continue
-      // skip cards excluded from statistics (flag computed by the backend)
-      if (t.card_excluded_from_stats) continue
-      // skip transfer-internal transactions and savings (they shouldn't affect earnings chart)
-      if (t.is_transfer) continue
-      if (t.is_savings) continue
-      // prefer explicit transaction currency; if missing, treat as undefined so
-      // it won't be accidentally coalesced to UAH — chart filters by selected
-      // currency, and if none is selected, we may show combined view per-currency elsewhere.
-      const txCur = t.currency ? String(t.currency).toUpperCase() : undefined
-      if (currencyArg && txCur !== currencyArg) continue
-      const key = dayKey(t.created_at)
-      const amt = Number(amountForStats(t) || 0)
-      if (modeArg === 'spending') {
-        if (amt >= 0) continue
-        map.set(key, (map.get(key) || 0) + Math.abs(amt))
-        continue
-      }
-      if (amt > 0) map.set(key, (map.get(key) || 0) + amt)
-    }
-
-    const start = new Date(fromArg)
-    const end = new Date(toArg)
-    // Add one more day to include the end date in range
-    end.setDate(end.getDate() + 1)
-    const out = []
-    for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
-      const iso = d.toISOString().slice(0,10)
-      const value = Number((map.get(iso) || 0).toFixed(2))
-      // Показуємо всі дні, включаючи пусті
-      out.push({ name: fmtLabel(iso), value, _iso: iso })
-    }
-    return out
-  }
-
   return (
     <motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} className="bg-gradient-to-b from-white/[0.075] to-white/[0.025] backdrop-blur-xl rounded-3xl p-3 md:p-5 shadow-glass border border-white/10">
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        {/* Income / spending */}
-        <div className="flex rounded-full bg-white/[0.06] p-0.5">
-          {[{ id: 'earning', label: 'Доходи' }, { id: 'spending', label: 'Витрати' }].map(o => (
-            <button
-              key={o.id}
-              onClick={() => { setMode(o.id); setAnimKey(k => k + 1) }}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-colors ${
-                mode === o.id
-                  ? (o.id === 'earning' ? 'bg-green-500/20 text-green-300' : 'bg-rose-500/20 text-rose-300')
-                  : 'text-white/55 hover:text-white'
-              }`}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div className="text-lg font-bold tracking-tight">Доходи і витрати</div>
         {/* Week / month */}
         <div className="flex rounded-full bg-white/[0.06] p-0.5">
           {[{ id: 'week', label: 'Тиждень' }, { id: 'month', label: 'Місяць' }].map(o => (
@@ -896,21 +573,6 @@ setPrefsLoaded(true)
           ))}
         </div>
 
-        <select
-          aria-label="Currency"
-          className="ml-auto text-xs font-bold rounded-full px-3 py-1.5 bg-white/[0.06] border border-white/10 focus:outline-none focus:ring-2 focus:ring-brand"
-          value={currency}
-          onChange={e => {
-            setCurrency(e.target.value) // saved to the DB by the effect above
-            setAnimKey(k => k + 1)
-          }}
-        >
-          <option value="ALL">Всі валюти</option>
-          <option>UAH</option>
-          <option>EUR</option>
-          <option>USD</option>
-          <option>USDT</option>
-        </select>
       </div>
 
       {/* ‹ period › and its total */}
@@ -943,22 +605,16 @@ setPrefsLoaded(true)
           </button>
         </div>
 
-        {currency === 'ALL' && periodTotalsByCurrency && periodTotalsByCurrency.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-2 justify-end">
-            {periodTotalsByCurrency.map(({ currency: cur, total }) => (
-              <div key={cur} className="flex items-center gap-1.5">
-                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: getCurrencyColor(cur) }} />
-                <div className={`${mode==='spending' ? 'text-rose-400' : 'text-green-400'} text-xs sm:text-sm font-bold tabular-nums`}>
-                  {mode==='spending' ? '-' : '+'}{total.toLocaleString()} {cur}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className={`${mode==='spending' ? 'text-rose-400' : 'text-green-400'} text-sm font-bold tabular-nums`}>
-            {mode==='spending' ? '-' : '+'}{periodTotal.toLocaleString()} {currency}
-          </div>
-        )}
+        <div className="flex items-center gap-3 text-sm font-bold tabular-nums">
+          <span className="flex items-center gap-1.5 text-green-400">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ background: INCOME_COLOR }} />
+            +{fmtMoney(totals.income, primary)}
+          </span>
+          <span className="flex items-center gap-1.5 text-[#FF6B6B]">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ background: EXPENSE_COLOR }} />
+            -{fmtMoney(totals.expense, primary)}
+          </span>
+        </div>
       </div>
 
       <div 
@@ -984,17 +640,13 @@ setPrefsLoaded(true)
           if (dayIndex >= 0 && dayIndex < displayData.length) {
             const clickedDay = displayData[dayIndex]
             if (clickedDay?._iso) {
-              const included = getIncludedTxIds(txs || [], mode, currency === 'ALL' ? null : currency)
+              const included = includedTxIds(txs || [])
               const txsForDay = (txs || []).filter(t => {
                 try { 
                   if (dayKey(t.created_at) !== clickedDay._iso) return false
                   if (!included.has(t.id)) return false
-                  // Фільтруємо USDT якщо налаштування вимкнено
-                  if (currency === 'ALL' && !showUsdtInChart) {
-                    const txCur = (t.currency || 'UAH').toUpperCase()
-                    if (txCur === 'USDT') return false
-                  }
-                  return true
+                  if (isCryptoTx(t)) return false
+return true
                 } catch { return false }
               })
               setDayTxs(txsForDay)
@@ -1035,67 +687,28 @@ setPrefsLoaded(true)
                 trigger="hover"
                 cursor={{ fill: 'rgba(255,255,255,0.05)' }}
                 animationDuration={200}
-                content={<CustomTooltip isMobile={isMobileViewport} currency={currency} mode={mode} rates={rates} onPointClick={(iso) => {
-                  const included = getIncludedTxIds(txs || [], mode, currency === 'ALL' ? null : currency)
-                  const txsForDay = (txs || []).filter(t => {
-                    try { 
-                      if (dayKey(t.created_at) !== iso) return false
-                      if (!included.has(t.id)) return false
-                      // Фільтруємо USDT якщо налаштування вимкнено
-                      if (currency === 'ALL' && !showUsdtInChart) {
-                        const txCur = (t.currency || 'UAH').toUpperCase()
-                        if (txCur === 'USDT') return false
-                      }
-                      return true
-                    } catch { return false }
-                  })
-                  setDayTxs(txsForDay)
-                  setDayModalOpen(true)
-                }} />} 
+                content={<FlowTooltip currency={primary} />}
               />
-              {currency === 'ALL' ? (
-                // Для ALL показуємо кілька Bar компонентів - по одному на валюту (grouped, не stacked)
-                (() => {
-                  // Отримуємо список валют з displayData
-                  const currencies = new Set()
-                  displayData.forEach(d => {
-                    Object.keys(d).forEach(key => {
-                      if (key !== 'name' && key !== '_iso' && typeof d[key] === 'number') {
-                        currencies.add(key)
-                      }
-                    })
-                  })
-                  // Фільтруємо USDT якщо налаштування вимкнено
-                  const filteredCurrencies = Array.from(currencies).filter(cur => {
-                    if (cur === 'USDT' && !showUsdtInChart) return false
-                    return true
-                  })
-                  const sortedCurrencies = filteredCurrencies.sort()
-                  
-                  return sortedCurrencies.map((cur) => (
-                    <Bar
-                      key={cur}
-                      dataKey={cur}
-                      fill={getCurrencyColor(cur)}
-                      isAnimationActive={true}
-                      radius={[4, 4, 0, 0]}
-                      cursor="pointer"
-                      onClick={handleBarClick}
-                      style={{ cursor: 'pointer' }}
-                    />
-                  ))
-                })()
-              ) : (
-                <Bar
-                  dataKey="value"
-                  fill={mode === 'spending' ? '#FF453A' : '#22C55E'}
-                  isAnimationActive={true}
-                  radius={[4, 4, 0, 0]}
-                  cursor="pointer"
-                  onClick={handleBarClick}
-                  style={{ cursor: 'pointer' }}
-                />
-              )}
+              <Bar
+                dataKey="income"
+                name="Доходи"
+                fill={INCOME_COLOR}
+                isAnimationActive={true}
+                radius={[4, 4, 0, 0]}
+                maxBarSize={18}
+                cursor="pointer"
+                onClick={handleBarClick}
+              />
+              <Bar
+                dataKey="expense"
+                name="Витрати"
+                fill={EXPENSE_COLOR}
+                isAnimationActive={true}
+                radius={[4, 4, 0, 0]}
+                maxBarSize={18}
+                cursor="pointer"
+                onClick={handleBarClick}
+              />
             </BarChart>
           </ResponsiveContainer>
         )}
@@ -1183,10 +796,10 @@ setPrefsLoaded(true)
 }
 
 // Synchronize compute->display when txs or controls change. We want to cross-fade
-// when animKey was bumped (mode or currency change). Otherwise replace immediately.
-function useChartSync(txs, mode, from, to, currency, animKey, setDisplayData, prevAnimKeyRef, setChartKey) {
+// when animKey was bumped (a new period). Otherwise replace immediately.
+function useChartSync(txs, from, to, primary, rates, animKey, setDisplayData, prevAnimKeyRef, setChartKey) {
   useEffect(() => {
-    const newData = computeChartData(txs, mode, from, to, currency)
+    const newData = computeFlowData(txs, from, to, primary, rates)
     const prevKey = prevAnimKeyRef.current
     if (animKey !== prevKey) {
       // user requested an animated transition: update data and bump chartKey
@@ -1197,5 +810,5 @@ function useChartSync(txs, mode, from, to, currency, animKey, setDisplayData, pr
     }
     // immediate replace
     setDisplayData(newData)
-  }, [txs, mode, from, to, currency, animKey, setDisplayData, prevAnimKeyRef, setChartKey])
+  }, [txs, from, to, primary, rates, animKey, setDisplayData, prevAnimKeyRef, setChartKey])
 }
