@@ -74,7 +74,6 @@ export default function Sidebar() {
   const updateSetting = useSettingsStore(state => state.updateSetting)
   const navigate = useNavigate()
   const isActive = useIsActive()
-  const [showCreateTxModal, setShowCreateTxModal] = useState(false)
 
   return (
     <aside className="sticky top-6 self-start w-full">
@@ -94,14 +93,6 @@ export default function Sidebar() {
             {hideAllBalances ? <EyeOff size={15} /> : <Eye size={15} />}
           </button>
         </div>
-
-        <button
-          onClick={() => setShowCreateTxModal(true)}
-          className="mb-2 flex items-center justify-center gap-2 h-11 rounded-2xl bg-gradient-to-br from-brand to-brand-deep text-white font-semibold shadow-brand hover:brightness-110 active:scale-[0.98] transition"
-        >
-          <Plus size={18} strokeWidth={2.6} />
-          Нова транзакція
-        </button>
 
         {NAV_ITEMS.map(({ path, label, icon: Icon }) => {
           const active = isActive(path)
@@ -142,12 +133,6 @@ export default function Sidebar() {
           </button>
         )}
       </div>
-
-      <CreateTxModal
-        open={showCreateTxModal}
-        onClose={() => setShowCreateTxModal(false)}
-        onSaved={() => setShowCreateTxModal(false)}
-      />
     </aside>
   )
 }
