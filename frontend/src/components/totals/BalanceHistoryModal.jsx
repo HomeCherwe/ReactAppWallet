@@ -21,10 +21,10 @@ const PERIODS = [
 ]
 
 const BUCKET_META = {
-  all:     { label: 'Загалом',     icon: Globe,      gradFrom: '#6366f1', gradTo: '#8b5cf6', textCls: 'text-indigo-600',  bgCls: 'bg-indigo-50',  borderCls: 'border-indigo-200' },
-  cash:    { label: 'Готівка',     icon: Wallet,     gradFrom: '#10b981', gradTo: '#059669', textCls: 'text-emerald-600', bgCls: 'bg-emerald-50', borderCls: 'border-emerald-200' },
-  cards:   { label: 'Карти',       icon: CreditCard, gradFrom: '#3b82f6', gradTo: '#6366f1', textCls: 'text-blue-600',   bgCls: 'bg-blue-50',    borderCls: 'border-blue-200' },
-  savings: { label: 'Заощадження', icon: PiggyBank,  gradFrom: '#a855f7', gradTo: '#ec4899', textCls: 'text-purple-600', bgCls: 'bg-purple-50',  borderCls: 'border-purple-200' },
+  all:     { label: 'Загалом',     icon: Globe,      gradFrom: '#FF6B00', gradTo: '#FF3D00', textCls: 'text-brand',  bgCls: 'bg-brand/10',  borderCls: 'border-brand/25' },
+  cash:    { label: 'Готівка',     icon: Wallet,     gradFrom: '#10b981', gradTo: '#059669', textCls: 'text-emerald-400', bgCls: 'bg-emerald-500/10', borderCls: 'border-emerald-500/25' },
+  cards:   { label: 'Карти',       icon: CreditCard, gradFrom: '#3b82f6', gradTo: '#60a5fa', textCls: 'text-blue-400',   bgCls: 'bg-blue-500/10',    borderCls: 'border-blue-500/25' },
+  savings: { label: 'Заощадження', icon: PiggyBank,  gradFrom: '#FF8C3A', gradTo: '#FF6B00', textCls: 'text-brand', bgCls: 'bg-brand/10',  borderCls: 'border-brand/25' },
 }
 
 const CUR_SYM = { UAH: '₴', EUR: '€', USD: '$', GBP: '£', PLN: 'zł', CHF: 'Fr', CZK: 'Kč', HUF: 'Ft' }
@@ -91,35 +91,35 @@ function ChartTooltip({ active, payload, label, period, currency }) {
     <motion.div
       initial={{ opacity: 0, scale: 0.95, y: -4 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
-      className="rounded-xl border border-gray-200 bg-white shadow-xl overflow-hidden pointer-events-none"
+      className="rounded-xl border border-white/10 bg-surface/90 shadow-xl overflow-hidden pointer-events-none"
       style={{ backdropFilter: 'blur(8px)', minWidth: 170 }}
     >
-      <div className="px-3 py-1.5 bg-gray-50 border-b border-gray-100">
-        <div className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">{formatDate(label, period)}</div>
+      <div className="px-3 py-1.5 bg-white/[0.03] border-b border-white/[0.06]">
+        <div className="text-[10px] text-white/55 font-bold uppercase tracking-wider">{formatDate(label, period)}</div>
       </div>
       <div className="px-3 py-2 space-y-1.5">
         <div>
-          <div className="text-[10px] text-gray-400 font-semibold leading-none mb-0.5">Баланс</div>
-          <div className="text-gray-900 font-extrabold text-sm">{fmtFull(val, currency)}</div>
+          <div className="text-[10px] text-white/40 font-semibold leading-none mb-0.5">Баланс</div>
+          <div className="text-white font-extrabold text-sm">{fmtFull(val, currency)}</div>
         </div>
         
         {(income !== 0 || expense !== 0) && (
-          <div className="pt-1.5 border-t border-gray-100 flex flex-col gap-1 text-[11px]">
+          <div className="pt-1.5 border-t border-white/[0.06] flex flex-col gap-1 text-[11px]">
             {income > 0 && (
-              <div className="flex justify-between items-center gap-4 text-emerald-600 font-medium">
+              <div className="flex justify-between items-center gap-4 text-emerald-400 font-medium">
                 <span>Надійшло</span>
                 <span>+{fmtFull(income, currency)}</span>
               </div>
             )}
             {expense < 0 && (
-              <div className="flex justify-between items-center gap-4 text-red-500 font-medium">
+              <div className="flex justify-between items-center gap-4 text-red-400 font-medium">
                 <span>Витрачено</span>
                 <span>{fmtFull(expense, currency)}</span>
               </div>
             )}
-            <div className="flex justify-between items-center gap-4 text-gray-500 font-bold pt-0.5">
+            <div className="flex justify-between items-center gap-4 text-white/55 font-bold pt-0.5">
               <span>Чистий рух</span>
-              <span className={isPos ? 'text-emerald-600' : change < 0 ? 'text-red-500' : 'text-gray-500'}>
+              <span className={isPos ? 'text-emerald-400' : change < 0 ? 'text-red-400' : 'text-white/55'}>
                 {isPos ? '+' : ''}{fmtFull(change, currency)}
               </span>
             </div>
@@ -134,9 +134,9 @@ function ChartTooltip({ active, payload, label, period, currency }) {
 
 function StatMini({ label, value, currency, borderCls }) {
   return (
-    <div className={`rounded-xl px-3 py-2.5 bg-white border ${borderCls || 'border-gray-200'} shadow-sm text-center`}>
-      <div className="text-gray-400 text-[10px] font-semibold uppercase tracking-wider mb-0.5">{label}</div>
-      <div className="text-gray-800 text-xs font-bold leading-snug">{fmtFull(value, currency)}</div>
+    <div className={`rounded-xl px-3 py-2.5 bg-surface/90 border ${borderCls || 'border-white/10'} shadow-sm text-center`}>
+      <div className="text-white/40 text-[10px] font-semibold uppercase tracking-wider mb-0.5">{label}</div>
+      <div className="text-white text-xs font-bold leading-snug">{fmtFull(value, currency)}</div>
     </div>
   )
 }
@@ -580,7 +580,7 @@ export default function BalanceHistoryModal({
             transition={{ type: 'spring', stiffness: 380, damping: 34 }}
           >
             <div
-              className="pointer-events-auto w-full bg-white rounded-2xl overflow-hidden"
+              className="pointer-events-auto w-full bg-surface/90 rounded-2xl overflow-hidden"
               style={{
                 maxWidth: 600,
                 boxShadow: '0 24px 48px -8px rgba(0,0,0,0.16), 0 0 0 1px rgba(0,0,0,0.05)',
@@ -593,7 +593,7 @@ export default function BalanceHistoryModal({
               />
 
               {/* Header */}
-              <div className="px-5 pt-4 pb-3 border-b border-gray-100">
+              <div className="px-5 pt-4 pb-3 border-b border-white/[0.06]">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2.5">
                     <div className={`p-2 rounded-xl ${meta.bgCls}`}>
@@ -601,15 +601,15 @@ export default function BalanceHistoryModal({
                     </div>
                     <div>
                       <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-gray-800 text-sm">{sectionTitle || meta.label}</span>
-                        <BarChart2 size={12} className="text-gray-400" />
+                        <span className="font-bold text-white text-sm">{sectionTitle || meta.label}</span>
+                        <BarChart2 size={12} className="text-white/40" />
                       </div>
-                      <div className="text-gray-400 text-[11px] mt-0.5">Історія балансу · {activeCurrency}</div>
+                      <div className="text-white/40 text-[11px] mt-0.5">Історія балансу · {activeCurrency}</div>
                     </div>
                   </div>
                   <button
                     onClick={onClose}
-                    className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                    className="p-1.5 rounded-lg text-white/40 hover:text-white/70 hover:bg-white/[0.06] transition-colors"
                   >
                     <X size={14} />
                   </button>
@@ -625,43 +625,43 @@ export default function BalanceHistoryModal({
                   >
                     <div className="flex items-end gap-3">
                       <div>
-                        <div className="text-gray-400 text-[11px] font-medium mb-0.5">Поточний баланс</div>
-                        <div className="text-gray-900 text-2xl font-extrabold tracking-tight leading-none">
+                        <div className="text-white/40 text-[11px] font-medium mb-0.5">Поточний баланс</div>
+                        <div className="text-white text-2xl font-extrabold tracking-tight leading-none">
                           {fmtFull(currentBalance, activeCurrency)}
                         </div>
                       </div>
                       <div className="mb-0.5 flex flex-col gap-0.5 items-start">
                         <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full ${
-                          trend === 'up'   ? 'bg-emerald-100 text-emerald-700' :
-                          trend === 'down' ? 'bg-red-100 text-red-600' :
-                          'bg-gray-100 text-gray-500'
+                          trend === 'up'   ? 'bg-emerald-500/15 text-emerald-300' :
+                          trend === 'down' ? 'bg-red-500/15 text-red-400' :
+                          'bg-white/[0.06] text-white/55'
                         }`}>
                           {trend === 'up'   && <TrendingUp size={10}/>}
                           {trend === 'down' && <TrendingDown size={10}/>}
                           {trend === 'flat' && <Minus size={10}/>}
                           {stats.diff >= 0 ? '+' : ''}{fmtFull(stats.diff, activeCurrency)}
                         </span>
-                        <span className="text-gray-400 text-[10px] pl-1">
+                        <span className="text-white/40 text-[10px] pl-1">
                           {stats.pct >= 0 ? '+' : ''}{stats.pct.toFixed(1)}% за період
                         </span>
                       </div>
                     </div>
 
                     {/* Window Navigation Arrows */}
-                    <div className="flex items-center gap-1.5 border border-gray-100 rounded-lg p-0.5 bg-gray-50/50">
+                    <div className="flex items-center gap-1.5 border border-white/[0.06] rounded-lg p-0.5 bg-white/[0.015]">
                       <button
                         onClick={handlePrev}
                         disabled={isOldest}
                         className={`p-1.5 rounded-md transition-colors ${
                           isOldest
-                            ? 'text-gray-300 cursor-not-allowed'
-                            : 'hover:bg-white text-gray-500 hover:text-gray-800 shadow-sm'
+                            ? 'text-white/30 cursor-not-allowed'
+                            : 'hover:bg-white/[0.06] text-white/55 hover:text-white shadow-sm'
                         }`}
                         title="Назад"
                       >
                         <ChevronLeft size={14} />
                       </button>
-                      <span className="text-[10px] font-bold text-gray-600 px-1 select-none tabular-nums">
+                      <span className="text-[10px] font-bold text-white/70 px-1 select-none tabular-nums">
                         {rangeLabel}
                       </span>
                       <button
@@ -669,8 +669,8 @@ export default function BalanceHistoryModal({
                         disabled={isLatest}
                         className={`p-1.5 rounded-md transition-colors ${
                           isLatest
-                            ? 'text-gray-300 cursor-not-allowed'
-                            : 'hover:bg-white text-gray-500 hover:text-gray-800 shadow-sm'
+                            ? 'text-white/30 cursor-not-allowed'
+                            : 'hover:bg-white/[0.06] text-white/55 hover:text-white shadow-sm'
                         }`}
                         title="Вперед"
                       >
@@ -683,15 +683,15 @@ export default function BalanceHistoryModal({
 
               {/* Currency switcher (only if multiple currencies exist in bucket) */}
               {currencies.length > 1 && (
-                <div className="px-5 pt-3 pb-1 flex gap-1.5 border-b border-gray-50">
+                <div className="px-5 pt-3 pb-1 flex gap-1.5 border-b border-white/5">
                   {currencies.map(cur => (
                     <button
                       key={cur}
                       onClick={() => setActiveCurrency(cur)}
                       className={`px-3 py-1 rounded-lg text-xs font-semibold border transition-all ${
                         activeCurrency === cur
-                          ? 'bg-gray-900 border-gray-900 text-white shadow-sm'
-                          : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                          ? 'bg-surface-raised border-white/30 text-white shadow-sm'
+                          : 'bg-white/[0.03] border-white/10 text-white/70 hover:bg-white/[0.06]'
                       }`}
                     >
                       {cur}
@@ -712,7 +712,7 @@ export default function BalanceHistoryModal({
                     className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                       period === p.key
                         ? `${meta.textCls} ${meta.bgCls} shadow-sm`
-                        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                        : 'text-white/55 hover:text-white/85 hover:bg-white/[0.06]'
                     }`}
                   >
                     {p.label}
@@ -733,12 +733,12 @@ export default function BalanceHistoryModal({
                     ))}
                   </div>
                 ) : error ? (
-                  <div className="flex items-center justify-center h-full text-red-500 text-sm">{error}</div>
+                  <div className="flex items-center justify-center h-full text-red-400 text-sm">{error}</div>
                 ) : chartData.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full gap-2">
-                    <BarChart2 size={28} className="text-gray-300" />
-                    <div className="text-gray-500 text-sm font-medium">Немає даних</div>
-                    <div className="text-gray-400 text-xs">Додайте транзакції, щоб побачити графік</div>
+                    <BarChart2 size={28} className="text-white/30" />
+                    <div className="text-white/55 text-sm font-medium">Немає даних</div>
+                    <div className="text-white/40 text-xs">Додайте транзакції, щоб побачити графік</div>
                   </div>
                 ) : (
                   <AnimatePresence mode="wait">
@@ -768,13 +768,13 @@ export default function BalanceHistoryModal({
                             </linearGradient>
                           </defs>
 
-                          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" vertical={false} />
 
                           <XAxis
                             dataKey="date"
                             tickFormatter={v => formatShortDate(v, period)}
-                            tick={{ fill: '#9ca3af', fontSize: 10, fontWeight: 500 }}
-                            axisLine={{ stroke: '#e5e7eb' }}
+                            tick={{ fill: 'rgba(255,255,255,0.45)', fontSize: 10, fontWeight: 500 }}
+                            axisLine={{ stroke: 'rgba(255,255,255,0.12)' }}
                             tickLine={false}
                             interval="preserveStartEnd"
                             minTickGap={40}
@@ -782,7 +782,7 @@ export default function BalanceHistoryModal({
 
                           <YAxis
                             tickFormatter={v => fmtCompact(v, activeCurrency)}
-                            tick={{ fill: '#9ca3af', fontSize: 10, fontWeight: 500 }}
+                            tick={{ fill: 'rgba(255,255,255,0.45)', fontSize: 10, fontWeight: 500 }}
                             axisLine={false}
                             tickLine={false}
                             domain={domain}
@@ -795,7 +795,7 @@ export default function BalanceHistoryModal({
                           />
 
                           {stats && stats.min < 0 && (
-                            <ReferenceLine y={0} stroke="#e5e7eb" strokeDasharray="4 4" />
+                            <ReferenceLine y={0} stroke="rgba(255,255,255,0.2)" strokeDasharray="4 4" />
                           )}
 
                           <Area
@@ -805,7 +805,7 @@ export default function BalanceHistoryModal({
                             strokeWidth={2.5}
                             fill={`url(#bhm-grad-${bucket})`}
                             dot={false}
-                            activeDot={{ r: 4.5, fill: chartColor, stroke: '#fff', strokeWidth: 2 }}
+                            activeDot={{ r: 4.5, fill: chartColor, stroke: '#18181C', strokeWidth: 2 }}
                             animationDuration={450}
                             animationEasing="ease-out"
                           />
@@ -831,35 +831,35 @@ export default function BalanceHistoryModal({
               )}
 
               {/* Selected Point Transactions Drilldown */}
-              <div className={`border-t border-gray-100 bg-gray-50/50 px-5 py-4 transition-all duration-300 overflow-y-auto ${
+              <div className={`border-t border-white/[0.06] bg-white/[0.015] px-5 py-4 transition-all duration-300 overflow-y-auto ${
                 selectedPoint ? 'h-[320px]' : 'h-[56px] py-2 flex items-center justify-center'
               }`}>
                 {!selectedPoint ? (
-                  <span className="text-[11px] font-semibold text-gray-400 text-center">
+                  <span className="text-[11px] font-semibold text-white/40 text-center">
                     💡 Натисни на будь-яку точку графіка, щоб переглянути транзакції за цей період
                   </span>
                 ) : loadingTxs ? (
-                  <div className="flex items-center justify-center h-full py-4 text-xs text-gray-500 gap-2">
-                    <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                  <div className="flex items-center justify-center h-full py-4 text-xs text-white/55 gap-2">
+                    <div className="w-4 h-4 border-2 border-brand border-t-transparent rounded-full animate-spin" />
                     Завантаження транзакцій...
                   </div>
                 ) : periodTxs.length === 0 ? (
                   <div className="text-center py-4">
-                    <div className="text-xs font-bold text-gray-700 mb-1">Транзакції за {selectedPeriodLabel}</div>
-                    <div className="text-[11px] text-gray-400">Немає транзакцій за цей період</div>
+                    <div className="text-xs font-bold text-white/85 mb-1">Транзакції за {selectedPeriodLabel}</div>
+                    <div className="text-[11px] text-white/40">Немає транзакцій за цей період</div>
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    <div className="flex justify-between items-center mb-1.5 pb-1 border-b border-gray-100">
-                      <span className="text-xs font-bold text-gray-800">Транзакції за {selectedPeriodLabel}</span>
+                    <div className="flex justify-between items-center mb-1.5 pb-1 border-b border-white/[0.06]">
+                      <span className="text-xs font-bold text-white">Транзакції за {selectedPeriodLabel}</span>
                       <button 
                         onClick={() => setSelectedPoint(null)} 
-                        className="text-[10px] text-indigo-600 hover:text-indigo-800 font-semibold"
+                        className="text-[10px] text-brand hover:text-brand-light font-semibold"
                       >
                         Закрити
                       </button>
                     </div>
-                    <div className="divide-y divide-gray-100/70">
+                    <div className="divide-y divide-white/[0.042]">
                       {periodTxs.map(tx => {
                         const card = cards.find(c => c.id === tx.card_id)
                         const cardName = card ? `${card.bank} ${card.name}` : 'Готівка'
@@ -868,10 +868,10 @@ export default function BalanceHistoryModal({
                         return (
                           <div key={tx.id} className="flex justify-between items-center py-2 text-xs">
                             <div>
-                              <div className="font-bold text-gray-800">{tx.category || 'Невідомо'}</div>
-                              <div className="text-[10px] text-gray-400 mt-0.5">{cardName} · {new Date(tx.created_at).toLocaleDateString('uk-UA', { hour: '2-digit', minute: '2-digit' })}</div>
+                              <div className="font-bold text-white">{tx.category || 'Невідомо'}</div>
+                              <div className="text-[10px] text-white/40 mt-0.5">{cardName} · {new Date(tx.created_at).toLocaleDateString('uk-UA', { hour: '2-digit', minute: '2-digit' })}</div>
                             </div>
-                            <div className={`font-bold ${isIncome ? 'text-emerald-600' : 'text-red-500'}`}>
+                            <div className={`font-bold ${isIncome ? 'text-emerald-400' : 'text-red-400'}`}>
                               {isIncome ? '+' : ''}{tx.amount.toLocaleString('uk-UA')} {symOf(tx.currency || activeCurrency)}
                             </div>
                           </div>

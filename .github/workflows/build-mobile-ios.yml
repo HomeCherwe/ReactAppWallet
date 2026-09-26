@@ -27,6 +27,8 @@ concurrency:
 jobs:
   build-ios:
     name: Build iOS App
+    permissions:
+      contents: write # publishes the .ipa to the "ios-latest" release
     # Liquid Glass (expo-glass-effect, @expo/ui) needs the iOS 26 SDK, i.e. Xcode 26
     runs-on: macos-26
 
@@ -122,3 +124,22 @@ jobs:
           name: WalletMobile-iOS-${{ github.run_number }}
           path: ${{ runner.temp }}/WalletMobile.ipa
           retention-days: 30
+
+      # The website's iPhone app guide links here: always the newest build, same URL
+      # https://github.com/HomeCherwe/ReactAppWallet/releases/download/ios-latest/MyWallet.ipa
+      - name: Publish to the "ios-latest" release
+        if: github.ref == 'refs/heads/main'
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./mobile/app.json').expo.version")
+          cp "$RUNNER_TEMP/WalletMobile.ipa" "$RUNNER_TEMP/MyWallet.ipa"
+          TITLE="MyWallet для iPhone $VERSION"
+          NOTES="Збірка #${{ github.run_number }} · $(date -u +%Y-%m-%d). Як встановити — на сайті: натисніть на значок MyWallet."
+          if gh release view ios-latest >/dev/null 2>&1; then
+            gh release edit ios-latest --title "$TITLE" --notes "$NOTES"
+          else
+            gh release create ios-latest --title "$TITLE" --notes "$NOTES" --target "${{ github.sha }}"
+          fi
+          gh release upload ios-latest "$RUNNER_TEMP/MyWallet.ipa" --clobber

@@ -404,6 +404,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
       // інформуємо інші віджети
       txBus.emit({ 
         type: 'CREATE',
+        transaction: data,
         card_id: data.card_id || null, 
         delta: Number(data.amount || 0) 
       })
@@ -429,24 +430,24 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
                 <button type="button"
                   className={`px-3 py-2 rounded-xl font-medium transition-colors ${
                     form.kind==='expense' 
-                      ? 'bg-red-100 text-red-700 border-2 border-red-300' 
-                      : 'bg-gray-100 text-gray-600 border-2 border-transparent'
+                      ? 'bg-red-500/15 text-red-300 border-2 border-red-500/35' 
+                      : 'bg-white/[0.06] text-white/70 border-2 border-transparent'
                   }`}
                   onClick={()=>setForm(f=>({...f, kind:'expense'}))}
                 >Витрата</button>
                 <button type="button"
                   className={`px-3 py-2 rounded-xl font-medium transition-colors ${
                     form.kind==='income' 
-                      ? 'bg-green-100 text-green-700 border-2 border-green-300' 
-                      : 'bg-gray-100 text-gray-600 border-2 border-transparent'
+                      ? 'bg-green-500/15 text-green-300 border-2 border-green-500/35' 
+                      : 'bg-white/[0.06] text-white/70 border-2 border-transparent'
                   }`}
                   onClick={()=>setForm(f=>({...f, kind:'income'}))}
                 >Дохід</button>
                 <button type="button"
                   className={`px-3 py-2 rounded-xl font-medium transition-colors ${
                     form.kind==='debt'
-                      ? 'bg-yellow-100 text-yellow-800 border-2 border-yellow-300'
-                      : 'bg-gray-100 text-gray-600 border-2 border-transparent'
+                      ? 'bg-yellow-500/15 text-yellow-300 border-2 border-yellow-500/35'
+                      : 'bg-white/[0.06] text-white/70 border-2 border-transparent'
                   }`}
                   onClick={()=>setForm(f=>({...f, kind:'debt', category: 'Борг', excludeFromStats: true }))}
                 >Борг</button>
@@ -457,7 +458,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
                   ref={amountInputRef}
                   type="text"
                   inputMode="decimal"
-                  className={`border rounded-xl px-3 py-2 w-full ${errors.amount ? 'border-rose-500 focus:ring-2 focus:ring-rose-500' : 'focus:ring-2 focus:ring-indigo-500'}`}
+                  className={`border rounded-xl px-3 py-2 w-full ${errors.amount ? 'border-rose-500 focus:ring-2 focus:ring-rose-500' : 'focus:ring-2 focus:ring-brand'}`}
                   placeholder="Сума (наприклад: 12-15 або 100*0.2)" 
                   value={form.amount}
                   onChange={e => {
@@ -484,7 +485,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
                     <button
                       key={op}
                       type="button"
-                      className="flex-1 py-1.5 text-sm font-semibold rounded-lg bg-gray-100 hover:bg-indigo-100 hover:text-indigo-700 active:scale-95 transition-all select-none"
+                      className="flex-1 py-1.5 text-sm font-semibold rounded-lg bg-white/[0.06] hover:bg-brand/15 hover:text-brand-light active:scale-95 transition-all select-none"
                       onMouseDown={e => e.preventDefault()}
                       onClick={() => {
                         const realOp = op === '×' ? '*' : op === '÷' ? '/' : op
@@ -506,7 +507,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
                   ))}
                   <button
                     type="button"
-                    className="flex-1 py-1.5 text-sm font-semibold rounded-lg bg-indigo-500 text-white hover:bg-indigo-600 active:scale-95 transition-all select-none"
+                    className="flex-1 py-1.5 text-sm font-semibold rounded-lg bg-brand text-white hover:bg-brand active:scale-95 transition-all select-none"
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
                       const result = calculateExpression(form.amount)
@@ -523,9 +524,9 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
                   <motion.div
                     initial={{ opacity: 0, y: -5 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="mt-1.5 text-sm text-rose-600 flex items-center gap-1"
+                    className="mt-1.5 text-sm text-rose-400 flex items-center gap-1"
                   >
-                    <span className="text-rose-500">⚠</span>
+                    <span className="text-rose-400">⚠</span>
                     {errors.amount}
                   </motion.div>
                 )}
@@ -534,7 +535,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
               {form.kind !== 'debt' && (
               <div className="relative" ref={categoryInputRef}>
                 <input 
-                  className={`border rounded-xl px-3 py-2 w-full ${errors.category ? 'border-rose-500 focus:ring-2 focus:ring-rose-500' : 'focus:ring-2 focus:ring-indigo-500'}`}
+                  className={`border rounded-xl px-3 py-2 w-full ${errors.category ? 'border-rose-500 focus:ring-2 focus:ring-rose-500' : 'focus:ring-2 focus:ring-brand'}`}
                   placeholder="Категорія (напр. Продукти)"
                   value={form.category}
                   onChange={e => {
@@ -549,9 +550,9 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
                   <motion.div
                     initial={{ opacity: 0, y: -5 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="mt-1.5 text-sm text-rose-600 flex items-center gap-1"
+                    className="mt-1.5 text-sm text-rose-400 flex items-center gap-1"
                   >
-                    <span className="text-rose-500">⚠</span>
+                    <span className="text-rose-400">⚠</span>
                     {errors.category}
                   </motion.div>
                 )}
@@ -565,7 +566,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
                     return filteredCategories.length > 0 && (
                       <motion.div
                         ref={categoryDropdownRef}
-                        className="absolute z-10 top-full left-0 right-0 mt-1 bg-white border rounded-xl max-h-48 overflow-y-auto"
+                        className="absolute z-10 top-full left-0 right-0 mt-1 bg-surface/90 border rounded-xl max-h-48 overflow-y-auto"
                         initial={{ opacity: 0, y: -10 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -10 }}
@@ -574,7 +575,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
                           <button
                             key={idx}
                             type="button"
-                            className="w-full text-left px-3 py-2 hover:bg-gray-50 first:rounded-t-xl last:rounded-b-xl"
+                            className="w-full text-left px-3 py-2 hover:bg-white/[0.03] first:rounded-t-xl last:rounded-b-xl"
                             onClick={() => {
                               setForm({...form, category: cat})
                               setShowCategoryDropdown(false)
@@ -592,12 +593,12 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
 
               {form.kind === 'debt' && (
                 <div className="grid gap-2">
-                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <label className="flex items-center gap-2 text-sm text-white/85">
                     <input
                       type="checkbox"
                       checked={!!form.debtIsLend}
                       onChange={(e) => setForm(f => ({ ...f, debtIsLend: e.target.checked }))}
-                      className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      className="w-4 h-4 rounded border-white/[0.14] text-brand focus:ring-brand"
                     />
                     <span className="font-medium">
                       {form.debtIsLend ? 'Я даю в борг' : 'Я беру в борг'}
@@ -622,7 +623,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
                         return filtered.length > 0 && (
                           <motion.div
                             ref={debtPartyDropdownRef}
-                            className="absolute z-10 top-full left-0 right-0 mt-1 bg-white border rounded-xl max-h-48 overflow-y-auto"
+                            className="absolute z-10 top-full left-0 right-0 mt-1 bg-surface/90 border rounded-xl max-h-48 overflow-y-auto"
                             initial={{ opacity: 0, y: -10 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: -10 }}
@@ -631,7 +632,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
                               <button
                                 key={idx}
                                 type="button"
-                                className="w-full text-left px-3 py-2 hover:bg-gray-50 first:rounded-t-xl last:rounded-b-xl"
+                                className="w-full text-left px-3 py-2 hover:bg-white/[0.03] first:rounded-t-xl last:rounded-b-xl"
                                 onClick={() => {
                                   setForm(f => ({ ...f, debtParty: p }))
                                   setShowDebtPartyDropdown(false)
@@ -645,7 +646,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
                       })()}
                     </AnimatePresence>
                   </div>
-                  <div className="text-[11px] text-gray-500">
+                  <div className="text-[11px] text-white/55">
                     Борг автоматично не враховується у статистику.
                   </div>
                 </div>
@@ -653,7 +654,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
 
               <div>
                 <select 
-                  className={`border rounded-xl px-3 py-2 w-full ${errors.cardId ? 'border-rose-500 focus:ring-2 focus:ring-rose-500' : 'focus:ring-2 focus:ring-indigo-500'}`}
+                  className={`border rounded-xl px-3 py-2 w-full ${errors.cardId ? 'border-rose-500 focus:ring-2 focus:ring-rose-500' : 'focus:ring-2 focus:ring-brand'}`}
                 value={form.cardId}
                   onChange={e => {
                     setForm({...form, cardId: e.target.value})
@@ -671,9 +672,9 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
                   <motion.div
                     initial={{ opacity: 0, y: -5 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="mt-1.5 text-sm text-rose-600 flex items-center gap-1"
+                    className="mt-1.5 text-sm text-rose-400 flex items-center gap-1"
                   >
-                    <span className="text-rose-500">⚠</span>
+                    <span className="text-rose-400">⚠</span>
                     {errors.cardId}
                   </motion.div>
                 )}
@@ -682,7 +683,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
               <div>
                 <input
                   type="datetime-local"
-                  className="border rounded-xl px-3 py-2 w-full focus:ring-2 focus:ring-indigo-500"
+                  className="border rounded-xl px-3 py-2 w-full focus:ring-2 focus:ring-brand"
                   value={form.date}
                   onChange={e => setForm({ ...form, date: e.target.value })}
                 />
@@ -694,12 +695,12 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
                 onChange={e=>setForm({...form, note: e.target.value})} />
 
               {/* Pinned toggle */}
-              <div className="flex items-center justify-between py-2 border-t border-gray-100">
+              <div className="flex items-center justify-between py-2 border-t border-white/[0.06]">
                 <div className="flex flex-col">
-                  <label className="text-sm text-gray-700 font-medium">
+                  <label className="text-sm text-white/85 font-medium">
                     Закріпити на головній
                   </label>
-                  <span className="text-[11px] text-gray-500">
+                  <span className="text-[11px] text-white/55">
                     Транзакція відображатиметься у верхньому блоці
                   </span>
                 </div>
@@ -707,13 +708,13 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
                   type="button"
                   onClick={() => setForm(f => ({ ...f, pinned: !f.pinned }))}
                   className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 ${
-                    form.pinned ? 'bg-amber-500' : 'bg-gray-300'
+                    form.pinned ? 'bg-amber-500' : 'bg-white/15'
                   }`}
                   role="switch"
                   aria-checked={form.pinned}
                 >
                   <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    className={`inline-block h-4 w-4 transform rounded-full bg-surface/90 transition-transform ${
                       form.pinned ? 'translate-x-6' : 'translate-x-1'
                     }`}
                   />
@@ -721,21 +722,21 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
               </div>
 
               {/* Exclude from stats toggle */}
-              <div className="flex items-center justify-between py-2 border-t border-gray-100">
-                <label className="text-sm text-gray-700 font-medium">
+              <div className="flex items-center justify-between py-2 border-t border-white/[0.06]">
+                <label className="text-sm text-white/85 font-medium">
                   Враховувати в статистиці
                 </label>
                 <button
                   type="button"
                   onClick={() => setForm(f => ({ ...f, excludeFromStats: !f.excludeFromStats }))}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
-                    !form.excludeFromStats ? 'bg-indigo-600' : 'bg-gray-300'
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2 ${
+                    !form.excludeFromStats ? 'bg-brand' : 'bg-white/15'
                   }`}
                   role="switch"
                   aria-checked={!form.excludeFromStats}
                 >
                   <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    className={`inline-block h-4 w-4 transform rounded-full bg-surface/90 transition-transform ${
                       !form.excludeFromStats ? 'translate-x-6' : 'translate-x-1'
                     }`}
                   />
@@ -744,12 +745,12 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
 
               {form.kind === 'expense' && (
               <div className="mt-1">
-                  <button type="button" className="w-full rounded-xl border px-3 py-2 hover:bg-gray-50"
+                  <button type="button" className="w-full rounded-xl border px-3 py-2 hover:bg-white/[0.03]"
                           onClick={onPickFile} disabled={parsing}>
                     Додати чек
                     </button>
                     <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={onFileChange}/>
-                  {parsing && <div className="mt-2 text-xs text-gray-500">Обробка чека…</div>}
+                  {parsing && <div className="mt-2 text-xs text-white/55">Обробка чека…</div>}
                   </div>
                 )}
 
@@ -769,13 +770,13 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
       <AnimatePresence>
             {cameraOpen && (
               <motion.div
-                className="fixed inset-0 z-[120] bg-black sm:bg-black/70 flex flex-col sm:grid sm:place-items-center sm:p-4 p-0"
+                className="fixed inset-0 z-[120] bg-brand sm:bg-black/70 flex flex-col sm:grid sm:place-items-center sm:p-4 p-0"
                 style={{ zIndex: 120 }}
                 initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                 onMouseDown={stopCamera}
               >
-                <div className="w-full h-full sm:w-full sm:max-w-lg sm:h-auto sm:bg-white sm:rounded-2xl overflow-hidden flex flex-col relative" onMouseDown={e=>e.stopPropagation()}>
-                  <div className="relative bg-black flex-1 flex items-center justify-center min-h-0">
+                <div className="w-full h-full sm:w-full sm:max-w-lg sm:h-auto sm:bg-surface/90 sm:rounded-2xl overflow-hidden flex flex-col relative" onMouseDown={e=>e.stopPropagation()}>
+                  <div className="relative bg-brand flex-1 flex items-center justify-center min-h-0">
                     <video 
                       ref={videoRef} 
                       autoPlay 
@@ -804,14 +805,14 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
                     
                     {/* Кругла кнопка для фотографування (як на iPhone) - по центру */}
                     <button 
-                      className="w-16 h-16 sm:w-14 sm:h-14 rounded-full bg-white border-4 border-white shadow-lg flex items-center justify-center hover:scale-105 active:scale-95 transition-transform flex-shrink-0"
+                      className="w-16 h-16 sm:w-14 sm:h-14 rounded-full bg-surface/90 border-4 border-white/20 shadow-lg flex items-center justify-center hover:scale-105 active:scale-95 transition-transform flex-shrink-0"
                       onClick={capturePhoto}
                       title="Зробити фото"
                       style={{
                         boxShadow: '0 0 0 2px rgba(255, 255, 255, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3)'
                       }}
                     >
-                      <div className="w-12 h-12 sm:w-10 sm:h-10 rounded-full bg-white"></div>
+                      <div className="w-12 h-12 sm:w-10 sm:h-10 rounded-full bg-surface/90"></div>
                     </button>
                     
                     {/* Заглушка для вирівнювання */}

@@ -12,6 +12,7 @@ export default function AddBankChoiceModal({ open, onClose, onManual }) {
   const [step, setStep] = useState('choice')
   const [connectedIds, setConnectedIds] = useState([])
   const [defaultCountry, setDefaultCountry] = useState('fr')
+  const [formOpen, setFormOpen] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -38,7 +39,7 @@ export default function AddBankChoiceModal({ open, onClose, onManual }) {
           <button
             type="button"
             onClick={() => setStep('connect')}
-            className="group text-left rounded-2xl border-2 border-orange-200 bg-gradient-to-br from-orange-50 to-white p-4 hover:border-orange-400 hover:shadow-md transition-all"
+            className="group text-left rounded-2xl border-2 border-orange-500/25 bg-gradient-to-br from-orange-500/10 to-white/[0.04] p-4 hover:border-orange-400 hover:shadow-md transition-all"
           >
             <div className="flex items-start gap-3">
               <div className="w-11 h-11 rounded-xl bg-orange-500 text-white flex items-center justify-center flex-shrink-0 shadow-sm">
@@ -46,15 +47,15 @@ export default function AddBankChoiceModal({ open, onClose, onManual }) {
               </div>
               <div className="flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-gray-900">Підключити банк</span>
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded">
+                  <span className="font-semibold text-white">Підключити банк</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-orange-400 bg-orange-500/15 px-1.5 py-0.5 rounded">
                     Рекомендовано
                   </span>
                 </div>
-                <p className="text-sm text-gray-600 mt-1">
-                  Транзакції й баланс підтягуються автоматично. Monobank, Revolut, Wise, BNP Paribas, Monzo та ще 80+ банків.
+                <p className="text-sm text-white/70 mt-1">
+                  Транзакції й баланс підтягуються автоматично. Monobank, Revolut, Wise, BNP Paribas, Monzo, 80+ банків і Binance.
                 </p>
-                <p className="text-xs text-gray-400 mt-2 flex items-center gap-1">
+                <p className="text-xs text-white/40 mt-2 flex items-center gap-1">
                   <ShieldCheck size={13} /> Open Banking · лише читання · без доступу до пароля
                 </p>
               </div>
@@ -64,15 +65,15 @@ export default function AddBankChoiceModal({ open, onClose, onManual }) {
           <button
             type="button"
             onClick={onManual}
-            className="text-left rounded-2xl border-2 border-gray-200 bg-white p-4 hover:border-gray-400 hover:shadow-md transition-all"
+            className="text-left rounded-2xl border-2 border-white/10 bg-surface/90 p-4 hover:border-white/20 hover:shadow-md transition-all"
           >
             <div className="flex items-start gap-3">
-              <div className="w-11 h-11 rounded-xl bg-gray-100 text-gray-700 flex items-center justify-center flex-shrink-0">
+              <div className="w-11 h-11 rounded-xl bg-white/[0.06] text-white/85 flex items-center justify-center flex-shrink-0">
                 <PenLine size={20} />
               </div>
               <div className="flex-1">
-                <span className="font-semibold text-gray-900">Власний рахунок</span>
-                <p className="text-sm text-gray-600 mt-1">
+                <span className="font-semibold text-white">Власний рахунок</span>
+                <p className="text-sm text-white/70 mt-1">
                   Готівка, скарбничка або банк без синхронізації — транзакції ви додаєте самі.
                 </p>
               </div>
@@ -81,18 +82,21 @@ export default function AddBankChoiceModal({ open, onClose, onManual }) {
         </div>
       ) : (
         <div className="grid gap-3">
-          <button
-            type="button"
-            onClick={() => setStep('choice')}
-            className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 w-fit"
-          >
-            <ArrowLeft size={15} /> Назад
-          </button>
+          {!formOpen && (
+            <button
+              type="button"
+              onClick={() => setStep('choice')}
+              className="inline-flex items-center gap-1 text-sm text-white/55 hover:text-white w-fit"
+            >
+              <ArrowLeft size={15} /> Назад
+            </button>
+          )}
           <ConnectBankCatalog
             active={open}
             connectedIds={connectedIds}
             defaultCountry={defaultCountry}
             onConnected={onClose}
+            onFormOpenChange={setFormOpen}
           />
         </div>
       )}

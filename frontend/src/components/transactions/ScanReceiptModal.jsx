@@ -337,20 +337,20 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                 relative border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer
                 transition-all duration-200
                 ${dragActive
-                  ? 'border-indigo-400 bg-indigo-50 scale-[1.02]'
-                  : 'border-gray-300 hover:border-indigo-300 hover:bg-gray-50'
+                  ? 'border-brand/60 bg-brand/10 scale-[1.02]'
+                  : 'border-white/[0.14] hover:border-brand/40 hover:bg-white/[0.03]'
                 }
               `}
             >
               <div className="flex flex-col items-center gap-3">
-                <div className={`w-14 h-14 rounded-full flex items-center justify-center transition-colors ${dragActive ? 'bg-indigo-100' : 'bg-gray-100'}`}>
-                  <ImagePlus size={28} className={dragActive ? 'text-indigo-500' : 'text-gray-400'} />
+                <div className={`w-14 h-14 rounded-full flex items-center justify-center transition-colors ${dragActive ? 'bg-brand/15' : 'bg-white/[0.06]'}`}>
+                  <ImagePlus size={28} className={dragActive ? 'text-brand' : 'text-white/40'} />
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-gray-700">
+                  <p className="text-sm font-medium text-white/85">
                     Перетягніть зображення сюди
                   </p>
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-white/55 mt-1">
                     або натисніть для вибору файлів
                   </p>
                 </div>
@@ -369,7 +369,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
             <button
               type="button"
               onClick={startCamera}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-gray-300 hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors"
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/[0.14] hover:bg-white/[0.03] text-sm font-medium text-white/85 transition-colors"
             >
               <Camera size={18} />
               Зробити фото
@@ -379,7 +379,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
             {previews.length > 0 && (
               <div className="grid grid-cols-3 gap-2">
                 {previews.map((url, idx) => (
-                  <div key={idx} className="relative group rounded-xl overflow-hidden aspect-square bg-gray-100">
+                  <div key={idx} className="relative group rounded-xl overflow-hidden aspect-square bg-white/[0.06]">
                     <img src={url} alt="" className="w-full h-full object-cover" />
                     <button
                       onClick={(e) => { e.stopPropagation(); removeFile(idx) }}
@@ -403,8 +403,8 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
               className={`
                 w-full py-3 rounded-xl font-semibold text-white transition-all flex items-center justify-center gap-2
                 ${files.length > 0
-                  ? 'bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98]'
-                  : 'bg-gray-300 cursor-not-allowed'
+                  ? 'bg-brand hover:bg-brand-dark active:scale-[0.98]'
+                  : 'bg-white/15 cursor-not-allowed'
                 }
               `}
             >
@@ -418,13 +418,13 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
         {step === 'scanning' && (
           <div className="flex flex-col items-center justify-center py-12 gap-4">
             <div className="relative">
-              <div className="w-16 h-16 rounded-full bg-indigo-50 flex items-center justify-center">
-                <Loader2 size={32} className="text-indigo-500 animate-spin" />
+              <div className="w-16 h-16 rounded-full bg-brand/10 flex items-center justify-center">
+                <Loader2 size={32} className="text-brand animate-spin" />
               </div>
             </div>
             <div className="text-center">
-              <p className="text-sm font-medium text-gray-700">Аналіз зображень…</p>
-              <p className="text-xs text-gray-500 mt-1">AI витягує транзакції з {files.length} фото</p>
+              <p className="text-sm font-medium text-white/85">Аналіз зображень…</p>
+              <p className="text-xs text-white/55 mt-1">AI витягує транзакції з {files.length} фото</p>
             </div>
           </div>
         )}
@@ -433,23 +433,23 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
         {step === 'review' && (
           <div className="grid gap-3">
             {/* Summary bar */}
-            <div className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-xl">
-              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+            <div className="flex items-center justify-between px-3 py-2 bg-white/[0.03] rounded-xl">
+              <label className="flex items-center gap-2 text-sm text-white/85 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={selectedIds.size === transactions.length}
                   onChange={toggleSelectAll}
-                  className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  className="w-4 h-4 rounded border-white/[0.14] text-brand focus:ring-brand"
                 />
                 <span className="font-medium">Обрати всі</span>
               </label>
-              <span className="text-xs text-gray-500">
+              <span className="text-xs text-white/55">
                 {selectedIds.size} з {transactions.length} обрано
               </span>
               <button
                 type="button"
                 onClick={() => setAllExpanded(v => !v)}
-                className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                className="text-xs text-brand hover:text-brand-light font-medium"
               >
                 {allExpanded ? 'Згорнути всі' : 'Розгорнути всі'}
               </button>
@@ -458,9 +458,9 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
             {/* Global card & category selectors */}
             <div className="grid gap-2">
               <div className="flex items-center gap-1.5">
-                <span className="text-xs text-gray-500 whitespace-nowrap">Карта:</span>
+                <span className="text-xs text-white/55 whitespace-nowrap">Карта:</span>
                 <select
-                  className="flex-1 border rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 min-w-0"
+                  className="flex-1 border rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-brand min-w-0"
                   value={globalCardId}
                   onChange={(e) => {
                     const cardId = e.target.value
@@ -476,9 +476,9 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                 </select>
               </div>
               <div className="flex items-center gap-1.5 relative" ref={globalCatInputRef}>
-                <span className="text-xs text-gray-500 whitespace-nowrap">Категорія:</span>
+                <span className="text-xs text-white/55 whitespace-nowrap">Категорія:</span>
                 <input
-                  className="flex-1 border rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 min-w-0"
+                  className="flex-1 border rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-brand min-w-0"
                   placeholder="Категорія для всіх"
                   value={globalCategory}
                   onChange={(e) => setGlobalCategory(e.target.value)}
@@ -500,7 +500,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                     return filtered.length > 0 && (
                       <motion.div
                         ref={globalCatDropdownRef}
-                        className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border rounded-xl max-h-48 overflow-y-auto shadow-lg"
+                        className="absolute z-20 top-full left-0 right-0 mt-1 bg-surface/90 border rounded-xl max-h-48 overflow-y-auto shadow-lg"
                         initial={{ opacity: 0, y: -8 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -8 }}
@@ -509,7 +509,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                           <button
                             key={idx}
                             type="button"
-                            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 first:rounded-t-xl last:rounded-b-xl"
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-white/[0.03] first:rounded-t-xl last:rounded-b-xl"
                             onClick={() => {
                               setGlobalCategory(cat)
                               setTransactions(prev => prev.map(tx => ({ ...tx, category: cat })))
@@ -539,7 +539,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                       animate={{ opacity: 1, height: 'auto' }}
                       exit={{ opacity: 0, height: 0 }}
                       className={`border rounded-xl overflow-hidden transition-colors ${
-                        isSelected ? 'border-indigo-200 bg-white' : 'border-gray-200 bg-gray-50 opacity-60'
+                        isSelected ? 'border-brand/25 bg-surface/90' : 'border-white/10 bg-white/[0.03] opacity-60'
                       }`}
                     >
                       {/* Row header */}
@@ -548,32 +548,32 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                           type="checkbox"
                           checked={isSelected}
                           onChange={() => toggleSelect(tx._id)}
-                          className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 flex-shrink-0"
+                          className="w-4 h-4 rounded border-white/[0.14] text-brand focus:ring-brand flex-shrink-0"
                         />
                         <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : tx._id)}>
                           <div className="flex items-center justify-between">
-                            <span className="text-sm font-medium text-gray-800 truncate">{tx.note?.split('\n')[0] || 'Транзакція'}</span>
-                            <span className={`text-sm font-semibold whitespace-nowrap ml-2 ${tx.type === 'income' ? 'text-emerald-600' : 'text-gray-900'}`}>
+                            <span className="text-sm font-medium text-white truncate">{tx.note?.split('\n')[0] || 'Транзакція'}</span>
+                            <span className={`text-sm font-semibold whitespace-nowrap ml-2 ${tx.type === 'income' ? 'text-emerald-400' : 'text-white'}`}>
                               {tx.type === 'income' ? '+' : '-'}{Number(tx.amount || 0).toFixed(2)} {getCurrencySymbol(tx.currency)}
                             </span>
                           </div>
                           <div className="flex items-center gap-2 mt-0.5">
-                            <span className="text-[11px] text-gray-500">{tx.date}</span>
-                            <span className="text-[11px] px-1.5 py-0.5 bg-gray-100 rounded text-gray-600">{tx.category}</span>
+                            <span className="text-[11px] text-white/55">{tx.date}</span>
+                            <span className="text-[11px] px-1.5 py-0.5 bg-white/[0.06] rounded text-white/70">{tx.category}</span>
                           </div>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
                           <button
                             type="button"
                             onClick={() => setExpandedId(isExpanded ? null : tx._id)}
-                            className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"
+                            className="p-1 rounded-lg hover:bg-white/[0.06] text-white/40"
                           >
                             {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                           </button>
                           <button
                             type="button"
                             onClick={() => removeTx(tx._id)}
-                            className="p-1 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500"
+                            className="p-1 rounded-lg hover:bg-red-500/10 text-white/40 hover:text-red-400"
                           >
                             <Trash2 size={16} />
                           </button>
@@ -589,9 +589,9 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                             exit={{ height: 0, opacity: 0 }}
                             className="border-t overflow-hidden"
                           >
-                            <div className="grid gap-2 p-3 bg-gray-50/50">
+                            <div className="grid gap-2 p-3 bg-white/[0.015]">
                               <div className={`cat-dropdown-${tx._id} relative`}>
-                                <label className="text-[11px] text-gray-500 mb-0.5 block">Категорія</label>
+                                <label className="text-[11px] text-white/55 mb-0.5 block">Категорія</label>
                                 <input
                                   className="border rounded-lg px-2 py-1.5 w-full text-sm"
                                   placeholder="Пошук категорії"
@@ -614,7 +614,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                                     const filtered = q ? categories.filter(c => c.toLowerCase().includes(q)) : categories
                                     return filtered.length > 0 && (
                                       <motion.div
-                                        className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border rounded-xl max-h-48 overflow-y-auto shadow-lg"
+                                        className="absolute z-20 top-full left-0 right-0 mt-1 bg-surface/90 border rounded-xl max-h-48 overflow-y-auto shadow-lg"
                                         initial={{ opacity: 0, y: -8 }}
                                         animate={{ opacity: 1, y: 0 }}
                                         exit={{ opacity: 0, y: -8 }}
@@ -623,7 +623,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                                           <button
                                             key={idx}
                                             type="button"
-                                            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 first:rounded-t-xl last:rounded-b-xl"
+                                            className="w-full text-left px-3 py-2 text-sm hover:bg-white/[0.03] first:rounded-t-xl last:rounded-b-xl"
                                             onClick={() => {
                                               updateTx(tx._id, 'category', cat)
                                               setOpenCategoryTxId(null)
@@ -639,7 +639,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                               </div>
                               <div className="grid grid-cols-2 gap-2">
                                 <div>
-                                  <label className="text-[11px] text-gray-500 mb-0.5 block">Сума</label>
+                                  <label className="text-[11px] text-white/55 mb-0.5 block">Сума</label>
                                   <input
                                     type="text"
                                     inputMode="decimal"
@@ -649,7 +649,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                                   />
                                 </div>
                                 <div>
-                                  <label className="text-[11px] text-gray-500 mb-0.5 block">Тип</label>
+                                  <label className="text-[11px] text-white/55 mb-0.5 block">Тип</label>
                                   <select
                                     className="border rounded-lg px-2 py-1.5 w-full text-sm"
                                     value={tx.type}
@@ -661,7 +661,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                                 </div>
                               </div>
                               <div>
-                                <label className="text-[11px] text-gray-500 mb-0.5 block">Дата</label>
+                                <label className="text-[11px] text-white/55 mb-0.5 block">Дата</label>
                                 <input
                                   type="datetime-local"
                                   className="border rounded-lg px-2 py-1.5 w-full text-sm"
@@ -670,7 +670,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                                 />
                               </div>
                               <div>
-                                <label className="text-[11px] text-gray-500 mb-0.5 block">Карта</label>
+                                <label className="text-[11px] text-white/55 mb-0.5 block">Карта</label>
                                 <select
                                   className="border rounded-lg px-2 py-1.5 w-full text-sm"
                                   value={tx.cardId}
@@ -683,7 +683,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                                 </select>
                               </div>
                               <div>
-                                <label className="text-[11px] text-gray-500 mb-0.5 block">Нотатка</label>
+                                <label className="text-[11px] text-white/55 mb-0.5 block">Нотатка</label>
                                 <textarea
                                   className="border rounded-lg px-2 py-1.5 w-full text-sm min-h-[60px]"
                                   value={tx.note}
@@ -717,8 +717,8 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                 className={`
                   btn flex-1 font-semibold text-white rounded-xl py-2.5 transition-all flex items-center justify-center gap-2
                   ${selectedIds.size > 0 && !saving
-                    ? 'bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98]'
-                    : 'bg-gray-300 cursor-not-allowed'
+                    ? 'bg-brand hover:bg-brand-dark active:scale-[0.98]'
+                    : 'bg-white/15 cursor-not-allowed'
                   }
                 `}
               >
@@ -737,7 +737,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
       <AnimatePresence>
         {cameraOpen && (
           <motion.div
-            className="fixed inset-0 z-[120] bg-black flex flex-col"
+            className="fixed inset-0 z-[120] bg-brand flex flex-col"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
           >
             <div className="flex-1 relative flex items-center justify-center">
@@ -752,11 +752,11 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                 <X size={20} />
               </button>
               <button
-                className="w-16 h-16 rounded-full bg-white border-4 border-white shadow-lg flex items-center justify-center hover:scale-105 active:scale-95 transition-transform"
+                className="w-16 h-16 rounded-full bg-surface/90 border-4 border-white/20 shadow-lg flex items-center justify-center hover:scale-105 active:scale-95 transition-transform"
                 onClick={capturePhoto}
                 style={{ boxShadow: '0 0 0 2px rgba(255,255,255,0.3), 0 4px 12px rgba(0,0,0,0.3)' }}
               >
-                <div className="w-12 h-12 rounded-full bg-white"></div>
+                <div className="w-12 h-12 rounded-full bg-surface/90"></div>
               </button>
               <div className="w-10"></div>
             </div>

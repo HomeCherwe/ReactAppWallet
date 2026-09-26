@@ -14,6 +14,7 @@ import { triggerLightHaptic } from "./utils/haptics"
 import { GlassSurface } from "./components/LiquidGlass"
 import { useSettingsStore } from "./store/useSettingsStore"
 import { useBankAutoSync } from "./hooks/useBankAutoSync"
+import { useMarkAppInstalled } from "./hooks/useMarkAppInstalled"
 import { toastConfig } from "./components/ToastConfig"
 import MenuOverlayHost from "./components/MenuOverlayHost"
 
@@ -76,6 +77,8 @@ export default function App() {
 
   // Pull new bank transactions whenever the app is opened (signed in only)
   useBankAutoSync(!!session)
+  // Lets the website know this user has the app (it stops showing the iPhone app promo)
+  useMarkAppInstalled(!!session)
 
   const handleTabPress = (tab: TabId) => {
     if (activeTab !== tab) triggerLightHaptic()

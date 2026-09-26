@@ -1,16 +1,13 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
-import { X, Plus, Trash2, ScanLine, AlertTriangle, Landmark, ChevronDown, ChevronUp } from 'lucide-react'
+import { X, Trash2, AlertTriangle, Landmark, ChevronDown, ChevronUp , Pin} from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
 import ConfirmModal from '../ConfirmModal'
 import DeleteTxModal from './DeleteTxModal'
 import Row from './Row'
 import DetailsModal from './DetailsModal'
-import CreateTxModal from './CreateTxModal'
 import EditTxModal from './EditTxModal'
-import TransferModal from './TransferModal'
-import ScanReceiptModal from './ScanReceiptModal'
 import SplitTxModal from './SplitTxModal'
 import { apiFetch, getApiUrl } from '../../utils.jsx'
 import { listTransactions, updateTransaction, deleteTransaction, archiveTransaction, deleteTransactions, getTransactionCategories } from '../../api/transactions'
@@ -94,9 +91,6 @@ export default function MonthlyPayment() {
   const [bulkCategoryValue, setBulkCategoryValue] = useState('')
   const [bulkCategoryLoading, setBulkCategoryLoading] = useState(false)
 
-  const [createOpen, setCreateOpen] = useState(false)
-  const [transferOpen, setTransferOpen] = useState(false)
-  const [scanOpen, setScanOpen] = useState(false)
   const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false)
   const [expiredBanks, setExpiredBanks] = useState([]) // names of banks whose 90-day access ran out
 
@@ -468,7 +462,7 @@ export default function MonthlyPayment() {
 
       const tx = event?.transaction
 
-      if (type === 'INSERT' && tx) {
+      if ((type === 'INSERT' || type === 'CREATE') && tx) {
         if (!txMatchesCurrentView(tx) && !shouldKeepForNesting(tx)) return
         setRows(prev => dedupeById([tx, ...(prev || [])]))
         return
@@ -885,19 +879,6 @@ export default function MonthlyPayment() {
     }
   }
 
-  const handleSaved = (tx) => {
-    // prepend saved tx but avoid duplicates by id
-    setRows(prev => dedupeById([tx, ...prev]))
-    // Update pinnedRows: remove if tx no longer satisfies pinning condition, patch if it does
-    setPinnedRows(prev => {
-      const exists = (prev || []).some(r => r?.id === tx?.id)
-      if (!exists) return prev
-      const isStillPinned = pinnedCategories.includes(tx.category) || String(tx.note || '').includes('[pinned]')
-      if (!isStillPinned) return (prev || []).filter(r => r?.id !== tx?.id)
-      return (prev || []).map(r => r?.id === tx?.id ? { ...r, ...tx } : r)
-    })
-  }
-
   const handleSelect = (txId, checked, index, event) => {
     // Перевіряємо shiftKey з event або з глобального стану
     const shiftKey = event?.shiftKey || shiftKeyPressedRef.current || false
@@ -1074,18 +1055,18 @@ export default function MonthlyPayment() {
   }
 
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-2xl p-5 shadow-soft min-h-[400px]">
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="bg-gradient-to-b from-white/[0.075] to-white/[0.025] backdrop-blur-xl rounded-3xl p-5 shadow-glass min-h-[400px] border border-white/10">
 
       {/* A bank's 90-day access ran out */}
       {expiredBanks.length > 0 && (
-        <div className="mb-4 flex items-start gap-3 bg-amber-50 border-2 border-amber-400 rounded-xl p-3 sticky top-0 z-10">
-          <AlertTriangle size={18} className="text-amber-600 mt-0.5 flex-shrink-0" />
+        <div className="mb-4 flex items-start gap-3 bg-amber-500/10 border-2 border-amber-400 rounded-xl p-3 sticky top-0 z-10">
+          <AlertTriangle size={18} className="text-amber-400 mt-0.5 flex-shrink-0" />
           <div className="flex-1 min-w-0">
-            <span className="text-xs font-semibold text-amber-900">⚠️ Доступ до {expiredBanks.join(', ')} сплив</span>
-            <span className="text-xs text-amber-800 ml-1">— синхронізація цих банків призупинена.</span>
+            <span className="text-xs font-semibold text-amber-200">⚠️ Доступ до {expiredBanks.join(', ')} сплив</span>
+            <span className="text-xs text-amber-300 ml-1">— синхронізація цих банків призупинена.</span>
             <a
               href="#/profile"
-              className="ml-2 text-xs font-bold text-amber-700 underline hover:text-amber-900 whitespace-nowrap"
+              className="ml-2 text-xs font-bold text-amber-300 underline hover:text-amber-200 whitespace-nowrap"
             >
               Підключити знову в профілі →
             </a>
@@ -1096,14 +1077,14 @@ export default function MonthlyPayment() {
       <div className="mb-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
           <div className="flex items-center gap-3 flex-wrap">
-            <div className="font-semibold text-gray-900">Recent transactions</div>
+            <div className="text-lg font-bold tracking-tight text-white">Транзакції</div>
             <BankSyncIndicator />
           </div>
           <div className="flex flex-wrap items-center gap-2 relative">
             {selectedIds.size > 0 && (
               <>
                 <button
-                  className="btn btn-soft text-xs inline-flex items-center gap-1 border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                  className="btn btn-soft text-xs inline-flex items-center gap-1 border border-brand/25 text-brand-light hover:bg-brand/10"
                   onClick={() => { setBulkCategoryOpen(v => !v); setBulkCategoryValue('') }}
                 >
                   🏷️ Категорія ({selectedIds.size})
@@ -1133,9 +1114,9 @@ export default function MonthlyPayment() {
                   initial={{ opacity: 0, y: -6, scale: 0.97 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -6, scale: 0.97 }}
-                  className="absolute right-0 top-full mt-1 z-50 w-72 p-3 rounded-2xl bg-white border border-indigo-100 shadow-xl space-y-2"
+                  className="absolute right-0 top-full mt-1 z-50 w-72 p-3 rounded-2xl bg-surface/90 border border-brand/15 shadow-xl space-y-2"
                 >
-                  <div className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Нова категорія для {selectedIds.size} транз.</div>
+                  <div className="text-xs font-semibold text-white/85 uppercase tracking-wider">Нова категорія для {selectedIds.size} транз.</div>
                   <input
                     autoFocus
                     type="text"
@@ -1144,7 +1125,7 @@ export default function MonthlyPayment() {
                     onKeyDown={e => { if (e.key === 'Enter') handleBulkCategoryChange(); if (e.key === 'Escape') setBulkCategoryOpen(false) }}
                     placeholder="Введіть або оберіть категорію..."
                     list="bulk-categories-list"
-                    className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                    className="w-full px-3 py-2 rounded-xl border border-white/[0.14] focus:outline-none focus:ring-2 focus:ring-brand text-sm"
                   />
                   <datalist id="bulk-categories-list">
                     {categories.map(c => <option key={c} value={c} />)}
@@ -1153,7 +1134,7 @@ export default function MonthlyPayment() {
                     <button
                       type="button"
                       onClick={() => setBulkCategoryOpen(false)}
-                      className="flex-1 px-3 py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium transition"
+                      className="flex-1 px-3 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/10 text-white/85 text-xs font-medium transition"
                     >
                       Скасувати
                     </button>
@@ -1161,7 +1142,7 @@ export default function MonthlyPayment() {
                       type="button"
                       disabled={!bulkCategoryValue.trim() || bulkCategoryLoading}
                       onClick={handleBulkCategoryChange}
-                      className="flex-1 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium transition disabled:opacity-50"
+                      className="flex-1 px-3 py-1.5 rounded-xl bg-brand hover:bg-brand-dark text-white text-xs font-medium transition disabled:opacity-50"
                     >
                       {bulkCategoryLoading ? 'Збереження...' : 'Застосувати'}
                     </button>
@@ -1169,15 +1150,6 @@ export default function MonthlyPayment() {
                 </motion.div>
               )}
             </AnimatePresence>
-            <button className="btn btn-primary text-xs inline-flex items-center gap-1" onClick={() => setCreateOpen(true)}>
-              <Plus size={14} /> Add
-            </button>
-            <button className="btn btn-soft text-xs inline-flex items-center gap-1" onClick={() => setScanOpen(true)}>
-              <ScanLine size={14} /> Scan
-            </button>
-            <button className="btn btn-soft text-xs inline-flex items-center gap-1" onClick={() => setTransferOpen(true)}>
-              Transfer
-            </button>
           </div>
         </div>
 
@@ -1188,13 +1160,13 @@ export default function MonthlyPayment() {
               placeholder="Пошук по сумі, категорії, банку, опису, даті..."
               value={searchQuery}
               onChange={(e) => handleSearch(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              className="w-full px-4 py-2.5 bg-white/[0.06] border border-white/10 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => handleSearch('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/70"
               >
                 <X size={16} />
               </button>
@@ -1204,13 +1176,13 @@ export default function MonthlyPayment() {
       </div>
 
       {initialLoading && visibleRows.length === 0 ? (
-        <div className="text-sm text-gray-500">Loading...</div>
+        <div className="text-sm text-white/55">Завантаження...</div>
       ) : visibleRows.length === 0 ? (
-        <div className="text-sm text-gray-500">No transactions yet</div>
+        <div className="text-sm text-white/55">No transactions yet</div>
       ) : (
         <>
           {visibleRows.length > 0 && (
-            <div className="mb-2 pb-2 border-b border-gray-200">
+            <div className="mb-2 pb-2 border-b border-white/10">
               <div className="flex items-center justify-between gap-4 flex-wrap">
                 <div className="flex items-center gap-4 flex-wrap">
                   <label className="flex items-center gap-2 cursor-pointer">
@@ -1218,9 +1190,9 @@ export default function MonthlyPayment() {
                       type="checkbox"
                       checked={selectedIds.size > 0 && selectedIds.size === visibleRows.length && visibleRows.length > 0}
                       onChange={(e) => handleSelectAll(e.target.checked)}
-                      className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      className="w-4 h-4 rounded border-white/[0.14] text-brand focus:ring-brand"
                     />
-                    <span className="text-sm text-gray-600">
+                    <span className="text-sm text-white/70">
                       Вибрати всі ({selectedIds.size}/{visibleRows.length})
                     </span>
                   </label>
@@ -1247,9 +1219,9 @@ export default function MonthlyPayment() {
                         updateNestedSetting('transactionsFilters', filtersToSave)
                         toast.success('Налаштування збережено')
                       }}
-                      className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      className="w-4 h-4 rounded border-white/[0.14] text-brand focus:ring-brand"
                     />
-                    <span className="text-sm text-gray-600">
+                    <span className="text-sm text-white/70">
                       Показувати USDT
                     </span>
                   </label>
@@ -1265,7 +1237,7 @@ export default function MonthlyPayment() {
                       setSelectedIds(new Set()) // Clear selection when filter changes
                       lastSelectedIndexRef.current = null // Reset last selected index
                     }}
-                    className="text-xs border border-gray-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="text-xs font-semibold border border-white/10 rounded-full px-3 py-1.5 bg-white/[0.06] focus:outline-none focus:ring-2 focus:ring-brand"
                   >
                     <option value="all">Всі</option>
                     <option value="expense">Витрати</option>
@@ -1280,7 +1252,7 @@ export default function MonthlyPayment() {
                       setSelectedIds(new Set()) // Clear selection when filter changes
                       lastSelectedIndexRef.current = null // Reset last selected index
                     }}
-                    className="text-xs border border-gray-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-[120px]"
+                    className="text-xs font-semibold border border-white/10 rounded-full px-3 py-1.5 bg-white/[0.06] focus:outline-none focus:ring-2 focus:ring-brand min-w-[120px]"
                   >
                     <option value="">Всі категорії</option>
                     {categories.map((cat) => (
@@ -1296,36 +1268,36 @@ export default function MonthlyPayment() {
           <div ref={listRef} className="space-y-6">
             {/* Pinned Section */}
             {pinnedTxs.length > 0 && (
-              <div className="bg-amber-50/50 rounded-2xl border border-amber-200 overflow-hidden mb-6">
+              <div className="rounded-3xl overflow-hidden mb-6 border border-brand/30 bg-gradient-to-b from-brand/[0.13] to-brand/[0.03]">
                 <button
                   onClick={() => setPinnedExpanded(!pinnedExpanded)}
-                  className="w-full flex items-center justify-between p-4 bg-amber-100/50 hover:bg-amber-100 transition-colors"
+                  className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-brand/[0.06] transition-colors"
                 >
                   <div className="flex items-center gap-2">
-                    <span className="text-amber-600">📌</span>
-                    <span className="font-semibold text-amber-900">Закріплені транзакції</span>
-                    <span className="bg-amber-200 text-amber-800 text-xs font-bold px-2 py-0.5 rounded-full">
+                    <span className="h-8 w-8 rounded-xl bg-gradient-to-br from-brand to-brand-deep grid place-items-center shadow-brand"><Pin size={15} className="text-white" /></span>
+                    <span className="font-semibold text-white">Закріплені транзакції</span>
+                    <span className="bg-brand/20 text-brand-light text-xs font-bold px-2 py-0.5 rounded-full">
                       {pinnedTxs.length}
                     </span>
                   </div>
-                  <div className="text-amber-700">
+                  <div className="text-brand-light">
                     {pinnedExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
                   </div>
                 </button>
                 
                 {pinnedExpanded && (
-                  <div className="p-4 space-y-6">
+                  <div className="px-3 pb-3 space-y-4">
                     {pinnedSortedDays.map(({ dayKey, dateHeader, transactions, total }) => {
                       const dayCurrency = 'EUR'
 
                       return (
                         <div key={dayKey} className="space-y-2">
-                          <div className="flex items-center justify-between mb-3 sticky top-0 bg-amber-50/90 py-2 border-b border-amber-200 z-10 backdrop-blur-sm">
-                            <div className="text-sm font-semibold text-amber-900">
+                          <div className="flex items-baseline justify-between px-1 pt-2 pb-1">
+                            <div className="text-[13px] font-bold text-white/60">
                               {dateHeader}
                             </div>
                             <div
-                              className={`text-sm font-semibold ${total < 0 ? 'text-rose-600' : total > 0 ? 'text-emerald-600' : 'text-amber-900'
+                              className={`text-xs font-semibold tabular-nums ${total < 0 ? 'text-rose-400/80' : total > 0 ? 'text-green-400/80' : 'text-white/40'
                                 }`}
                             >
                               {!ratesReady
@@ -1377,7 +1349,7 @@ export default function MonthlyPayment() {
 
                                   {/* Nested refund transactions */}
                                   {Number(tx.amount || 0) < 0 && refundTxsSorted.length > 0 && (
-                                    <div className="mt-1 ml-6 pl-3 border-l-2 border-gray-200 space-y-1">
+                                    <div className="mt-1 ml-6 pl-3 border-l-2 border-white/10 space-y-1">
                                       {refundTxsSorted.map((rtx) => {
                                         const rCurrency = (rtx.currency || cardMap[rtx.card_id] || 'EUR')
                                         return (
@@ -1407,7 +1379,7 @@ export default function MonthlyPayment() {
             )}
 
             {regularTxs.length === 0 && pinnedTxs.length === 0 ? (
-              <div className="text-sm text-gray-500 text-center py-4">
+              <div className="text-sm text-white/55 text-center py-4">
                 Транзакції не знайдено за обраними фільтрами
               </div>
             ) : (
@@ -1416,12 +1388,12 @@ export default function MonthlyPayment() {
 
                 return (
                   <div key={dayKey} className="space-y-2">
-                    <div className="flex items-center justify-between mb-3 sticky top-0 bg-white py-2 border-b border-gray-200 z-10">
-                      <div className="text-sm font-semibold text-gray-700">
+                    <div className="flex items-baseline justify-between px-1 py-2 sticky top-0 z-10 bg-[rgba(18,18,21,0.82)] backdrop-blur-xl -mx-1 rounded-xl">
+                      <div className="text-[13px] font-bold text-white/60">
                         {dateHeader}
                       </div>
                       <div
-                        className={`text-sm font-semibold ${total < 0 ? 'text-rose-600' : total > 0 ? 'text-emerald-600' : 'text-gray-900'
+                        className={`text-xs font-semibold tabular-nums ${total < 0 ? 'text-rose-400/80' : total > 0 ? 'text-green-400/80' : 'text-white/40'
                           }`}
                       >
                         {!ratesReady
@@ -1473,7 +1445,7 @@ export default function MonthlyPayment() {
 
                             {/* Nested refund transactions (linked by refund_for / legacy [refund_for:<id>] tag) */}
                             {Number(tx.amount || 0) < 0 && refundTxsSorted.length > 0 && (
-                              <div className="mt-1 ml-6 pl-3 border-l-2 border-gray-200 space-y-1">
+                              <div className="mt-1 ml-6 pl-3 border-l-2 border-white/10 space-y-1">
                                 {refundTxsSorted.map((rtx) => {
                                   const rCurrency = (rtx.currency || cardMap[rtx.card_id] || 'EUR')
                                   return (
@@ -1507,14 +1479,14 @@ export default function MonthlyPayment() {
                 style={{ minHeight: '200px' }}
               >
                 {loadingMore ? (
-                  <div className="text-sm text-gray-500">
+                  <div className="text-sm text-white/55">
                     <svg className="w-5 h-5 animate-spin mx-auto" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
                     </svg>
                   </div>
                 ) : (
-                  <div className="text-xs text-gray-400">Прокрутіть вниз для завантаження більше... (Завантажено: {visibleRows.length})</div>
+                  <div className="text-xs text-white/40">Прокрутіть вниз для завантаження більше... (Завантажено: {visibleRows.length})</div>
                 )}
               </div>
             )}
@@ -1544,18 +1516,6 @@ export default function MonthlyPayment() {
         }}
       />
 
-      <CreateTxModal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        onSaved={handleSaved}
-      />
-
-      <TransferModal
-        open={transferOpen}
-        onClose={() => setTransferOpen(false)}
-        onDone={(res) => { fetchPage({ append: false, search: searchQuery }); setTransferOpen(false) }}
-      />
-
       <EditTxModal
         open={editOpen}
         tx={editTx}
@@ -1581,11 +1541,6 @@ export default function MonthlyPayment() {
         onCancel={() => { setBulkDeleteOpen(false) }}
       />
 
-      <ScanReceiptModal
-        open={scanOpen}
-        onClose={() => setScanOpen(false)}
-        onSaved={() => fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })}
-      />
       <Toaster position="top-right" />
     </motion.div>
   )

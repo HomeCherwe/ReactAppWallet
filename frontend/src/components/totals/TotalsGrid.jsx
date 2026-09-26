@@ -16,7 +16,7 @@ export default function TotalsGrid({ totals, sectionType, isVisible }) {
 
   if (!entries.length) {
     return (
-      <div className="text-center py-8 text-sm text-gray-500">Немає даних</div>
+      <div className="text-center py-8 text-sm text-white/55">Немає даних</div>
     )
   }
 

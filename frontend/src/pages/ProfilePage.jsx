@@ -1,12 +1,40 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase, invalidateUserCache } from '../lib/supabase'
 import { motion } from 'framer-motion'
-import { User, Mail, Save, Upload, Key, CreditCard, Copy, Eye, EyeOff, RefreshCw, BarChart3, LogOut, Landmark, CheckCircle, XCircle, HelpCircle, ChevronDown, ChevronUp, ExternalLink, AlertTriangle } from 'lucide-react'
+import { User, Mail, Save, Upload, Key, Copy, Eye, EyeOff, RefreshCw, LogOut, Check, Coins, Pin } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { getUserAPIs, getApiKey, generateApiKey, updatePreferencesSection, invalidatePreferencesCache } from '../api/preferences'
+import { getApiKey, generateApiKey } from '../api/preferences'
 import { getApiUrl, apiFetch } from '../utils.jsx'
 import { useSettingsStore } from '../store/useSettingsStore'
 import ConfirmModal from '../components/ConfirmModal'
+import { SUPPORTED_CURRENCIES, usePrimaryCurrency, setPrimaryCurrency } from '../utils/primaryCurrency'
+
+// Symbol tile colors in the currency list
+const CURRENCY_COLORS = {
+  UAH: '#007AFF',
+  EUR: '#5856D6',
+  USD: '#34C759',
+  PLN: '#FF3B30',
+  GBP: '#AF52DE',
+}
+
+/** iOS-Settings-style section header: white glyph on a colored square */
+function SectionTitle({ icon: Icon, color, title, subtitle }) {
+  return (
+    <div className="flex items-start gap-3 mb-4">
+      <span
+        className="h-8 w-8 shrink-0 rounded-[9px] grid place-items-center shadow-[inset_0_1px_0_rgba(255,255,255,0.25)]"
+        style={{ background: color }}
+      >
+        <Icon size={17} strokeWidth={2.2} className="text-white" />
+      </span>
+      <div className="min-w-0">
+        <h3 className="text-[17px] font-semibold text-white leading-8">{title}</h3>
+        {subtitle && <p className="text-xs text-white/50 -mt-0.5">{subtitle}</p>}
+      </div>
+    </div>
+  )
+}
 
 export default function ProfilePage() {
   const [user, setUser] = useState(null)
@@ -16,28 +44,16 @@ export default function ProfilePage() {
   const [avatarFile, setAvatarFile] = useState(null)
   const [avatarPreview, setAvatarPreview] = useState(null)
 
-  // API keys state
-  const [binanceApiKey, setBinanceApiKey] = useState('')
-  const [binanceApiSecret, setBinanceApiSecret] = useState('')
-  const [monobankToken, setMonobankToken] = useState('')
-  const [monobankBlackCardId, setMonobankBlackCardId] = useState('')
-  const [monobankWhiteCardId, setMonobankWhiteCardId] = useState('')
-
-  // Guide visibility state
-  const [showBinanceGuide, setShowBinanceGuide] = useState(false)
-  const [showMonobankGuide, setShowMonobankGuide] = useState(false)
-
   // API Key state
   const [apiKey, setApiKey] = useState(null)
   const [apiKeyVisible, setApiKeyVisible] = useState(false)
   const [apiKeyLoading, setApiKeyLoading] = useState(false)
   const [apiKeyGenerating, setApiKeyGenerating] = useState(false)
 
-  // Dashboard settings - використовуємо новий store
-  const settings = useSettingsStore((state) => state.settings)
+  // Main currency (shared with the iPhone app) and pinned categories
+  const primaryCurrency = usePrimaryCurrency()
   const updateNestedSetting = useSettingsStore((state) => state.updateNestedSetting)
   const getNestedSetting = useSettingsStore((state) => state.getNestedSetting)
-  const showUsdtInChart = getNestedSetting('dashboard.showUsdtInChart', true)
   const pinnedCategories = getNestedSetting('dashboard.pinnedCategories', [])
 
   const [newCategoryInput, setNewCategoryInput] = useState('')
@@ -75,37 +91,9 @@ export default function ProfilePage() {
     return () => subscription.unsubscribe()
   }, [])
 
-  // Load API keys from separate APIs column
-  const loadApiKeys = async () => {
-    try {
-      const APIs = await getUserAPIs()
-      if (APIs) {
-        // Binance API
-        if (APIs.binance) {
-          setBinanceApiKey(APIs.binance.api_key || '')
-          setBinanceApiSecret(APIs.binance.api_secret || '')
-        }
-
-        // Monobank API
-        if (APIs.monobank) {
-          setMonobankToken(APIs.monobank.token || '')
-          setMonobankBlackCardId(APIs.monobank.black_card_id || '')
-          setMonobankWhiteCardId(APIs.monobank.white_card_id || '')
-        }
-
-
-      }
-    } catch (e) {
-      console.error('Failed to load API keys:', e)
-    }
-  }
-
-  // Load API keys from separate APIs column
+  // Bank and Binance keys are connected on the cards page now; only the automation key lives here
   useEffect(() => {
-    loadApiKeys()
     loadApiKey()
-    // Note: we do NOT load from localStorage here anymore — it caused the re-bind bug.
-    // Token state is set only from DB (via loadApiKeys) or after successful exchange.
   }, [])
 
   // Load API Key
@@ -324,22 +312,6 @@ export default function ProfilePage() {
 
       if (error) throw error
 
-      // Save API keys to preferences
-      const apis = {
-        binance: {
-          api_key: binanceApiKey.trim(),
-          api_secret: binanceApiSecret.trim()
-        },
-        monobank: {
-          token: monobankToken.trim(),
-          black_card_id: monobankBlackCardId.trim(),
-          white_card_id: monobankWhiteCardId.trim()
-        }
-        // TrueLayer keys are handled via .env and backend now
-      }
-
-      await updatePreferencesSection('apis', apis)
-
       toast.success('Профіль оновлено!')
 
       // Refresh user data
@@ -349,9 +321,6 @@ export default function ProfilePage() {
         setAvatarPreview(updatedUser.user_metadata?.avatar_url || null)
       }
 
-      // Reload API keys to get masked versions from backend
-      invalidatePreferencesCache()
-      await loadApiKeys()
 
     } catch (error) {
       console.error('Error updating profile:', error)
@@ -370,9 +339,24 @@ export default function ProfilePage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand"></div>
       </div>
     )
+  }
+
+  const section = 'rounded-3xl bg-gradient-to-b from-white/[0.075] to-white/[0.025] backdrop-blur-xl shadow-glass border border-white/10 p-4 sm:p-5'
+  const field = 'w-full pl-10 pr-4 py-2.5 border border-white/[0.14] rounded-xl focus:ring-2 focus:ring-brand focus:border-brand outline-none transition'
+
+  const addPinnedCategory = () => {
+    const trimmed = newCategoryInput.trim()
+    if (!trimmed) return
+    if (!pinnedCategories.includes(trimmed)) {
+      updateNestedSetting('dashboard.pinnedCategories', [...pinnedCategories, trimmed])
+      toast.success(`Категорію "${trimmed}" додано`)
+    } else {
+      toast('Така категорія вже є в списку', { icon: 'ℹ️' })
+    }
+    setNewCategoryInput('')
   }
 
   return (
@@ -380,503 +364,303 @@ export default function ProfilePage() {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="bg-white rounded-2xl shadow-soft border border-gray-200 p-6"
+      className="space-y-4"
     >
-      <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-2">
-        <User size={24} />
-        Налаштування профілю
-      </h2>
+      <h1 className="text-[28px] font-bold tracking-tight px-1">Налаштування</h1>
 
-      <div className="space-y-6">
-        {/* Avatar Section */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 pb-6 border-b border-gray-200">
-          <div className="flex-shrink-0">
-            {avatarPreview ? (
-              <img
-                src={avatarPreview}
-                alt="Avatar"
-                className="h-20 w-20 rounded-full object-cover border-2 border-gray-200"
-              />
-            ) : (
-              <div className="h-20 w-20 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-2xl font-bold">
-                {user?.email?.[0]?.toUpperCase() || 'U'}
-              </div>
-            )}
-          </div>
-          <div className="flex-1">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Фото профілю
+      {/* Profile */}
+      <section className={section}>
+        <SectionTitle icon={User} color="#8E8E93" title="Профіль" />
+
+        <div className="flex items-center gap-4 mb-5">
+          {avatarPreview ? (
+            <img src={avatarPreview} alt="Avatar" className="h-16 w-16 rounded-full object-cover border border-white/10" />
+          ) : (
+            <div className="h-16 w-16 rounded-full bg-gradient-to-br from-brand to-brand-deep grid place-items-center text-white text-2xl font-bold">
+              {user?.email?.[0]?.toUpperCase() || 'U'}
+            </div>
+          )}
+          <div>
+            <label className="inline-flex items-center gap-2 h-9 px-3.5 rounded-full btn-soft cursor-pointer text-sm font-semibold">
+              <Upload size={15} />
+              Змінити фото
+              <input type="file" accept="image/*" onChange={handleAvatarChange} className="hidden" />
             </label>
-            <label className="inline-flex items-center gap-2 px-4 py-2 bg-gray-50 hover:bg-gray-100 rounded-lg cursor-pointer transition-colors">
-              <Upload size={16} className="text-gray-600" />
-              <span className="text-sm text-gray-700">Завантажити фото</span>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleAvatarChange}
-                className="hidden"
-              />
-            </label>
-            <p className="text-xs text-gray-500 mt-1">JPG, PNG або GIF. Макс. 5MB</p>
+            <p className="text-xs text-white/45 mt-1.5">JPG, PNG або GIF. Макс. 5MB</p>
           </div>
         </div>
 
-        {/* Display Name */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Ім'я
-          </label>
-          <div className="relative">
-            <User className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-            <input
-              type="text"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="Введіть ваше ім'я"
-              className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
-            />
-          </div>
-        </div>
-
-        {/* Email (read-only) */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Email
-          </label>
-          <div className="relative">
-            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-            <input
-              type="email"
-              value={user?.email || ''}
-              disabled
-              className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed"
-            />
-          </div>
-          <p className="text-xs text-gray-500 mt-1">Email не можна змінити</p>
-        </div>
-
-        {/* Binance API Section */}
-        <div className="pt-6 border-t border-gray-200">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Key size={20} className="text-yellow-600" />
-              <h3 className="text-lg font-semibold text-gray-900">Binance API</h3>
-            </div>
-            <button
-              onClick={() => setShowBinanceGuide(!showBinanceGuide)}
-              className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700 font-medium bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-full transition-colors"
-            >
-              <HelpCircle size={16} />
-              <span>Як отримати ключі?</span>
-              {showBinanceGuide ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            </button>
-          </div>
-
-          {/* Binance Guide */}
-          <motion.div
-            initial={false}
-            animate={{ height: showBinanceGuide ? 'auto' : 0, opacity: showBinanceGuide ? 1 : 0 }}
-            transition={{ duration: 0.3 }}
-            className="overflow-hidden"
-          >
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6 text-sm text-gray-800">
-              <h4 className="font-semibold text-gray-900 mb-2 flex items-center gap-2">
-                <ExternalLink size={16} />
-                Інструкція отримання ключів Binance:
-              </h4>
-              <ol className="list-decimal list-inside space-y-1 ml-1">
-                <li>Перейдіть на сторінку <a href="https://www.binance.com/en/my/settings/api-management" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-medium">API Management</a>.</li>
-                <li>Натисніть <strong>Create API</strong> та виберіть <strong>System Generated</strong>.</li>
-                <li>Введіть назву (наприклад: <code>WalletApp</code>) та пройдіть верифікацію.</li>
-                <li>Скопіюйте <strong>API Key</strong> та <strong>Secret Key</strong>. <span className="text-red-600 font-medium">Важливо: Secret Key показується тільки один раз!</span></li>
-                <li>У налаштуваннях API поставте галочку <strong>Enable Reading</strong> (зазвичай увімкнено за замовчуванням).</li>
-                <li>Вставте ключі у поля нижче та натисніть <strong>Зберегти зміни</strong>.</li>
-              </ol>
-            </div>
-          </motion.div>
-
-          <div className="space-y-4 bg-gray-50 rounded-lg p-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                API Key
-              </label>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="block text-xs font-semibold text-white/55 mb-1.5 px-1">Ім'я</label>
+            <div className="relative">
+              <User className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" size={17} />
               <input
                 type="text"
-                value={binanceApiKey}
-                onChange={(e) => setBinanceApiKey(e.target.value)}
-                placeholder="Введіть Binance API Key"
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 outline-none transition"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="Введіть ваше ім'я"
+                className={field}
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                API Secret
-              </label>
-              <input
-                type="text"
-                value={binanceApiSecret}
-                onChange={(e) => setBinanceApiSecret(e.target.value)}
-                placeholder="Введіть Binance API Secret"
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 outline-none transition"
-              />
-            </div>
-            <p className="text-xs text-gray-500">
-              Ключі зберігаються безпечно в вашому обліковому записі
-            </p>
           </div>
-        </div>
-
-        {/* Monobank API Section */}
-        <div className="pt-6 border-t border-gray-200">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <CreditCard size={20} className="text-indigo-600" />
-              <h3 className="text-lg font-semibold text-gray-900">Monobank API</h3>
-            </div>
-            <button
-              onClick={() => setShowMonobankGuide(!showMonobankGuide)}
-              className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700 font-medium bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-full transition-colors"
-            >
-              <HelpCircle size={16} />
-              <span>Як отримати токен?</span>
-              {showMonobankGuide ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            </button>
-          </div>
-
-          {/* Monobank Guide */}
-          <motion.div
-            initial={false}
-            animate={{ height: showMonobankGuide ? 'auto' : 0, opacity: showMonobankGuide ? 1 : 0 }}
-            transition={{ duration: 0.3 }}
-            className="overflow-hidden"
-          >
-            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-6 text-sm text-gray-800">
-              <h4 className="font-semibold text-gray-900 mb-2 flex items-center gap-2">
-                <ExternalLink size={16} />
-                Інструкція отримання токена Monobank:
-              </h4>
-              <ol className="list-decimal list-inside space-y-1 ml-1">
-                <li>Перейдіть на офіційний сайт <a href="https://api.monobank.ua/" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-medium">api.monobank.ua</a>.</li>
-                <li>Відскануйте QR-код через мобільний додаток Monobank.</li>
-                <li>Підтвердіть вхід у додатку.</li>
-                <li>Після входу скопіюйте довгий рядок під назвою <strong>Токен для особистого використання</strong>.</li>
-                <li>Вставте цей токен у поле нижче. ID карток можна буде отримати автоматично після збереження.</li>
-              </ol>
-            </div>
-          </motion.div>
-
-          <div className="space-y-4 bg-gray-50 rounded-lg p-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Monobank Token
-              </label>
-              <input
-                type="text"
-                value={monobankToken}
-                onChange={(e) => setMonobankToken(e.target.value)}
-                placeholder="Введіть Monobank Token"
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                ID Чорної картки
-              </label>
-              <input
-                type="text"
-                value={monobankBlackCardId}
-                onChange={(e) => setMonobankBlackCardId(e.target.value)}
-                placeholder="Введіть ID чорної картки"
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                ID Білої картки
-              </label>
-              <input
-                type="text"
-                value={monobankWhiteCardId}
-                onChange={(e) => setMonobankWhiteCardId(e.target.value)}
-                placeholder="Введіть ID білої картки"
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
-              />
-            </div>
-            <p className="text-xs text-gray-500">
-              Token та ID карток зберігаються безпечно в вашому обліковому записі
-            </p>
-          </div>
-        </div>
-
-        {/* Dashboard Settings Section */}
-        <div className="pt-6 border-t border-gray-200">
-          <div className="flex items-center gap-2 mb-4">
-            <BarChart3 size={20} className="text-blue-600" />
-            <h3 className="text-lg font-semibold text-gray-900">Налаштування дашборду</h3>
-          </div>
-          <div className="space-y-4 bg-gray-50 rounded-lg p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Показувати USDT в графіку (режим ALL)
-                </label>
-                <p className="text-xs text-gray-500">
-                  Коли вибрано "ALL" в графіку витрат і доходів, показувати USDT разом з іншими валютами
-                </p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer ml-4">
-                <input
-                  type="checkbox"
-                  checked={showUsdtInChart}
-                  onChange={(e) => {
-                    const newValue = e.target.checked
-                    // Оновлюємо локальний стейт (джерело правди) - автоматично зберігається через debounce
-                    updateNestedSetting('dashboard.showUsdtInChart', newValue)
-                    toast.success('Налаштування збережено')
-                  }}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-              </label>
-            </div>
-
-            <div className="pt-4 border-t border-gray-200">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Закріплені категорії транзакцій
-              </label>
-              <p className="text-xs text-gray-500 mb-3">
-                Додайте категорії, які будуть завжди відображатися зверху на головній сторінці. Введіть назву вручну і натисніть «+».
-              </p>
-
-              {/* Input row */}
-              <div className="flex gap-2 mb-3">
-                <input
-                  type="text"
-                  value={newCategoryInput}
-                  onChange={(e) => setNewCategoryInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      const trimmed = newCategoryInput.trim()
-                      if (trimmed && !pinnedCategories.includes(trimmed)) {
-                        updateNestedSetting('dashboard.pinnedCategories', [...pinnedCategories, trimmed])
-                        toast.success(`Категорію "${trimmed}" додано`)
-                      }
-                      setNewCategoryInput('')
-                    }
-                  }}
-                  placeholder="Назва категорії..."
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const trimmed = newCategoryInput.trim()
-                    if (!trimmed) return
-                    if (!pinnedCategories.includes(trimmed)) {
-                      updateNestedSetting('dashboard.pinnedCategories', [...pinnedCategories, trimmed])
-                      toast.success(`Категорію "${trimmed}" додано`)
-                    } else {
-                      toast('Така категорія вже є в списку', { icon: 'ℹ️' })
-                    }
-                    setNewCategoryInput('')
-                  }}
-                  className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold transition-colors flex items-center gap-1"
-                >
-                  +
-                </button>
-              </div>
-
-              {/* Pinned tags */}
-              <div className="flex flex-wrap gap-2">
-                {pinnedCategories.length > 0 ? pinnedCategories.map(cat => (
-                  <span
-                    key={cat}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-100 border border-amber-300 text-amber-800 rounded-full text-xs font-medium"
-                  >
-                    {cat}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        updateNestedSetting('dashboard.pinnedCategories', pinnedCategories.filter(c => c !== cat))
-                      }}
-                      className="ml-0.5 hover:text-amber-900 text-amber-600 font-bold leading-none"
-                      title="Видалити"
-                    >
-                      ×
-                    </button>
-                  </span>
-                )) : (
-                  <span className="text-xs text-gray-400 italic">Немає закріплених категорій. Додайте першу вище.</span>
-                )}
-              </div>
+          <div>
+            <label className="block text-xs font-semibold text-white/55 mb-1.5 px-1">Email</label>
+            <div className="relative">
+              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" size={17} />
+              <input type="email" value={user?.email || ''} disabled className={`${field} text-white/50 cursor-not-allowed`} />
             </div>
           </div>
         </div>
 
-        {/* API Key Section для автоматизації */}
-        <div className="pt-6 border-t border-gray-200">
-          <div className="flex items-center gap-2 mb-4">
-            <Key size={20} className="text-green-600" />
-            <h3 className="text-lg font-semibold text-gray-900">API Key для автоматизації</h3>
-          </div>
-          <div className="space-y-4 bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 border border-green-200">
-            <p className="text-sm text-gray-700 mb-4">
-              API Key дозволяє автоматично синхронізувати транзакції з Monobank через iPhone Shortcuts або інші автоматизації.
-              Ключ не має терміну дії, на відміну від JWT токену.
-            </p>
-
-            {/* API URL для зручності */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                API URL (для використання в автоматизаціях)
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  defaultValue={getApiUrl()}
-                  onChange={(e) => {
-                    const newUrl = e.target.value.trim()
-                    if (newUrl) {
-                      localStorage.setItem('api_url_override', newUrl)
-                      toast.success('API URL збережено! Перезавантажте сторінку.')
-                    } else {
-                      localStorage.removeItem('api_url_override')
-                      toast.success('API URL скинуто до значення за замовчуванням')
-                    }
-                  }}
-                  className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg bg-white font-mono text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
-                  placeholder="http://192.168.1.100:8787"
-                />
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(getApiUrl())
-                      toast.success('API URL скопійовано!')
-                    } catch (e) {
-                      toast.error('Не вдалося скопіювати URL')
-                    }
-                  }}
-                  className="p-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                  title="Скопіювати URL"
-                >
-                  <Copy size={18} className="text-gray-600" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    localStorage.removeItem('api_url_override')
-                    toast.success('API URL скинуто! Перезавантажте сторінку.')
-                    setTimeout(() => window.location.reload(), 1000)
-                  }}
-                  className="p-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm"
-                  title="Скинути до значення за замовчуванням"
-                >
-                  ↻
-                </button>
-              </div>
-              <p className="text-xs text-gray-600 mt-1">
-                Використай цей URL разом з API Key для налаштування автоматизації.
-                <br />
-                <span className="text-amber-600 font-medium">На мобільних:</span> введіть IP-адресу вашого комп'ютера (наприклад: http://192.168.1.100:8787)
-              </p>
-            </div>
-
-            {apiKeyLoading ? (
-              <div className="flex items-center justify-center py-4">
-                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600"></div>
-              </div>
-            ) : apiKey ? (
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Ваш API Key
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type={apiKeyVisible ? 'text' : 'password'}
-                      value={apiKey}
-                      readOnly
-                      className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg bg-white font-mono text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setApiKeyVisible(!apiKeyVisible)}
-                      className="p-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                      title={apiKeyVisible ? 'Приховати' : 'Показати'}
-                    >
-                      {apiKeyVisible ? <EyeOff size={18} className="text-gray-600" /> : <Eye size={18} className="text-gray-600" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleCopyApiKey}
-                      className="p-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                      title="Скопіювати"
-                    >
-                      <Copy size={18} className="text-gray-600" />
-                    </button>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleGenerateApiKey}
-                  disabled={apiKeyGenerating}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <RefreshCw size={16} className={apiKeyGenerating ? 'animate-spin' : ''} />
-                  {apiKeyGenerating ? 'Генерація...' : 'Створити новий ключ'}
-                </button>
-                <p className="text-xs text-gray-600">
-                  ⚠️ При створенні нового ключа старий перестане працювати
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <p className="text-sm text-gray-600">
-                  У вас поки немає API ключа. Створіть його для використання в автоматизаціях.
-                </p>
-                <button
-                  type="button"
-                  onClick={handleGenerateApiKey}
-                  disabled={apiKeyGenerating}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Key size={16} />
-                  {apiKeyGenerating ? 'Генерація...' : 'Створити API Key'}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Save Button */}
-        <div className="flex justify-end pt-4 border-t border-gray-200">
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
+        <div className="flex justify-end mt-4">
+          <button
+            type="button"
             onClick={handleSave}
             disabled={saving}
-            className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white font-medium rounded-lg transition-all shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-primary inline-flex items-center gap-2 h-10 px-5 rounded-full text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Save size={18} />
-            {saving ? 'Збереження...' : 'Зберегти зміни'}
-          </motion.button>
+            <Save size={16} />
+            {saving ? 'Збереження...' : 'Зберегти'}
+          </button>
         </div>
+      </section>
 
-        {/* Logout Button */}
-        <div className="flex justify-end pt-4 border-t border-gray-200">
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            onClick={() => setShowLogoutModal(true)}
-            className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 text-white font-medium rounded-lg transition-all shadow-sm hover:shadow-md"
-          >
-            <LogOut size={18} />
-            Вийти з акаунту
-          </motion.button>
+      {/* Main currency */}
+      <section className={section}>
+        <SectionTitle
+          icon={Coins}
+          color="#34C759"
+          title="Основна валюта"
+          subtitle="Доходи, витрати й графік на головній рахуються в цій валюті. Та сама, що в застосунку на iPhone."
+        />
+        <div className="rounded-2xl overflow-hidden border border-white/[0.08] divide-y divide-white/[0.06]">
+          {SUPPORTED_CURRENCIES.map(c => {
+            const active = c.code === primaryCurrency
+            return (
+              <button
+                key={c.code}
+                type="button"
+                onClick={() => {
+                  if (active) return
+                  setPrimaryCurrency(c.code)
+                  toast.success(`Основна валюта: ${c.name}`)
+                }}
+                className={`w-full flex items-center gap-3 px-3.5 py-3 text-left transition-colors ${
+                  active ? 'bg-brand/[0.08]' : 'bg-white/[0.02] hover:bg-white/[0.05]'
+                }`}
+              >
+                <span
+                  className="h-9 w-9 shrink-0 rounded-[10px] grid place-items-center text-white font-bold shadow-[inset_0_1px_0_rgba(255,255,255,0.25)]"
+                  style={{ background: CURRENCY_COLORS[c.code] }}
+                >
+                  {c.symbol}
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="block font-semibold text-white">{c.name}</span>
+                  <span className="block text-xs text-white/45">{c.code}</span>
+                </span>
+                {active && <Check size={20} strokeWidth={3} className="text-brand" />}
+              </button>
+            )
+          })}
         </div>
-      </div>
+      </section>
+
+      {/* Pinned categories */}
+      <section className={section}>
+        <SectionTitle
+          icon={Pin}
+          color="#FF9500"
+          title="Закріплені категорії"
+          subtitle="Транзакції цих категорій завжди показуються зверху на головній."
+        />
+        <div className="flex gap-2 mb-3">
+          <input
+            type="text"
+            value={newCategoryInput}
+            onChange={(e) => setNewCategoryInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                addPinnedCategory()
+              }
+            }}
+            placeholder="Назва категорії..."
+            className="flex-1 px-3.5 py-2.5 border border-white/[0.14] rounded-xl text-sm focus:ring-2 focus:ring-brand focus:border-brand outline-none transition"
+          />
+          <button
+            type="button"
+            onClick={addPinnedCategory}
+            className="btn-primary h-10 w-10 shrink-0 rounded-full text-lg font-bold grid place-items-center"
+            title="Додати"
+          >
+            +
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {pinnedCategories.length > 0 ? pinnedCategories.map(cat => (
+            <span
+              key={cat}
+              className="inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 bg-brand/[0.12] border border-brand/30 text-orange-200 rounded-full text-xs font-semibold"
+            >
+              {cat}
+              <button
+                type="button"
+                onClick={() => updateNestedSetting('dashboard.pinnedCategories', pinnedCategories.filter(c => c !== cat))}
+                className="h-4 w-4 grid place-items-center rounded-full bg-white/10 hover:bg-white/20 text-white/80 leading-none"
+                title="Видалити"
+              >
+                ×
+              </button>
+            </span>
+          )) : (
+            <span className="text-xs text-white/40">Немає закріплених категорій. Додайте першу вище.</span>
+          )}
+        </div>
+      </section>
+
+      {/* Automation key */}
+      <section className={section}>
+        <SectionTitle icon={Key} color="#007AFF" title="API Key для автоматизації" />
+        <div className="space-y-4">
+          <p className="text-sm text-white/70">
+            API Key дозволяє автоматично синхронізувати транзакції з Monobank через iPhone Shortcuts або інші автоматизації.
+            Ключ не має терміну дії, на відміну від JWT токену.
+          </p>
+
+          {/* API URL для зручності */}
+          <div>
+            <label className="block text-xs font-semibold text-white/55 mb-1.5 px-1">
+              API URL (для використання в автоматизаціях)
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                defaultValue={getApiUrl()}
+                onChange={(e) => {
+                  const newUrl = e.target.value.trim()
+                  if (newUrl) {
+                    localStorage.setItem('api_url_override', newUrl)
+                    toast.success('API URL збережено! Перезавантажте сторінку.')
+                  } else {
+                    localStorage.removeItem('api_url_override')
+                    toast.success('API URL скинуто до значення за замовчуванням')
+                  }
+                }}
+                className="flex-1 px-4 py-2.5 border border-white/[0.14] rounded-xl font-mono text-sm focus:ring-2 focus:ring-brand focus:border-brand outline-none"
+                placeholder="http://192.168.1.100:8787"
+              />
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(getApiUrl())
+                    toast.success('API URL скопійовано!')
+                  } catch (e) {
+                    toast.error('Не вдалося скопіювати URL')
+                  }
+                }}
+                className="p-2.5 border border-white/[0.14] rounded-xl hover:bg-white/[0.06] transition-colors"
+                title="Скопіювати URL"
+              >
+                <Copy size={18} className="text-white/70" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  localStorage.removeItem('api_url_override')
+                  toast.success('API URL скинуто! Перезавантажте сторінку.')
+                  setTimeout(() => window.location.reload(), 1000)
+                }}
+                className="p-2.5 border border-white/[0.14] rounded-xl hover:bg-white/[0.06] transition-colors text-sm"
+                title="Скинути до значення за замовчуванням"
+              >
+                ↻
+              </button>
+            </div>
+            <p className="text-xs text-white/70 mt-1">
+              Використай цей URL разом з API Key для налаштування автоматизації.
+              <br />
+              <span className="text-amber-400 font-medium">На мобільних:</span> введіть IP-адресу вашого комп'ютера (наприклад: http://192.168.1.100:8787)
+            </p>
+          </div>
+
+          {apiKeyLoading ? (
+            <div className="flex items-center justify-center py-4">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-brand"></div>
+            </div>
+          ) : apiKey ? (
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-white/55 mb-1.5 px-1">
+                  Ваш API Key
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type={apiKeyVisible ? 'text' : 'password'}
+                    value={apiKey}
+                    readOnly
+                    className="flex-1 px-4 py-2.5 border border-white/[0.14] rounded-xl font-mono text-sm focus:ring-2 focus:ring-brand focus:border-brand outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setApiKeyVisible(!apiKeyVisible)}
+                    className="p-2.5 border border-white/[0.14] rounded-xl hover:bg-white/[0.06] transition-colors"
+                    title={apiKeyVisible ? 'Приховати' : 'Показати'}
+                  >
+                    {apiKeyVisible ? <EyeOff size={18} className="text-white/70" /> : <Eye size={18} className="text-white/70" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopyApiKey}
+                    className="p-2.5 border border-white/[0.14] rounded-xl hover:bg-white/[0.06] transition-colors"
+                    title="Скопіювати"
+                  >
+                    <Copy size={18} className="text-white/70" />
+                  </button>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleGenerateApiKey}
+                disabled={apiKeyGenerating}
+                className="btn-soft inline-flex items-center gap-2 h-9 px-4 rounded-full text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw size={16} className={apiKeyGenerating ? 'animate-spin' : ''} />
+                {apiKeyGenerating ? 'Генерація...' : 'Створити новий ключ'}
+              </button>
+              <p className="text-xs text-white/70">
+                ⚠️ При створенні нового ключа старий перестане працювати
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-sm text-white/70">
+                У вас поки немає API ключа. Створіть його для використання в автоматизаціях.
+              </p>
+              <button
+                type="button"
+                onClick={handleGenerateApiKey}
+                disabled={apiKeyGenerating}
+                className="btn-soft inline-flex items-center gap-2 h-9 px-4 rounded-full text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Key size={16} />
+                {apiKeyGenerating ? 'Генерація...' : 'Створити API Key'}
+              </button>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <button
+        type="button"
+        onClick={() => setShowLogoutModal(true)}
+        className="w-full flex items-center justify-center gap-2 h-12 rounded-2xl bg-white/[0.05] hover:bg-white/[0.08] border border-white/10 text-[#FF453A] font-semibold transition-colors"
+      >
+        <LogOut size={18} />
+        Вийти з акаунту
+      </button>
 
       <ConfirmModal
         open={showLogoutModal}

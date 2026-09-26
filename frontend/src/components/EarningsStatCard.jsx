@@ -1,460 +1,177 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { supabase } from '../lib/supabase'
+import { motion } from 'framer-motion'
 import { txBus } from '../utils/txBus'
 import useMonoRates from '../hooks/useMonoRates'
 import { listCards } from '../api/cards'
 import { apiFetch } from '../utils.jsx'
-import { useSettingsStore } from '../store/useSettingsStore'
-import { ChevronDown, Check } from 'lucide-react'
+import { usePrimaryCurrency, convertAmount, currencySymbol } from '../utils/primaryCurrency'
 
-// Custom Dropdown component for selecting currencies with beautiful styling
-function CurrencySelect({ value, onChange, options }) {
-  const [isOpen, setIsOpen] = useState(false)
-  const containerRef = useRef(null)
+const MONTHS = [
+  'Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень',
+  'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень',
+]
 
-  useEffect(() => {
-    function handleClickOutside(event) {
-      if (containerRef.current && !containerRef.current.contains(event.target)) {
-        setIsOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
-
-  const selectedOption = options.find(opt => opt.value === value) || options[0]
-
-  return (
-    <div className="relative z-20" ref={containerRef}>
-      <button
-        type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50/80 border border-gray-200/80 rounded-lg shadow-sm transition-all duration-200 focus:outline-none select-none hover:border-gray-300"
-      >
-        <span>{selectedOption?.label}</span>
-        <ChevronDown size={12} className={`text-gray-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
-      </button>
-
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: 4, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 4, scale: 0.95 }}
-            transition={{ duration: 0.1 }}
-            className="absolute right-0 mt-1 min-w-[120px] bg-white/95 backdrop-blur-md border border-gray-200/60 rounded-xl shadow-xl overflow-hidden py-1 z-30"
-          >
-            {options.map((opt) => {
-              const isSelected = opt.value === value
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => {
-                    onChange(opt.value)
-                    setIsOpen(false)
-                  }}
-                  className={`w-full flex items-center justify-between px-3 py-1.5 text-xs text-left transition-colors duration-150 ${
-                    isSelected 
-                      ? 'bg-indigo-50 text-indigo-600 font-semibold' 
-                      : 'text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  <span>{opt.label}</span>
-                  {isSelected && <Check size={12} className="text-indigo-600 flex-shrink-0" />}
-                </button>
-              )
-            })}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  )
+const isExcludedFromStats = (tx) => {
+  if (!tx) return false
+  if (tx.exclude_from_stats === true || tx.exclude_from_stats === 'true' || tx.exclude_from_stats === 1) return true
+  // Card switched off in its settings (flag computed by the backend)
+  if (tx.card_excluded_from_stats) return true
+  // Linked refunds are counted through their expense (amount_stat), not directly
+  if (tx.refund_for) return true
+  return String(tx.note || '').includes('[refund_for:')
 }
 
-export default function EarningsStatCard({ title, mode, currency: initialCurrency }) {
-  // Використовуємо новий store
-  const settings = useSettingsStore((state) => state.settings)
-  const updateNestedSetting = useSettingsStore((state) => state.updateNestedSetting)
-  const initialized = useSettingsStore((state) => state.initialized)
-  // mode: 'earning' or 'spending'
-  const [selectedCurrency, setSelectedCurrency] = useState(initialCurrency || 'ALL_UAH')
-  const [prefsLoaded, setPrefsLoaded] = useState(false)
+const amountForStats = (tx) => {
+  const v = tx?.amount_stat
+  if (v === null || v === undefined || v === '') return Number(tx?.amount || 0)
+  return Number(v || 0)
+}
+
+/**
+ * This month's income or spending (and last month's for comparison), everything converted to
+ * the main currency from the settings — like the iPhone Home screen.
+ */
+export default function EarningsStatCard({ title, mode }) {
+  const primary = usePrimaryCurrency()
+  const rates = useMonoRates()
   const [loading, setLoading] = useState(true)
   const [total, setTotal] = useState(0)
   const [prevTotal, setPrevTotal] = useState(0)
-  const currencies = ['UAH', 'EUR', 'USD', 'USDT']
-  const rates = useMonoRates()
-  const saveTimeoutRef = useRef(null)
-  const lastSavedCurrencyRef = useRef(null) // Відстежуємо останнє збережене значення
+  const abortControllerRef = useRef(null)
+
   const delta = useMemo(() => {
     if (prevTotal === 0) return 0
     return Math.round(((total - prevTotal) / Math.abs(prevTotal)) * 100)
   }, [total, prevTotal])
 
-  // Init preferences from settings store (single fetch per session)
   useEffect(() => {
-    if (!initialized || !settings) return
-    const modePrefs = settings?.earningsStat?.[mode]
-    // Завантажуємо тільки якщо currency не null і не undefined (включаючи "ALL_UAH" та "ALL_EUR")
-    if (modePrefs && modePrefs.currency !== undefined && modePrefs.currency !== null && modePrefs.currency !== '') {
-      setSelectedCurrency(modePrefs.currency)
-      lastSavedCurrencyRef.current = modePrefs.currency // Зберігаємо початкове значення
-    } else {
-      // Якщо значення немає в БД або null, встановлюємо "ALL_UAH" за замовчуванням
-      const defaultCurrency = 'ALL_UAH'
-      setSelectedCurrency(defaultCurrency)
-      lastSavedCurrencyRef.current = defaultCurrency
-    }
-    setPrefsLoaded(true)
-  }, [initialized, settings, mode]) // НЕ додаємо selectedCurrency в залежності, щоб уникнути циклу
-
-  // Save preferences to DB when changed (через store з debounce) - тільки якщо значення дійсно змінилося
-  useEffect(() => {
-    if (!prefsLoaded) return
-    
-    // Перевіряємо, чи значення дійсно змінилося
-    if (selectedCurrency === lastSavedCurrencyRef.current) {
-      return // Нічого не змінилося, не записуємо
-    }
-    
-    // Оновлюємо збережене значення
-    lastSavedCurrencyRef.current = selectedCurrency
-
-    // Оновлюємо через store (автоматично зберігається через debounce)
-    // НЕ зберігаємо null - якщо selectedCurrency null або undefined, не зберігаємо поле
-    const earningsStat = { ...(settings?.earningsStat || {}) }
-    
-    // Зберігаємо тільки якщо значення не null і не undefined (включаючи "ALL_UAH" та "ALL_EUR")
-    if (selectedCurrency !== null && selectedCurrency !== undefined && selectedCurrency !== '') {
-      earningsStat[mode] = { currency: selectedCurrency }
-      updateNestedSetting('earningsStat', earningsStat)
-    } else {
-      // Якщо null/undefined/порожнє, НЕ зберігаємо взагалі (не викликаємо updateNestedSetting)
-      // Це означає, що поле залишиться як є в БД, або буде видалено при наступному оновленні
-    }
-  }, [selectedCurrency, prefsLoaded, mode, updateNestedSetting, settings]) // Видалено settings з залежностей, щоб уникнути циклу
-
-  // Захист від дублювання через AbortController
-  const abortControllerRef = useRef(null)
-
-  useEffect(() => {
-    // Скасовуємо попередній запит, якщо він є
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
-    }
-    
-    // Створюємо новий AbortController
-    const abortController = new AbortController()
-    abortControllerRef.current = abortController
-
     let mounted = true
 
-    // Helper to convert any currency to target currency using Monobank rates
-    // USDT is treated as USD (code 840)
-    const convertCurrency = (amount, fromCurrency, toCurrency) => {
-      if (!fromCurrency || fromCurrency === toCurrency) return amount
-      
-      const codeMap = { UAH: 980, USD: 840, EUR: 978, GBP: 826, PLN: 985, USDT: 840 }
-      const fromCode = codeMap[fromCurrency] || 980
-      const toCode = codeMap[toCurrency] || 980
-      
-      if (fromCode === toCode) return amount
-      
-      // Convert via UAH as intermediate currency
-      // First convert from source currency to UAH
-      let inUAH = amount
-      if (fromCode !== 980) {
-        const rateToUAH = rates?.[`${fromCode}->980`]
-        if (!rateToUAH) return amount
-        inUAH = amount * rateToUAH
-      }
-      
-      // Then convert from UAH to target currency
-      if (toCode === 980) return inUAH
-      const rateFromUAH = rates?.[`${toCode}->980`]
-      if (!rateFromUAH) return inUAH
-      return inUAH / rateFromUAH
-    }
-
     const fetchData = async () => {
-      // Перевіряємо, чи запит не було скасовано
-      if (abortController.signal.aborted) {
-        return
-      }
-      
+      if (abortControllerRef.current) abortControllerRef.current.abort()
+      const abortController = new AbortController()
+      abortControllerRef.current = abortController
+      const aborted = () => abortController.signal.aborted || !mounted
+
       setLoading(true)
-      
       try {
-        // Calculate first day of current month and first day of previous month
         const now = new Date()
         const firstDayThisMonth = new Date(now.getFullYear(), now.getMonth(), 1)
         const firstDayPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
         const firstDayNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1)
 
-        // Перевіряємо перед виконанням запиту
-        if (abortController.signal.aborted) return
-
-        // Fetch card info first to determine savings accounts and currencies (using cached API)
         const cards = await listCards()
-
-        // Перевіряємо після отримання карток
-        if (abortController.signal.aborted || !mounted) return
-
+        if (aborted()) return
         const cardMap = new Map()
         cards.forEach(c => {
           const bank = String(c.bank || '').toLowerCase()
           const name = String(c.name || '').toLowerCase()
-          const isSavings = bank.includes('збер') || bank.includes('savings')
-          const isBinance = bank.includes('binance') || name.includes('binance')
-          cardMap.set(c.id, { isSavings, isBinance, currency: (c.currency || 'UAH').toUpperCase() })
+          cardMap.set(c.id, {
+            isSavings: bank.includes('збер') || bank.includes('savings'),
+            isBinance: bank.includes('binance') || name.includes('binance'),
+            currency: (c.currency || 'UAH').toUpperCase(),
+          })
         })
 
-        // Перевіряємо перед виконанням запиту транзакцій
-        if (abortController.signal.aborted || !mounted) return
-
-        const isExcludedFromStats = (tx) => {
-          if (!tx) return false
-          // New rule: exclude from any stats when flag is true.
-          if (tx.exclude_from_stats === true || tx.exclude_from_stats === 'true' || tx.exclude_from_stats === 1) return true
-          // Card switched off in its settings (flag computed by the backend)
-          if (tx.card_excluded_from_stats) return true
-          // Safety/backward-compat: linked refund rows are not counted directly
-          if (tx.refund_for) return true
-          const note = String(tx.note || '')
-          return note.includes('[refund_for:')
-        }
-
-        const amountForStats = (tx) => {
-          const v = tx?.amount_stat
-          if (v === null || v === undefined || v === '') return Number(tx?.amount || 0)
-          return Number(v || 0)
-        }
-
-        // Fetch transactions from this month
-        const fields = 'id,amount,amount_stat,exclude_from_stats,created_at,is_transfer,transfer_role,transfer_id,archives,card,card_id,category,note,refund_for'
-        const allTxs = await apiFetch(
-          `/api/transactions?start_date=${firstDayThisMonth.toISOString()}&end_date=${firstDayNextMonth.toISOString()}&fields=${fields}&order_by=created_at&order_asc=true`,
-          { signal: abortController.signal }
-        ) || []
-        
-        // Перевіряємо після отримання транзакцій
-        if (abortController.signal.aborted || !mounted) return
-
-        // Apply filters: no archived, no transfers, no savings
-        const included = new Set()
-        const effectiveCurrency = selectedCurrency || 'ALL_UAH'
-
-        for (const tx of allTxs) {
-          if (tx.archives) continue
-          if (isExcludedFromStats(tx)) continue
-          
-          // Check if transaction's card is savings
-          const cardInfo = cardMap.get(tx.card_id) || { isSavings: false, isBinance: false, currency: 'UAH' }
-          if (cardInfo.isSavings) continue
-
-          // Skip Binance transactions when calculating ALL to UAH or ALL to EUR
-          if ((effectiveCurrency === 'ALL_UAH' || effectiveCurrency === 'ALL_EUR') && cardInfo.isBinance) continue
-
-          // Check currency match using card currency
-          const txCur = cardInfo.currency
-          
-          // If selectedCurrency is a specific currency (not ALL), filter by it
-          if (effectiveCurrency !== 'ALL_UAH' && effectiveCurrency !== 'ALL_EUR' && txCur !== effectiveCurrency) continue
-
-          const amt = Number(amountForStats(tx) || 0)
-          if (mode === 'spending') {
-            if (amt >= 0) continue
-            included.add(tx.id)
-          } else if (mode === 'earning') {
-            if (amt <= 0) continue
-            included.add(tx.id)
+        // Sum of this mode's amounts in the main currency (savings and Binance left out)
+        const sumInPrimary = (txs) => {
+          let sum = 0
+          for (const tx of txs || []) {
+            if (tx.archives || isExcludedFromStats(tx)) continue
+            const card = cardMap.get(tx.card_id) || { currency: 'UAH' }
+            if (card.isSavings || card.isBinance) continue
+            const amt = amountForStats(tx)
+            if (mode === 'spending' ? amt >= 0 : amt <= 0) continue
+            const cur = tx.currency ? String(tx.currency).toUpperCase() : card.currency
+            const converted = convertAmount(Math.abs(amt), cur, primary, rates)
+            sum += converted ?? Math.abs(amt)
           }
+          return sum
         }
 
-        // Calculate total for this month
-        let currentTotal = 0
-        for (const tx of allTxs) {
-          if (!included.has(tx.id)) continue
-          const cardInfo = cardMap.get(tx.card_id) || { isSavings: false, isBinance: false, currency: 'UAH' }
-          const txCur = cardInfo.currency
-          const absAmt = Math.abs(Number(amountForStats(tx) || 0))
-          // Convert based on selected currency option
-          if (effectiveCurrency === 'ALL_UAH') currentTotal += convertCurrency(absAmt, txCur, 'UAH')
-          else if (effectiveCurrency === 'ALL_EUR') currentTotal += convertCurrency(absAmt, txCur, 'EUR')
-          else currentTotal += absAmt
-        }
+        const fields = 'id,amount,amount_stat,exclude_from_stats,created_at,is_transfer,archives,card_id,category,note,refund_for'
+        const range = (from, to) =>
+          `/api/transactions?start_date=${from.toISOString()}&end_date=${to.toISOString()}&fields=${fields}&order_by=created_at&order_asc=true`
 
-        // Перевіряємо перед виконанням запиту попереднього місяця
-        if (abortController.signal.aborted || !mounted) return
-
-        // Calculate previous month total
-        const prevMonthFields = 'id,amount,amount_stat,exclude_from_stats,created_at,is_transfer,archives,card_id,category,note,refund_for'
-        let prevMonthTotal = 0
-        try {
-          const prevTxs = await apiFetch(
-            `/api/transactions?start_date=${firstDayPrevMonth.toISOString()}&end_date=${firstDayThisMonth.toISOString()}&fields=${prevMonthFields}&order_by=created_at&order_asc=true`,
-            { signal: abortController.signal }
-          ) || []
-          
-          // Перевіряємо після отримання транзакцій попереднього місяця
-          if (abortController.signal.aborted || !mounted) return
-          for (const tx of prevTxs) {
-            if (tx.archives) continue
-            if (isExcludedFromStats(tx)) continue
-            
-            const cardInfo = cardMap.get(tx.card_id) || { isSavings: false, isBinance: false, currency: 'UAH' }
-            if (cardInfo.isSavings) continue
-
-            // Skip Binance transactions when calculating ALL to UAH or ALL to EUR
-            if ((effectiveCurrency === 'ALL_UAH' || effectiveCurrency === 'ALL_EUR') && cardInfo.isBinance) continue
-
-            const txCur = tx.currency ? String(tx.currency).toUpperCase() : cardInfo.currency
-            
-            // If selectedCurrency is a specific currency (not ALL), filter by it
-            if (effectiveCurrency !== 'ALL_UAH' && effectiveCurrency !== 'ALL_EUR' && txCur !== effectiveCurrency) continue
-
-            const amt = Number(amountForStats(tx) || 0)
-            let addAbs = 0
-            if (mode === 'spending' && amt < 0) addAbs = Math.abs(amt)
-            else if (mode === 'earning' && amt > 0) addAbs = amt
-
-            if (!addAbs) continue
-            if (effectiveCurrency === 'ALL_UAH') prevMonthTotal += convertCurrency(addAbs, txCur, 'UAH')
-            else if (effectiveCurrency === 'ALL_EUR') prevMonthTotal += convertCurrency(addAbs, txCur, 'EUR')
-            else prevMonthTotal += addAbs
-          }
-        } catch (e) {
-          if (e.name !== 'AbortError' && !abortController.signal.aborted) {
-            console.error('Failed to fetch previous month transactions:', e)
-          }
-        }
-
-        if (!mounted || abortController.signal.aborted) return
-        setPrevTotal(prevMonthTotal)
-        setTotal(currentTotal)
+        const [thisMonth, prevMonth] = await Promise.all([
+          apiFetch(range(firstDayThisMonth, firstDayNextMonth), { signal: abortController.signal }),
+          apiFetch(range(firstDayPrevMonth, firstDayThisMonth), { signal: abortController.signal }).catch(() => []),
+        ])
+        if (aborted()) return
+        setTotal(sumInPrimary(thisMonth))
+        setPrevTotal(sumInPrimary(prevMonth))
       } catch (e) {
-        // Ігноруємо помилки скасування
-        if (e.name === 'AbortError' || abortController.signal.aborted) return
+        if (e.name === 'AbortError' || aborted()) return
         console.error('fetch earnings stat failed', e)
-        if (!mounted || abortController.signal.aborted) return
         setTotal(0)
         setPrevTotal(0)
       } finally {
-        if (!abortController.signal.aborted && mounted) {
-          setLoading(false)
-        }
+        if (!aborted()) setLoading(false)
       }
     }
 
     fetchData()
-
-    // Subscribe to txBus for real-time updates
-    let unsub = null
-    if (txBus && typeof txBus.subscribe === 'function') {
-      unsub = txBus.subscribe(() => {
-        fetchData()
-      })
-    }
+    const unsub = txBus?.subscribe?.(() => fetchData())
 
     return () => {
       mounted = false
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort()
-        abortControllerRef.current = null
-      }
+      abortControllerRef.current?.abort()
+      abortControllerRef.current = null
       if (typeof unsub === 'function') unsub()
     }
-  }, [mode, selectedCurrency, rates ? Object.keys(rates).join(',') : ''])
+  }, [mode, primary, rates ? Object.keys(rates).join(',') : ''])
 
-  const badge = delta >= 0 ? 'text-emerald-600' : 'text-rose-600'
-  const displayValue = loading ? '-' : Math.round(total).toLocaleString()
-  const prevDisplayValue = loading ? '-' : Math.round(prevTotal).toLocaleString()
-  
-  // Get month names in Ukrainian
-  const getMonthName = (date) => {
-    const months = [
-      'Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень',
-      'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень'
-    ]
-    return months[date.getMonth()]
-  }
-  
   const now = new Date()
-  const currentMonth = getMonthName(now)
-  const currentYear = now.getFullYear()
   const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-  const prevMonth = getMonthName(prevMonthDate)
-  const prevYear = prevMonthDate.getFullYear()
-  
-  // Determine display currency symbol
-  const getCurrencySymbol = () => {
-    if (!selectedCurrency || selectedCurrency === 'ALL_UAH') return 'ALL to UAH'
-    if (selectedCurrency === 'ALL_EUR') return 'ALL to EUR'
-    return selectedCurrency
-  }
-  const currencySymbol = getCurrencySymbol()
-  
-  // Determine color and sign based on mode
-  const amountColor = mode === 'earning' ? 'text-emerald-600' : 'text-rose-600'
-  const amountSign = mode === 'earning' ? '+' : '-'
-  
+  const symbol = currencySymbol(primary)
+  const fmt = (v) => `${Math.round(v).toLocaleString('uk-UA')} ${symbol}`
+
+  const earning = mode === 'earning'
+  const amountColor = earning ? 'text-green-400' : 'text-rose-400'
+  const amountSign = earning ? '+' : '-'
+  // More income is good, more spending is not
+  const deltaGood = earning ? delta >= 0 : delta <= 0
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4 }}
-      className="rounded-2xl bg-white shadow-soft p-4 sm:p-5"
+      className={`relative overflow-hidden rounded-3xl bg-gradient-to-b from-white/[0.075] to-white/[0.025] backdrop-blur-xl shadow-glass p-4 sm:p-5 border ${
+        earning ? 'border-green-500/20' : 'border-rose-500/20'
+      }`}
     >
-      <div className="flex items-center justify-between mb-2">
-        <div className="text-sm text-gray-500">{title}</div>
-        <CurrencySelect
-          value={selectedCurrency || 'ALL_UAH'}
-          onChange={(val) => setSelectedCurrency(val || 'ALL_UAH')}
-          options={[
-            { value: 'ALL_UAH', label: 'ALL to UAH' },
-            { value: 'ALL_EUR', label: 'ALL to EUR' },
-            ...currencies.map(c => ({ value: c, label: c }))
-          ]}
-        />
+      {/* Soft accent glow in the corner */}
+      <div
+        className={`pointer-events-none absolute -z-10 -top-16 -right-16 h-40 w-40 rounded-full blur-3xl ${
+          earning ? 'bg-green-500/20' : 'bg-rose-500/20'
+        }`}
+      />
+      <div className="text-sm font-semibold text-white/60 mb-2">{title}</div>
+
+      <div className="text-xs text-white/40 mb-0.5">
+        {MONTHS[now.getMonth()]} {now.getFullYear()}
       </div>
-      
-      {/* Current month label */}
-      <div className="text-xs text-gray-400 mb-1">
-        {currentMonth} {currentYear}
+      <div className={`text-[26px] sm:text-3xl font-bold tracking-tight tabular-nums ${amountColor}`}>
+        {loading ? '—' : `${amountSign}${fmt(total)}`}
       </div>
-      
-      {/* Current month amount */}
-      <div>
-        <div className={`text-[28px] sm:text-3xl font-bold ${amountColor}`}>
-          {loading ? '-' : `${amountSign}${displayValue}`}
-        </div>
-        <div className="text-lg text-gray-500">{currencySymbol}</div>
-      </div>
-      
-      {/* Delta percentage */}
-      {!loading && (
-        <div className={`mt-1 text-xs ${badge}`}>
-          {delta > 0 ? '+' : ''}{delta}% vs last month
+
+      {!loading && prevTotal !== 0 && (
+        <div className={`mt-1 text-xs font-semibold ${deltaGood ? 'text-green-400' : 'text-rose-400'}`}>
+          {delta > 0 ? '+' : ''}{delta}% до минулого місяця
         </div>
       )}
-      
-      {/* Previous month result */}
+
       {!loading && prevTotal !== 0 && (
-        <div className="mt-2 pt-2 border-t border-gray-100">
-          <div className="text-xs text-gray-400 mb-1">
-            {prevMonth} {prevYear}
+        <div className="mt-3 pt-3 border-t border-white/[0.06]">
+          <div className="text-xs text-white/40 mb-0.5">
+            {MONTHS[prevMonthDate.getMonth()]} {prevMonthDate.getFullYear()}
           </div>
-          <div>
-            <div className={`text-lg font-semibold ${amountColor}`}>
-              {amountSign}{prevDisplayValue}
-            </div>
-            <div className="text-lg text-gray-500">{currencySymbol}</div>
+          <div className={`text-lg font-semibold tabular-nums ${amountColor} opacity-80`}>
+            {amountSign}{fmt(prevTotal)}
           </div>
         </div>
       )}
     </motion.div>
   )
 }
-

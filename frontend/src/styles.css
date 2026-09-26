@@ -3,8 +3,8 @@
 @tailwind utilities;
 
 :root {
-  --card: #ffffff;
-  --muted:  #8b8ea1;
+  --card: rgba(255, 255, 255, 0.04);
+  --muted:  rgba(255, 255, 255, 0.55);
   --ring:   0 0% 0%;
 
   /* iOS Safe Area відступи (Notch / Dynamic Island / Home Indicator) */
@@ -12,20 +12,50 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left:   env(safe-area-inset-left, 0px);
   --safe-right:  env(safe-area-inset-right, 0px);
+
+  /* Native controls (date pickers, selects, scrollbars) in the dark theme */
+  color-scheme: dark;
+  accent-color: #FF6B00;
 }
 
 * { box-sizing: border-box; }
 body {
   font-family: theme('fontFamily.inter');
+  background-color: theme('colors.ink');
+  color: #fff;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   /* Вимикаємо горизонтальний bounce-scroll на iOS — виглядає непрофесійно */
   overscroll-behavior-x: none;
 }
+
+/* Warm ambient background like the iPhone app: dark gradient + soft orange glows */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(420px 420px at 0% 0%, rgba(255, 107, 0, 0.28), transparent 70%),
+    radial-gradient(360px 360px at 100% 8%, rgba(255, 150, 60, 0.14), transparent 70%),
+    radial-gradient(380px 300px at 8% 55%, rgba(255, 90, 0, 0.10), transparent 70%),
+    radial-gradient(600px 260px at 50% 105%, rgba(255, 90, 0, 0.18), transparent 70%),
+    linear-gradient(180deg, #180A02 0%, #0A0A0E 45%, #060608 100%);
+}
+
+/* No visible page scrollbar (like the iPhone app): it showed up as a light stripe on the right
+   while scrolling. Wheel / touch / keyboard scrolling still work. */
+html { scrollbar-width: none; }
+html::-webkit-scrollbar { display: none; }
 
 /* Головний контейнер додатку враховує Safe Area */
 #root {
   padding-top: var(--safe-top);
   padding-bottom: var(--safe-bottom);
 }
+
+::selection { background: rgba(255, 107, 0, 0.35); }
 
 
 @layer base {
@@ -35,6 +65,22 @@ body {
 
   /* Slightly larger line-height for readability on mobile */
   body { line-height: 1.45; }
+
+  /* Form fields: dark glass by default (a bg-* class still wins) */
+  input, select, textarea {
+    color: #fff;
+  }
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']), select, textarea {
+    background-color: rgba(255, 255, 255, 0.06);
+  }
+  input::placeholder, textarea::placeholder { color: rgba(255, 255, 255, 0.3); }
+  select option { background: #1E1E23; color: #fff; }
+
+  /* Thin, quiet scrollbars */
+  * { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.15) transparent; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
 }
 
 @layer components {
@@ -44,46 +90,45 @@ body {
     @apply container mx-auto px-4;
   }
 
+  /* Glass card — the building block of every screen (like the iPhone tiles) */
+  .glass-card {
+    @apply bg-gradient-to-b from-white/[0.075] to-white/[0.025] border border-white/10 rounded-3xl backdrop-blur-xl shadow-glass;
+  }
+
   /* Responsive button sizes */
   .btn {
-    @apply px-3 py-2 rounded-xl font-semibold transition shadow-soft text-sm;
+    @apply px-3 py-2 rounded-xl font-semibold transition text-sm;
   }
   @screen md { .btn { @apply px-4 py-2 text-base } }
 }
 
 /* Glassy container */
 .glass {
-  backdrop-filter: blur(12px);
-  background: rgba(255,255,255,0.75);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  background: rgba(30, 30, 35, 0.72);
 }
 
-/* Liquid Glass styling */
+/* Liquid Glass styling (dark) */
 .bg-liquid-glass {
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  background: rgba(255, 255, 255, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.35), 0 8px 32px 0 rgba(0, 0, 0, 0.12);
-}
-
-@supports not (hanging-punctuation:first) {
-  .bg-liquid-glass {
-    backdrop-filter: url(#displacementFilter) blur(4px);
-    -webkit-backdrop-filter: url(#displacementFilter) blur(4px);
-  }
+  backdrop-filter: blur(24px) saturate(170%);
+  -webkit-backdrop-filter: blur(24px) saturate(170%);
+  background: rgba(28, 28, 32, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 40px rgba(0, 0, 0, 0.5);
 }
 
 .btn {
-  @apply px-4 py-2 rounded-xl font-semibold transition shadow-soft;
+  @apply px-4 py-2 rounded-xl font-semibold transition;
 }
 .btn-primary {
-  @apply bg-black text-white hover:opacity-90 active:scale-[0.98];
+  @apply bg-gradient-to-br from-brand to-brand-deep text-white shadow-brand hover:brightness-110 active:scale-[0.98];
 }
 .btn-soft {
-  @apply bg-white hover:bg-gray-50 border border-gray-200;
+  @apply bg-white/[0.06] text-white hover:bg-white/10 border border-white/10;
 }
 .btn-danger {
-  @apply bg-rose-500 text-white hover:bg-rose-600 active:scale-[0.98];
+  @apply bg-[#FF453A] text-white hover:brightness-110 active:scale-[0.98];
 }
 
 /* Hide scrollbar but keep functionality */

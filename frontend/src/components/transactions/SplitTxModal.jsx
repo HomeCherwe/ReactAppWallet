@@ -246,17 +246,17 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
     >
       <div className="space-y-4 text-sm">
         {/* Main transaction summary header */}
-        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-indigo-50/80 via-purple-50/50 to-pink-50/40 border border-indigo-100 flex items-center justify-between shadow-xs">
+        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-brand/[0.08] via-brand/5 to-pink-500/[0.04] border border-brand/15 flex items-center justify-between shadow-xs">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wider text-indigo-600/80">Основна транзакція</div>
-            <div className="font-semibold text-gray-900 text-base">{tx.category || 'Без категорії'}</div>
-            <div className="text-xs text-gray-500">{tx.card || 'Карта'} · {fmtDate(tx.created_at)}</div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-brand/80">Основна транзакція</div>
+            <div className="font-semibold text-white text-base">{tx.category || 'Без категорії'}</div>
+            <div className="text-xs text-white/55">{tx.card || 'Карта'} · {fmtDate(tx.created_at)}</div>
           </div>
           <div className="text-right">
-            <div className={`text-lg font-bold ${isExp ? 'text-gray-900' : 'text-emerald-600'}`}>
+            <div className={`text-lg font-bold ${isExp ? 'text-white' : 'text-emerald-400'}`}>
               {fmtAmount(tx.amount, currency)}
             </div>
-            <div className="text-xs font-medium text-indigo-600">
+            <div className="text-xs font-medium text-brand">
               Залишок: <span className="font-bold">{fmtAmount(isExp ? -remainingAbs : remainingAbs, currency)}</span>
             </div>
           </div>
@@ -266,14 +266,14 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
         {step === 'build' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <span className="font-medium text-gray-700 text-xs uppercase tracking-wider">
+              <span className="font-medium text-white/85 text-xs uppercase tracking-wider">
                 Частини розділу ({parts.length})
               </span>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={loadExistingTransactions}
-                  className="px-2.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-medium transition flex items-center gap-1.5"
+                  className="px-2.5 py-1.5 rounded-xl bg-brand/10 hover:bg-brand/15 text-brand-light text-xs font-medium transition flex items-center gap-1.5"
                 >
                   <Search size={14} />
                   Обрати з існуючих
@@ -281,7 +281,7 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
                 <button
                   type="button"
                   onClick={() => addManualPart()}
-                  className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium transition flex items-center gap-1.5 shadow-xs"
+                  className="px-2.5 py-1.5 rounded-xl bg-brand hover:bg-brand-dark text-white text-xs font-medium transition flex items-center gap-1.5 shadow-xs"
                 >
                   <Plus size={14} />
                   Додати суму
@@ -291,10 +291,10 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
 
             {/* List of active split parts */}
             {parts.length === 0 ? (
-              <div className="py-8 text-center border-2 border-dashed border-gray-200 rounded-2xl bg-gray-50/50">
-                <Split className="mx-auto text-indigo-400 mb-2 opacity-60" size={32} />
-                <p className="text-gray-600 font-medium">Ще немає доданих частин</p>
-                <p className="text-xs text-gray-400 max-w-xs mx-auto mt-1">
+              <div className="py-8 text-center border-2 border-dashed border-white/10 rounded-2xl bg-white/[0.015]">
+                <Split className="mx-auto text-brand-light mb-2 opacity-60" size={32} />
+                <p className="text-white/70 font-medium">Ще немає доданих частин</p>
+                <p className="text-xs text-white/40 max-w-xs mx-auto mt-1">
                   Натисніть "Додати суму" або залучіть існуючі транзакції для розподілу.
                 </p>
               </div>
@@ -306,12 +306,12 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     className={`p-3 rounded-xl border transition ${
-                      p.isExisting ? 'bg-amber-50/40 border-amber-200' : 'bg-white border-gray-200 hover:border-indigo-200'
+                      p.isExisting ? 'bg-amber-500/[0.04] border-amber-500/25' : 'bg-surface/90 border-white/10 hover:border-brand/25'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-xs font-semibold text-gray-500 flex items-center gap-1.5">
-                        <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 grid place-items-center text-[10px]">
+                      <span className="text-xs font-semibold text-white/55 flex items-center gap-1.5">
+                        <span className="w-5 h-5 rounded-full bg-brand/15 text-brand-light grid place-items-center text-[10px]">
                           {idx + 1}
                         </span>
                         {p.isExisting ? 'Існуюча транзакція' : 'Нова частина'}
@@ -319,7 +319,7 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
                       <button
                         type="button"
                         onClick={() => removePart(p.id)}
-                        className="p-1 rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                        className="p-1 rounded-lg text-white/40 hover:text-rose-400 hover:bg-rose-500/10 transition"
                       >
                         <Trash2 size={15} />
                       </button>
@@ -327,7 +327,7 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       <div>
-                        <label className="text-[11px] text-gray-400 block mb-0.5">Сума ({currency})</label>
+                        <label className="text-[11px] text-white/40 block mb-0.5">Сума ({currency})</label>
                         <input
                           type="number"
                           step="any"
@@ -335,17 +335,17 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
                           value={p.amount}
                           onChange={(e) => updatePart(p.id, 'amount', e.target.value)}
                           placeholder="0.00"
-                          className="w-full px-2.5 py-1.5 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold text-sm disabled:bg-gray-100"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-white/[0.14] focus:outline-none focus:ring-2 focus:ring-brand font-semibold text-sm disabled:bg-white/[0.06]"
                         />
                       </div>
 
                       <div>
-                        <label className="text-[11px] text-gray-400 block mb-0.5">Категорія</label>
+                        <label className="text-[11px] text-white/40 block mb-0.5">Категорія</label>
                         <select
                           disabled={p.isExisting}
                           value={p.category}
                           onChange={(e) => updatePart(p.id, 'category', e.target.value)}
-                          className="w-full px-2.5 py-1.5 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs disabled:bg-gray-100"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-white/[0.14] focus:outline-none focus:ring-2 focus:ring-brand text-xs disabled:bg-white/[0.06]"
                         >
                           {categories.map(c => (
                             <option key={c} value={c}>{c}</option>
@@ -354,13 +354,13 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
                       </div>
 
                       <div>
-                        <label className="text-[11px] text-gray-400 block mb-0.5">Нотатка</label>
+                        <label className="text-[11px] text-white/40 block mb-0.5">Нотатка</label>
                         <input
                           type="text"
                           value={p.note}
                           onChange={(e) => updatePart(p.id, 'note', e.target.value)}
                           placeholder="Опис розділу..."
-                          className="w-full px-2.5 py-1.5 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-white/[0.14] focus:outline-none focus:ring-2 focus:ring-brand text-xs"
                         />
                       </div>
                     </div>
@@ -376,25 +376,25 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
                   initial={{ opacity: 0, y: -6 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -6 }}
-                  className="p-3.5 rounded-2xl bg-slate-50 border border-indigo-100 shadow-sm space-y-3"
+                  className="p-3.5 rounded-2xl bg-white/[0.03] border border-brand/15 shadow-sm space-y-3"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-semibold text-xs uppercase tracking-wider text-indigo-900">
+                    <span className="font-semibold text-xs uppercase tracking-wider text-brand-light">
                       Оберіть існуючі транзакції ({selectedExistingIds.size})
                     </span>
                     <button
                       type="button"
                       onClick={() => setShowExistingSelector(false)}
-                      className="p-1 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-200/60 transition text-xs font-bold"
+                      className="p-1 rounded-lg text-white/40 hover:text-white/85 hover:bg-white/[0.06] transition text-xs font-bold"
                     >
                       ✕
                     </button>
                   </div>
 
                   {loadingExisting ? (
-                    <div className="py-6 text-center text-xs text-gray-500 font-medium">Завантаження транзакцій...</div>
+                    <div className="py-6 text-center text-xs text-white/55 font-medium">Завантаження транзакцій...</div>
                   ) : existingTxs.length === 0 ? (
-                    <div className="py-6 text-center text-xs text-gray-500 font-medium">Немає доступних транзакцій для вибору</div>
+                    <div className="py-6 text-center text-xs text-white/55 font-medium">Немає доступних транзакцій для вибору</div>
                   ) : (
                     <>
                       <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
@@ -405,7 +405,7 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
                               key={eTx.id}
                               onClick={() => toggleSelectExisting(eTx.id)}
                               className={`p-2.5 rounded-xl border cursor-pointer flex items-center justify-between text-xs transition shadow-2xs ${
-                                isSelected ? 'bg-indigo-50/90 border-indigo-300 ring-1 ring-indigo-200' : 'bg-white hover:bg-indigo-50/40 border-gray-200/80'
+                                isSelected ? 'bg-brand/[0.09] border-brand/40 ring-1 ring-brand/25' : 'bg-surface/90 hover:bg-brand/[0.04] border-white/[0.08]'
                               }`}
                             >
                               <div className="flex items-center gap-2.5">
@@ -413,14 +413,14 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
                                   type="checkbox"
                                   checked={isSelected}
                                   onChange={() => {}}
-                                  className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                  className="w-4 h-4 rounded border-white/[0.14] text-brand focus:ring-brand cursor-pointer"
                                 />
                                 <div>
-                                  <div className="font-semibold text-gray-900">{eTx.category || 'Без категорії'}</div>
-                                  <div className="text-[11px] text-gray-500">{fmtDate(eTx.created_at)} · {eTx.card || 'Карта'}</div>
+                                  <div className="font-semibold text-white">{eTx.category || 'Без категорії'}</div>
+                                  <div className="text-[11px] text-white/55">{fmtDate(eTx.created_at)} · {eTx.card || 'Карта'}</div>
                                 </div>
                               </div>
-                              <div className="font-bold text-sm text-indigo-600">
+                              <div className="font-bold text-sm text-brand">
                                 {fmtAmount(eTx.amount, currency)}
                               </div>
                             </div>
@@ -433,7 +433,7 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
                           type="button"
                           disabled={selectedExistingIds.size === 0}
                           onClick={attachSelectedExistingTxs}
-                          className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-medium transition flex items-center gap-1.5 shadow-xs"
+                          className="px-3.5 py-1.5 rounded-xl bg-brand hover:bg-brand-dark disabled:opacity-50 text-white text-xs font-medium transition flex items-center gap-1.5 shadow-xs"
                         >
                           <Plus size={14} />
                           Додати обрані ({selectedExistingIds.size})
@@ -449,14 +449,14 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium"
+                className="px-4 py-2 rounded-xl bg-white/[0.06] hover:bg-white/10 text-white/85 font-medium"
               >
                 Скасувати
               </button>
               <button
                 type="button"
                 onClick={handleGoToReview}
-                className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium flex items-center gap-1.5 shadow-md"
+                className="px-5 py-2 rounded-xl bg-brand hover:bg-brand-dark text-white font-medium flex items-center gap-1.5 shadow-md"
               >
                 Перегляд і підтвердження
                 <ArrowRight size={16} />
@@ -479,7 +479,7 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
 
           return (
           <div className="space-y-4">
-            <div className="p-3 rounded-xl bg-indigo-50/60 border border-indigo-100 text-xs text-indigo-900">
+            <div className="p-3 rounded-xl bg-brand/[0.06] border border-brand/15 text-xs text-brand-light">
               ⚡ Перевірте деталі розділу перед збереженням. Оберіть прапорцями частини, які потрібно створити.
             </div>
 
@@ -491,7 +491,7 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
                     key={p.id}
                     onClick={() => toggleSelectPart(p.id)}
                     className={`p-3 rounded-xl border cursor-pointer transition flex items-center justify-between ${
-                      isSelected ? 'bg-indigo-50/40 border-indigo-300 ring-1 ring-indigo-300' : 'bg-gray-50 border-gray-200 opacity-60'
+                      isSelected ? 'bg-brand/[0.04] border-brand/40 ring-1 ring-brand/40' : 'bg-white/[0.03] border-white/10 opacity-60'
                     }`}
                   >
                     <div className="flex items-center gap-3">
@@ -499,14 +499,14 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
                         type="checkbox"
                         checked={isSelected}
                         onChange={() => {}}
-                        className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        className="w-4 h-4 rounded border-white/[0.14] text-brand focus:ring-brand"
                       />
                       <div>
-                        <div className="font-semibold text-gray-900 text-sm">{p.category}</div>
-                        <div className="text-xs text-gray-500">{tx.card || 'Карта'} · {p.note || 'Без нотатки'}</div>
+                        <div className="font-semibold text-white text-sm">{p.category}</div>
+                        <div className="text-xs text-white/55">{tx.card || 'Карта'} · {p.note || 'Без нотатки'}</div>
                       </div>
                     </div>
-                    <div className="text-right font-bold text-sm text-gray-900">
+                    <div className="text-right font-bold text-sm text-white">
                       {fmtAmount(isExp ? -Math.abs(Number(p.amount)) : Math.abs(Number(p.amount)), currency)}
                     </div>
                   </div>
@@ -515,21 +515,21 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
             </div>
 
             {/* Залишок на основній транзакції */}
-            <div className="p-3 rounded-xl bg-amber-50/60 border border-amber-200 flex items-center justify-between text-xs">
+            <div className="p-3 rounded-xl bg-amber-500/[0.06] border border-amber-500/25 flex items-center justify-between text-xs">
               <div>
-                <div className="font-semibold text-amber-900">Основна транзакція після розділу</div>
-                <div className="text-amber-700/80">{tx.category} · {tx.card || 'Карта'}</div>
+                <div className="font-semibold text-amber-200">Основна транзакція після розділу</div>
+                <div className="text-amber-300/80">{tx.category} · {tx.card || 'Карта'}</div>
               </div>
-              <div className={`font-bold text-base ${isExp ? 'text-amber-800' : 'text-emerald-700'}`}>
+              <div className={`font-bold text-base ${isExp ? 'text-amber-300' : 'text-emerald-300'}`}>
                 {fmtAmount(reviewMainSigned, currency)}
               </div>
             </div>
 
-            <div className="pt-3 border-t border-gray-100 flex items-center justify-between">
+            <div className="pt-3 border-t border-white/[0.06] flex items-center justify-between">
               <button
                 type="button"
                 onClick={() => setStep('build')}
-                className="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-xs"
+                className="px-4 py-2 rounded-xl bg-white/[0.06] hover:bg-white/10 text-white/85 font-medium text-xs"
               >
                 ← Назад до редагування
               </button>

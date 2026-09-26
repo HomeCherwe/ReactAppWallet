@@ -44,3 +44,11 @@ export async function connectBankWithToken(providerId, token) {
     body: JSON.stringify({ provider_id: providerId, token }),
   })
 }
+
+/** Links a bank account without a card to one of the user's cards; its transactions go there. */
+export async function linkBankAccountToCard(connectionId, accountId, cardId) {
+  return apiFetch(`/api/bank-connections/${connectionId}/accounts/${encodeURIComponent(accountId)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ card_id: cardId }),
+  })
+}

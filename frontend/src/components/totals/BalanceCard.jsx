@@ -1,33 +1,29 @@
 import { motion } from 'framer-motion'
-import { Wallet, CreditCard, PiggyBank, Globe } from 'lucide-react'
 import { fmtAmount } from '../../utils/format'
 
-export default function BalanceCard({ currency, amount, isVisible, sectionType }) {
-  const icon = sectionType==='cash' ? <Wallet size={12} className="text-green-600"/> :
-               sectionType==='cards'? <CreditCard size={12} className="text-blue-600"/> :
-               sectionType==='savings' ? <PiggyBank size={12} className="text-purple-600"/> :
-               <Globe size={12} className="text-indigo-600"/>
-  const grad = sectionType==='cash' ? 'from-green-500 to-emerald-600' :
-               sectionType==='cards'? 'from-blue-500 to-indigo-600' :
-               sectionType==='savings' ? 'from-purple-500 to-pink-600' :
-               'from-indigo-500 to-purple-600'
+// Accent per bucket, like the iPhone cards tab: all/savings orange, cash green, cards blue
+const ACCENT = {
+  cash: 'bg-green-500/15 text-green-400 border-green-500/25',
+  cards: 'bg-blue-500/15 text-blue-300 border-blue-500/25',
+  savings: 'bg-brand/15 text-brand-light border-brand/30',
+  all: 'bg-brand/15 text-brand-light border-brand/30',
+}
 
+export default function BalanceCard({ currency, amount, isVisible, sectionType }) {
+  const accent = ACCENT[sectionType] || ACCENT.all
   return (
     <motion.div
       initial={{ opacity: 0, y: 5 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
-      className={`relative overflow-hidden rounded-lg bg-gradient-to-r ${grad} p-2 text-white shadow-sm`}
+      className="flex items-center justify-between gap-2 rounded-2xl bg-white/[0.05] border border-white/[0.08] px-3 py-2"
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1">
-          {icon}
-          <span className="text-xs font-medium">{currency}</span>
-        </div>
-        <div className="text-xs font-bold">
-          {isVisible ? fmtAmount(amount, currency) : '••••'}
-        </div>
-      </div>
+      <span className={`px-2 py-0.5 rounded-full border text-[11px] font-extrabold tracking-wide ${accent}`}>
+        {currency}
+      </span>
+      <span className={`text-sm font-extrabold tabular-nums ${amount < 0 ? 'text-[#FF6B6B]' : 'text-white'}`}>
+        {isVisible ? fmtAmount(amount, currency) : '••••'}
+      </span>
     </motion.div>
   )
 }
