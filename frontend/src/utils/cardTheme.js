@@ -1,86 +1,61 @@
-// Card look per bank, the same themes as the iPhone app's card carousel
-// (mobile/components/CardCarousel.tsx → getCardTheme)
+// Card look: every card gets a colored gradient with white text (like Apple Wallet), picked by
+// the bank — known banks get their brand color, any other bank a stable color from its name.
 
-const ORANGE = '#FF6B00'
+const WHITE_TEXT = {
+  textColor: '#FFFFFF',
+  subColor: 'rgba(255, 255, 255, 0.72)',
+  borderColor: 'rgba(255, 255, 255, 0.14)',
+}
+
+// Monobank White / Black go by the card name
+const CARD_NAMES = [
+  [['white', 'вайт', 'біл'], ['#8A9099', '#4B5059']], // silver
+  [['black', 'блек', 'чорн'], ['#3A3A40', '#141417']], // graphite
+]
+
+// [words, gradient]; first match wins, the bank name is checked before the card name
+const BRANDS = [
+  [['mono'], ['#3A3A40', '#141417']],
+  [['binance', 'usdt', 'крипт'], ['#C99A06', '#5C4500']],
+  [['revolut'], ['#4F6BFF', '#1E2A8C']],
+  [['wise'], ['#4C9A2A', '#163300']],
+  [['приват', 'privat'], ['#3DAE4A', '#11521E']],
+  [['paypal'], ['#1F63D6', '#0B2C6E']],
+  [['n26'], ['#2FB5A3', '#0E5049']],
+  [['bnp', 'paribas'], ['#16A064', '#0A4A2E']],
+  [['збер', 'savings', 'скарбн'], ['#1FA2C4', '#0B4A66']],
+  [['гот', 'cash'], ['#34A86B', '#135838']],
+]
+
+// Deep iOS-colored gradients for everything else
+const PALETTE = [
+  ['#FF8A1F', '#A3430A'], // orange
+  ['#5E5CE6', '#2A2880'], // indigo
+  ['#BF5AF2', '#5B1F80'], // purple
+  ['#FF375F', '#8A1430'], // pink
+  ['#0A84FF', '#0A3D8F'], // blue
+  ['#30B0C7', '#0F5260'], // teal
+  ['#AC8E68', '#54402A'], // brown
+]
+
+function hashString(str) {
+  let h = 0
+  for (const ch of str) h = (h * 31 + ch.charCodeAt(0)) | 0
+  return Math.abs(h)
+}
 
 export function getCardTheme(bank, name) {
   const b = String(bank || '').toLowerCase()
   const n = String(name || '').toLowerCase()
-  const full = `${b} ${n}`
+  const find = (rules, text) => rules.find(([words]) => words.some(w => text.includes(w)))?.[1]
 
-  // Monobank White
-  if (n.includes('white') || n.includes('вайт') || n.includes('біл')) {
-    return {
-      gradient: ['#FFFFFF', '#E9EDF2'],
-      isLight: true,
-      textColor: '#121417',
-      subColor: '#6B7280',
-      borderColor: 'rgba(0, 0, 0, 0.12)',
-      accentColor: '#9CA3AF',
-    }
-  }
-  // Monobank Black
-  if (n.includes('black') || n.includes('блек') || n.includes('чорн')) {
-    return {
-      gradient: ['#1A1A1E', '#0D0D10'],
-      textColor: '#FFFFFF',
-      subColor: 'rgba(255, 255, 255, 0.65)',
-      borderColor: 'rgba(255, 107, 0, 0.35)',
-      accentColor: ORANGE,
-    }
-  }
-  // Binance / crypto
-  if (full.includes('binance') || full.includes('usdt') || full.includes('крипт')) {
-    return {
-      gradient: ['#2B2100', '#151000'],
-      textColor: '#FFFFFF',
-      subColor: 'rgba(255, 255, 255, 0.70)',
-      borderColor: 'rgba(240, 185, 11, 0.35)',
-      accentColor: '#F0B90B',
-    }
-  }
-  // PrivatBank
-  if (full.includes('приват') || full.includes('privat')) {
-    return {
-      gradient: ['#0C2B19', '#043A1E'],
-      textColor: '#FFFFFF',
-      subColor: 'rgba(255, 255, 255, 0.70)',
-      borderColor: 'rgba(34, 197, 94, 0.35)',
-      accentColor: '#22C55E',
-    }
-  }
-  // Cash
-  if (full.includes('гот') || full.includes('cash')) {
-    return {
-      gradient: ['#321E12', '#1A1009'],
-      textColor: '#FFFFFF',
-      subColor: 'rgba(255, 255, 255, 0.70)',
-      borderColor: 'rgba(249, 115, 22, 0.35)',
-      accentColor: '#F97316',
-    }
-  }
-  // Any other Monobank card
-  if (full.includes('mono')) {
-    return {
-      gradient: ['#222226', '#121215'],
-      textColor: '#FFFFFF',
-      subColor: 'rgba(255, 255, 255, 0.65)',
-      borderColor: 'rgba(255, 107, 0, 0.35)',
-      accentColor: ORANGE,
-    }
-  }
-  // Default
-  return {
-    gradient: ['#1C1410', '#100C0A'],
-    textColor: '#FFFFFF',
-    subColor: 'rgba(255, 255, 255, 0.65)',
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    accentColor: 'rgba(255, 255, 255, 0.5)',
-  }
+  const gradient = find(CARD_NAMES, n) || find(BRANDS, b) || find(BRANDS, n) ||
+    PALETTE[hashString(b || n) % PALETTE.length]
+  return { gradient, ...WHITE_TEXT }
 }
 
-/** CSS background for a card without its own image: themed gradient + a soft accent glow */
+/** CSS background for a card without its own image: the gradient plus a soft light in the corner */
 export function cardBackground(theme) {
   const [from, to] = theme.gradient
-  return `radial-gradient(circle at 88% 0%, ${theme.accentColor}33, transparent 55%), linear-gradient(135deg, ${from}, ${to})`
+  return `radial-gradient(circle at 85% -10%, rgba(255,255,255,0.22), transparent 55%), linear-gradient(135deg, ${from}, ${to})`
 }

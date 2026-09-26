@@ -124,7 +124,7 @@ export default function QuickAddFab({ variant = 'fab' }) {
           }}
           className={`relative overflow-hidden rounded-full grid place-items-center bg-gradient-to-br from-[#FF7A00] to-brand-deep text-white select-none ${
             inline
-              ? 'h-9 w-9 shadow-[0_4px_12px_rgba(255,107,0,0.5)]'
+              ? 'h-9 w-9 shadow-[0_2px_6px_rgba(255,107,0,0.3)]'
               : 'h-16 w-16 shadow-[0_6px_18px_rgba(255,107,0,0.65)] border border-[rgba(255,200,140,0.6)]'
           }`}
           style={{ WebkitTouchCallout: 'none' }}

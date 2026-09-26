@@ -167,7 +167,7 @@ export function MobileDock() {
                 {active && (
                   <motion.span
                     layoutId="dock-active"
-                    className="absolute inset-0 rounded-[24px] bg-gradient-to-br from-brand to-brand-deep shadow-[0_4px_10px_rgba(255,107,0,0.5)]"
+                    className="absolute inset-0 rounded-[24px] bg-gradient-to-br from-brand to-brand-deep shadow-[0_2px_8px_rgba(255,107,0,0.3)]"
                     transition={{ type: 'spring', stiffness: 420, damping: 34 }}
                   >
                     <span className="absolute top-0 left-2 right-2 h-px bg-white/50 rounded-full" />

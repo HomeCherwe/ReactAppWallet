@@ -1268,7 +1268,7 @@ export default function MonthlyPayment() {
           <div ref={listRef} className="space-y-6">
             {/* Pinned Section */}
             {pinnedTxs.length > 0 && (
-              <div className="rounded-3xl overflow-hidden mb-6 border border-brand/30 bg-gradient-to-b from-brand/[0.13] to-brand/[0.03] shadow-[0_10px_30px_rgba(255,107,0,0.10)]">
+              <div className="rounded-3xl overflow-hidden mb-6 border border-brand/30 bg-gradient-to-b from-brand/[0.13] to-brand/[0.03]">
                 <button
                   onClick={() => setPinnedExpanded(!pinnedExpanded)}
                   className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-brand/[0.06] transition-colors"

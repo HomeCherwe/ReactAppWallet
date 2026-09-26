@@ -71,9 +71,9 @@ function SortableCardTile({ c, onEdit, onDelete, showActions = true, isFavorite 
 }
 
 function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false, onToggleFavorite, isDragging = false, isGrouped = false, onViewBank, onCardClick }) {
-  // Same per-bank look as the iPhone cards (dark tiles with an accent edge; Monobank White is light)
+  // Every card: a colored gradient by bank with white text (see utils/cardTheme)
   const theme = getCardTheme(c.bank, c.name)
-  const chip = theme.isLight ? 'bg-black/[0.06] hover:bg-black/10' : 'bg-white/15 hover:bg-white/25'
+  const chip = 'bg-black/25 hover:bg-black/40'
   const hideAllBalances = useSettingsStore(state => state.settings.hideAllBalances ?? false)
   const cardNumber = hideAllBalances ? '**** **** **** ****' : formatCardNumber(c.card_number, c.bank, c.name)
   
@@ -94,6 +94,21 @@ function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false,
     }
   }
 
+  const skin = !!c?.bg_url
+  const balanceText = hideAllBalances ? '***' : (() => {
+    const currency = c.currency || 'EUR'
+    const valid = ['USD','EUR','UAH','PLN','GBP','CHF','CZK','HUF'].includes(currency)
+    const v = Number(c._balance ?? 0)
+    if (valid) return new Intl.NumberFormat('uk-UA', { style: 'currency', currency }).format(v)
+    return `${v.toLocaleString('uk-UA', { minimumFractionDigits: 2 })} ${currency}`
+  })()
+  const stop = (fn) => (e) => {
+    e.stopPropagation()
+    e.preventDefault()
+    fn()
+  }
+  const actionBtn = `h-7 px-2 rounded-full ${chip} backdrop-blur-sm text-[11px] font-semibold inline-flex items-center gap-1 transition-colors`
+
   return (
     <motion.div
       layout
@@ -104,127 +119,95 @@ function CardTile({ c, onEdit, onDelete, showActions = true, isFavorite = false,
         if (e.target.closest('button')) return
         onCardClick?.(c)
       }}
-      className={`relative overflow-hidden rounded-[22px] shadow-glass ${isDragging ? 'cursor-grabbing' : onCardClick ? 'cursor-pointer' : 'cursor-grab'}`}
+      className={`relative overflow-hidden rounded-[22px] shadow-[0_10px_28px_rgba(0,0,0,0.45)] text-white ${isDragging ? 'cursor-grabbing' : onCardClick ? 'cursor-pointer' : 'cursor-grab'}`}
       style={{
         aspectRatio: isGrouped ? '1.586 / 1.08' : '1.586 / 1',
-        backgroundImage: c?.bg_url
-          ? `linear-gradient(135deg, rgba(17,17,17,.2), rgba(17,17,17,.8)), url(${c.bg_url})`
+        // A skin keeps its own picture; the dark fade at the bottom keeps the balance readable
+        backgroundImage: skin
+          ? `linear-gradient(180deg, rgba(0,0,0,0) 30%, rgba(0,0,0,0.72)), url(${c.bg_url})`
           : cardBackground(theme),
         backgroundSize: 'cover',
         backgroundPosition: 'center',
-        color: c?.bg_url ? '#fff' : theme.textColor,
-        border: `1px solid ${c?.bg_url ? 'rgba(255,255,255,0.12)' : theme.borderColor}`,
+        border: `1px solid ${theme.borderColor}`,
       }}
     >
-
       <div className="relative h-full p-4 sm:p-5 flex flex-col">
-        <div className="flex justify-between items-start">
-          <div>
-            {!c?.bg_url && <div className="text-[10px] sm:text-xs font-semibold" style={{ color: theme.subColor }}>{c.bank}</div>}
-            {c?.bg_url && <div className="text-transparent text-[10px] sm:text-xs select-none">.</div>}
-            <div className="text-base sm:text-lg font-extrabold mt-0.5">{c.name}</div>
-          </div>
-          {/* Зірочка вгорі справа */}
+        <div className="flex justify-between items-start gap-2">
+          {/* The skin already shows the bank and the card, so no name on top of it */}
+          {skin ? <span /> : (
+            <div className="min-w-0">
+              <div className="text-[11px] sm:text-xs font-semibold truncate" style={{ color: theme.subColor }}>{c.bank}</div>
+              <div className="text-base sm:text-lg font-bold tracking-tight truncate">{c.name}</div>
+            </div>
+          )}
           {onToggleFavorite && (
-            <button 
-              className={`p-1.5 sm:p-2 rounded-lg transition-colors ${
-                isFavorite 
-                  ? 'bg-yellow-500/90 hover:bg-yellow-500 shadow-lg' 
-                  : `${chip} backdrop-blur-sm`
+            <button
+              className={`h-8 w-8 grid place-items-center rounded-full shrink-0 transition-colors ${
+                isFavorite ? 'bg-yellow-400 text-black' : `${chip} backdrop-blur-sm`
               }`}
-              onClick={(e) => {
-                e.stopPropagation()
-                e.preventDefault()
-                onToggleFavorite(c.id)
-              }}
+              onClick={stop(() => onToggleFavorite(c.id))}
               onMouseDown={(e) => e.stopPropagation()}
               title={isFavorite ? 'Прибрати з вибраних' : 'Додати до вибраних'}
             >
-              <Star 
-                size={14} 
-                className={isFavorite ? 'fill-white text-white' : ''} 
-              />
+              <Star size={14} className={isFavorite ? 'fill-black' : ''} />
             </button>
           )}
         </div>
 
-        <div className="mt-2 sm:mt-3">
-          <div className="text-[10px] sm:text-xs" style={{ color: c?.bg_url ? 'rgba(255,255,255,0.8)' : theme.subColor }}>Баланс</div>
-          <div className="text-lg sm:text-xl font-extrabold leading-tight">
-            {hideAllBalances ? '***' : (() => {
-              const currency = c.currency || 'EUR'
-              const valid = ['USD','EUR','UAH','PLN','GBP','CHF','CZK','HUF'].includes(currency)
-              const v = Number(c._balance ?? 0)
-              if (valid) return new Intl.NumberFormat('uk-UA', { style: 'currency', currency }).format(v)
-              return `${v.toLocaleString('uk-UA', { minimumFractionDigits: 2 })} ${currency}`
-            })()}
-          </div>
-        </div>
+        <div className="mt-auto">
+          <div className="text-[11px] sm:text-xs" style={{ color: theme.subColor }}>Баланс</div>
+          <div className="text-xl sm:text-2xl font-bold tracking-tight tabular-nums leading-tight">{balanceText}</div>
 
-        <div className="mt-2 space-y-2">
-          <div className="flex items-center gap-2">
-            <div className="font-mono tracking-wider text-xs sm:text-sm">
-              {cardNumber}
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="font-mono tracking-wider text-[11px] sm:text-xs truncate" style={{ color: theme.subColor }}>
+                {cardNumber}
+              </span>
+              {!hideAllBalances && (
+                <button
+                  onClick={stop(copyCardNumber)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className={`h-6 w-6 grid place-items-center rounded-full ${chip} shrink-0 transition-colors`}
+                  title="Копіювати номер картки"
+                >
+                  <Copy size={11} />
+                </button>
+              )}
             </div>
-            {!hideAllBalances && (
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation()
-                  e.preventDefault()
-                  copyCardNumber()
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-                className={`p-1.5 rounded-lg ${chip} transition-colors`}
-                title="Копіювати номер картки"
-              >
-                <Copy size={12} />
-              </button>
-            )}
-          </div>
-        </div>
 
-        {/* Кнопки внизу справа */}
-        <div className="absolute bottom-2 sm:bottom-3 right-2 sm:right-3 flex gap-1.5 sm:gap-2">
-          {onViewBank && c.bank_id && (
-            <button 
-              className={`px-1.5 sm:px-2 py-1 sm:py-1.5 rounded-lg ${chip} text-[10px] sm:text-xs inline-flex items-center gap-1`} 
-              onClick={(e) => {
-                e.stopPropagation()
-                e.preventDefault()
-                onViewBank(c.bank_id)
-              }}
-              onMouseDown={(e) => e.stopPropagation()}
-              title="Переглянути банк"
-            >
-              <Eye size={12} /> <span className="hidden sm:inline">Банк</span>
-            </button>
-          )}
-          {showActions && (
-            <>
-              <button 
-                className={`px-1.5 sm:px-2 py-1 sm:py-1.5 rounded-lg ${chip} text-[10px] sm:text-xs inline-flex items-center gap-1`} 
-                onClick={(e) => {
-                  e.stopPropagation()
-                  e.preventDefault()
-                  onEdit(c)
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-              >
-            <Pencil size={12} /> <span className="hidden sm:inline">Змінити</span>
-          </button>
-              <button 
-                className={`px-1.5 sm:px-2 py-1 sm:py-1.5 rounded-lg ${chip} text-[10px] sm:text-xs inline-flex items-center gap-1`} 
-                onClick={(e) => {
-                  e.stopPropagation()
-                  e.preventDefault()
-                  onDelete(c)
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-              >
-            <Trash2 size={12} /> <span className="hidden sm:inline">Видалити</span>
-          </button>
-            </>
-          )}
+            <div className="flex gap-1.5 shrink-0">
+              {onViewBank && c.bank_id && (
+                <button
+                  className={actionBtn}
+                  onClick={stop(() => onViewBank(c.bank_id))}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  title="Переглянути банк"
+                >
+                  <Eye size={12} /> <span className="hidden sm:inline">Банк</span>
+                </button>
+              )}
+              {showActions && (
+                <>
+                  <button
+                    className={actionBtn}
+                    onClick={stop(() => onEdit(c))}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    title="Змінити"
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  <button
+                    className={actionBtn}
+                    onClick={stop(() => onDelete(c))}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    title="Видалити"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </motion.div>
