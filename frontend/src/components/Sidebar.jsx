@@ -4,6 +4,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { supabase, cacheUser } from '../lib/supabase'
 import { useState, useEffect } from 'react'
 import { useSettingsStore } from '../store/useSettingsStore'
+import QuickAddFab from './QuickAddFab'
 
 export const NAV_ITEMS = [
   { path: '/', label: 'Головна', icon: Home },
@@ -75,7 +76,7 @@ export default function Sidebar() {
   const isActive = useIsActive()
 
   return (
-    <aside className="sticky top-6 self-start w-full">
+    <aside className="sticky top-6 z-30 self-start w-full">
       <div className="bg-liquid-glass rounded-[28px] p-3 flex flex-col gap-1">
         <div className="flex items-center justify-between px-2 pt-1 pb-3">
           <div className="flex items-center gap-2.5">
@@ -84,13 +85,8 @@ export default function Sidebar() {
             </div>
             <div className="font-bold tracking-tight">MyWallet</div>
           </div>
-          <button
-            onClick={() => updateSetting('hideAllBalances', !hideAllBalances)}
-            className="h-8 w-8 grid place-items-center rounded-full bg-white/[0.06] text-white/60 hover:text-white hover:bg-white/10 transition-colors"
-            title={hideAllBalances ? 'Показати баланси' : 'Приховати баланси'}
-          >
-            {hideAllBalances ? <EyeOff size={15} /> : <Eye size={15} />}
-          </button>
+          {/* The app's one + (click: new transaction; hold / right-click: more) */}
+          <QuickAddFab variant="inline" />
         </div>
 
         {NAV_ITEMS.map(({ path, label, icon: Icon }) => {
@@ -117,20 +113,29 @@ export default function Sidebar() {
           )
         })}
 
-        {user && (
+        <div className="mt-3 flex items-center gap-2">
+          {user && (
+            <button
+              onClick={() => navigate('/profile')}
+              className={`flex-1 min-w-0 flex items-center gap-2.5 p-2 rounded-2xl border transition-colors ${
+                isActive('/profile') ? 'bg-brand/10 border-brand/40' : 'bg-white/[0.04] border-white/10 hover:bg-white/[0.07]'
+              }`}
+            >
+              <Avatar user={user} size={30} />
+              <div className="min-w-0 text-left">
+                <div className="text-sm font-semibold truncate">{userFirstName(user)}</div>
+                <div className="text-[11px] text-white/45">Профіль</div>
+              </div>
+            </button>
+          )}
           <button
-            onClick={() => navigate('/profile')}
-            className={`mt-3 flex items-center gap-2.5 p-2 rounded-2xl border transition-colors ${
-              isActive('/profile') ? 'bg-brand/10 border-brand/40' : 'bg-white/[0.04] border-white/10 hover:bg-white/[0.07]'
-            }`}
+            onClick={() => updateSetting('hideAllBalances', !hideAllBalances)}
+            className="h-11 w-11 shrink-0 grid place-items-center rounded-2xl bg-white/[0.04] border border-white/10 text-white/60 hover:text-white hover:bg-white/[0.07] transition-colors"
+            title={hideAllBalances ? 'Показати баланси' : 'Приховати баланси'}
           >
-            <Avatar user={user} size={30} />
-            <div className="min-w-0 text-left">
-              <div className="text-sm font-semibold truncate">{userFirstName(user)}</div>
-              <div className="text-[11px] text-white/45">Профіль</div>
-            </div>
+            {hideAllBalances ? <EyeOff size={16} /> : <Eye size={16} />}
           </button>
-        )}
+        </div>
       </div>
     </aside>
   )

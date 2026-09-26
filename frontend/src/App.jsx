@@ -447,11 +447,11 @@ export default function App(){
   
 
   return (
-    <div className="app-container min-h-dvh pt-4 sm:pt-6 pb-40 lg:pb-28">
+    <div className="app-container min-h-dvh pt-4 sm:pt-6 pb-40 lg:pb-6">
       {/* Phone & tablet: bottom dock like the iPhone app */}
       <div className="lg:hidden"><MobileDock /></div>
-      {/* The one + of the app, on every page */}
-      <QuickAddFab />
+      {/* Phone & tablet: the floating + (on desktop it sits in the sidebar) */}
+      <div className="lg:hidden"><QuickAddFab /></div>
 
       <div className="max-w-[1300px] mx-auto grid grid-cols-1 lg:grid-cols-[230px_1fr_360px] gap-4">
         <div className="hidden lg:block"><Sidebar /></div>

@@ -10,10 +10,13 @@ import { txBus } from '../utils/txBus'
 const HOLD_MS = 420
 
 /**
- * The one "+" of the app, on every page and screen size (bottom-right, like the iPhone FAB):
- * click → new transaction; hold or right-click → menu with transfer and receipt scan.
+ * The one "+" of the app: click → new transaction; hold or right-click → menu with transfer and
+ * receipt scan.
+ * - variant="fab": floating bottom-right (phone & tablet, like the iPhone FAB)
+ * - variant="inline": compact round button (desktop sidebar header); the menu drops down
  */
-export default function QuickAddFab() {
+export default function QuickAddFab({ variant = 'fab' }) {
+  const inline = variant === 'inline'
   const [menuOpen, setMenuOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [transferOpen, setTransferOpen] = useState(false)
@@ -59,18 +62,24 @@ export default function QuickAddFab() {
     <>
       <div
         ref={rootRef}
-        className="fixed right-4 lg:right-8 z-50 bottom-[calc(92px+env(safe-area-inset-bottom,0px))] lg:bottom-8"
+        className={
+          inline
+            ? 'relative'
+            : 'fixed right-4 z-50 bottom-[calc(92px+env(safe-area-inset-bottom,0px))]'
+        }
       >
         <AnimatePresence>
           {menuOpen && (
             <motion.div
               key="fab-menu"
-              initial={{ opacity: 0, scale: 0.85, y: 8 }}
+              initial={{ opacity: 0, scale: 0.85, y: inline ? -8 : 8 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 6 }}
+              exit={{ opacity: 0, scale: 0.9, y: inline ? -6 : 6 }}
               transition={{ type: 'spring', stiffness: 460, damping: 32 }}
-              style={{ transformOrigin: 'bottom right' }}
-              className="absolute bottom-[76px] right-0 w-64 overflow-hidden rounded-[20px] bg-[rgba(30,30,35,0.92)] backdrop-blur-2xl border border-white/10 shadow-[0_18px_50px_rgba(0,0,0,0.6)]"
+              style={{ transformOrigin: inline ? 'top left' : 'bottom right' }}
+              className={`absolute z-50 w-64 overflow-hidden rounded-[20px] bg-[rgba(30,30,35,0.92)] backdrop-blur-2xl border border-white/10 shadow-[0_18px_50px_rgba(0,0,0,0.6)] ${
+                inline ? 'top-[calc(100%+8px)] left-0' : 'bottom-[76px] right-0'
+              }`}
             >
               {actions.map(({ label, icon: Icon, onClick }, i) => (
                 <button
@@ -89,7 +98,7 @@ export default function QuickAddFab() {
         </AnimatePresence>
 
         <motion.button
-          whileHover={{ scale: 1.05 }}
+          whileHover={{ scale: 1.06 }}
           whileTap={{ scale: 0.9 }}
           onPointerDown={() => {
             heldRef.current = false
@@ -113,14 +122,18 @@ export default function QuickAddFab() {
             if (menuOpen) setMenuOpen(false)
             else setCreateOpen(true)
           }}
-          className="relative h-16 w-16 overflow-hidden rounded-full grid place-items-center bg-gradient-to-br from-[#FF7A00] to-brand-deep text-white shadow-[0_6px_18px_rgba(255,107,0,0.65)] border border-[rgba(255,200,140,0.6)] select-none"
+          className={`relative overflow-hidden rounded-full grid place-items-center bg-gradient-to-br from-[#FF7A00] to-brand-deep text-white select-none ${
+            inline
+              ? 'h-9 w-9 shadow-[0_4px_12px_rgba(255,107,0,0.5)]'
+              : 'h-16 w-16 shadow-[0_6px_18px_rgba(255,107,0,0.65)] border border-[rgba(255,200,140,0.6)]'
+          }`}
           style={{ WebkitTouchCallout: 'none' }}
           title="Нова транзакція · утримуйте або правий клік — ще дії"
           aria-label="Нова транзакція"
         >
-          <span className="absolute top-0 left-[20%] right-[20%] h-0.5 bg-[rgba(255,220,180,0.75)] rounded-full" />
+          <span className={`absolute top-0 left-[20%] right-[20%] rounded-full bg-[rgba(255,220,180,0.75)] ${inline ? 'h-px' : 'h-0.5'}`} />
           <motion.span animate={{ rotate: menuOpen ? 45 : 0 }} transition={{ type: 'spring', stiffness: 420, damping: 26 }}>
-            <Plus size={30} strokeWidth={2.4} />
+            <Plus size={inline ? 20 : 30} strokeWidth={inline ? 2.6 : 2.4} />
           </motion.span>
         </motion.button>
       </div>
