@@ -1,10 +1,11 @@
-import { Home, CreditCard, BarChart3, Repeat, Archive, HandCoins, Eye, EyeOff, Wallet } from 'lucide-react'
+import { Home, CreditCard, BarChart3, Repeat, Archive, HandCoins, Eye, EyeOff } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { supabase, cacheUser } from '../lib/supabase'
 import { useState, useEffect } from 'react'
 import { useSettingsStore } from '../store/useSettingsStore'
 import QuickAddFab from './QuickAddFab'
+import AppLogo from './AppLogo'
 
 export const NAV_ITEMS = [
   { path: '/', label: 'Головна', icon: Home },
@@ -79,12 +80,8 @@ export default function Sidebar() {
     <aside className="sticky top-6 z-30 self-start w-full">
       <div className="bg-liquid-glass rounded-[28px] p-3 flex flex-col gap-1">
         <div className="flex items-center justify-between px-2 pt-1 pb-3">
-          <div className="flex items-center gap-2.5">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-brand to-brand-deep grid place-items-center shadow-brand">
-              <Wallet size={18} className="text-white" />
-            </div>
-            <div className="font-bold tracking-tight">MyWallet</div>
-          </div>
+          {/* Also the way to the iPhone app: animates until the user has it, opens the install guide */}
+          <AppLogo size={36} withLabel />
           {/* The app's one + (click: new transaction; hold / right-click: more) */}
           <QuickAddFab variant="inline" />
         </div>
@@ -203,6 +200,7 @@ export function MobileHeader() {
         <div className="text-[22px] font-semibold leading-tight mt-0.5">{userFirstName(user)}</div>
       </div>
       <div className="flex items-center gap-2.5">
+        <AppLogo size={40} />
         <button
           onClick={() => updateSetting('hideAllBalances', !hideAllBalances)}
           className="h-10 w-10 rounded-full bg-white/[0.08] grid place-items-center text-white/80"
