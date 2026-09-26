@@ -404,6 +404,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
       // інформуємо інші віджети
       txBus.emit({ 
         type: 'CREATE',
+        transaction: data,
         card_id: data.card_id || null, 
         delta: Number(data.amount || 0) 
       })

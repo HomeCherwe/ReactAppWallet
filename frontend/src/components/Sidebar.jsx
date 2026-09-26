@@ -1,9 +1,8 @@
-import { Home, CreditCard, BarChart3, Repeat, Plus, Archive, HandCoins, Eye, EyeOff, Wallet } from 'lucide-react'
+import { Home, CreditCard, BarChart3, Repeat, Archive, HandCoins, Eye, EyeOff, Wallet } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { supabase, cacheUser } from '../lib/supabase'
 import { useState, useEffect } from 'react'
-import CreateTxModal from './transactions/CreateTxModal'
 import { useSettingsStore } from '../store/useSettingsStore'
 
 export const NAV_ITEMS = [
@@ -137,14 +136,10 @@ export default function Sidebar() {
   )
 }
 
-/**
- * Phone: the iPhone app's bottom dock (dark glass pill, orange active tab) plus the big orange +
- * floating above it on the right.
- */
+/** Phone & tablet: the iPhone app's bottom dock (dark glass pill, orange active tab) */
 export function MobileDock() {
   const navigate = useNavigate()
   const isActive = useIsActive()
-  const [showCreateTxModal, setShowCreateTxModal] = useState(false)
 
   return (
     <>
@@ -183,23 +178,6 @@ export function MobileDock() {
         </div>
       </nav>
 
-      {/* Big orange + (like the iPhone FAB) */}
-      <motion.button
-        whileTap={{ scale: 0.9 }}
-        onClick={() => setShowCreateTxModal(true)}
-        className="fixed right-4 z-50 h-16 w-16 overflow-hidden rounded-full grid place-items-center bg-gradient-to-br from-[#FF7A00] to-brand-deep text-white shadow-[0_6px_18px_rgba(255,107,0,0.65)] border border-[rgba(255,200,140,0.6)]"
-        style={{ bottom: 'calc(92px + env(safe-area-inset-bottom, 0px))' }}
-        aria-label="Нова транзакція"
-      >
-        <span className="absolute top-0 left-[20%] right-[20%] h-0.5 bg-[rgba(255,220,180,0.75)] rounded-full" />
-        <Plus size={30} strokeWidth={2.4} />
-      </motion.button>
-
-      <CreateTxModal
-        open={showCreateTxModal}
-        onClose={() => setShowCreateTxModal(false)}
-        onSaved={() => setShowCreateTxModal(false)}
-      />
     </>
   )
 }

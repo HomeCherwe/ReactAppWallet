@@ -1,16 +1,13 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
-import { X, Plus, Trash2, ScanLine, AlertTriangle, Landmark, ChevronDown, ChevronUp , Pin} from 'lucide-react'
+import { X, Trash2, AlertTriangle, Landmark, ChevronDown, ChevronUp , Pin} from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
 import ConfirmModal from '../ConfirmModal'
 import DeleteTxModal from './DeleteTxModal'
 import Row from './Row'
 import DetailsModal from './DetailsModal'
-import CreateTxModal from './CreateTxModal'
 import EditTxModal from './EditTxModal'
-import TransferModal from './TransferModal'
-import ScanReceiptModal from './ScanReceiptModal'
 import SplitTxModal from './SplitTxModal'
 import { apiFetch, getApiUrl } from '../../utils.jsx'
 import { listTransactions, updateTransaction, deleteTransaction, archiveTransaction, deleteTransactions, getTransactionCategories } from '../../api/transactions'
@@ -94,9 +91,6 @@ export default function MonthlyPayment() {
   const [bulkCategoryValue, setBulkCategoryValue] = useState('')
   const [bulkCategoryLoading, setBulkCategoryLoading] = useState(false)
 
-  const [createOpen, setCreateOpen] = useState(false)
-  const [transferOpen, setTransferOpen] = useState(false)
-  const [scanOpen, setScanOpen] = useState(false)
   const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false)
   const [expiredBanks, setExpiredBanks] = useState([]) // names of banks whose 90-day access ran out
 
@@ -468,7 +462,7 @@ export default function MonthlyPayment() {
 
       const tx = event?.transaction
 
-      if (type === 'INSERT' && tx) {
+      if ((type === 'INSERT' || type === 'CREATE') && tx) {
         if (!txMatchesCurrentView(tx) && !shouldKeepForNesting(tx)) return
         setRows(prev => dedupeById([tx, ...(prev || [])]))
         return
@@ -885,19 +879,6 @@ export default function MonthlyPayment() {
     }
   }
 
-  const handleSaved = (tx) => {
-    // prepend saved tx but avoid duplicates by id
-    setRows(prev => dedupeById([tx, ...prev]))
-    // Update pinnedRows: remove if tx no longer satisfies pinning condition, patch if it does
-    setPinnedRows(prev => {
-      const exists = (prev || []).some(r => r?.id === tx?.id)
-      if (!exists) return prev
-      const isStillPinned = pinnedCategories.includes(tx.category) || String(tx.note || '').includes('[pinned]')
-      if (!isStillPinned) return (prev || []).filter(r => r?.id !== tx?.id)
-      return (prev || []).map(r => r?.id === tx?.id ? { ...r, ...tx } : r)
-    })
-  }
-
   const handleSelect = (txId, checked, index, event) => {
     // Перевіряємо shiftKey з event або з глобального стану
     const shiftKey = event?.shiftKey || shiftKeyPressedRef.current || false
@@ -1169,15 +1150,6 @@ export default function MonthlyPayment() {
                 </motion.div>
               )}
             </AnimatePresence>
-            <button className="btn btn-primary text-xs inline-flex items-center gap-1" onClick={() => setCreateOpen(true)}>
-              <Plus size={14} /> Додати
-            </button>
-            <button className="btn btn-soft text-xs inline-flex items-center gap-1" onClick={() => setScanOpen(true)}>
-              <ScanLine size={14} /> Сканувати
-            </button>
-            <button className="btn btn-soft text-xs inline-flex items-center gap-1" onClick={() => setTransferOpen(true)}>
-              Переказ
-            </button>
           </div>
         </div>
 
@@ -1544,18 +1516,6 @@ export default function MonthlyPayment() {
         }}
       />
 
-      <CreateTxModal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        onSaved={handleSaved}
-      />
-
-      <TransferModal
-        open={transferOpen}
-        onClose={() => setTransferOpen(false)}
-        onDone={(res) => { fetchPage({ append: false, search: searchQuery }); setTransferOpen(false) }}
-      />
-
       <EditTxModal
         open={editOpen}
         tx={editTx}
@@ -1581,11 +1541,6 @@ export default function MonthlyPayment() {
         onCancel={() => { setBulkDeleteOpen(false) }}
       />
 
-      <ScanReceiptModal
-        open={scanOpen}
-        onClose={() => setScanOpen(false)}
-        onSaved={() => fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })}
-      />
       <Toaster position="top-right" />
     </motion.div>
   )

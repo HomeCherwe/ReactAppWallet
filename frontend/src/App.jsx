@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { supabase, cacheUser, getUserCacheStats } from './lib/supabase'
 import Sidebar, { MobileDock } from './components/Sidebar.jsx'
+import QuickAddFab from './components/QuickAddFab'
 import DashboardPage from './pages/DashboardPage'
 import ProfilePage from './pages/ProfilePage'
 import AnalyticsPage from './pages/AnalyticsPage'
@@ -446,9 +447,11 @@ export default function App(){
   
 
   return (
-    <div className="app-container min-h-dvh pt-4 sm:pt-6 pb-40 lg:pb-6">
-      {/* Phone & tablet: bottom dock + big orange + like the iPhone app */}
+    <div className="app-container min-h-dvh pt-4 sm:pt-6 pb-40 lg:pb-28">
+      {/* Phone & tablet: bottom dock like the iPhone app */}
       <div className="lg:hidden"><MobileDock /></div>
+      {/* The one + of the app, on every page */}
+      <QuickAddFab />
 
       <div className="max-w-[1300px] mx-auto grid grid-cols-1 lg:grid-cols-[230px_1fr_360px] gap-4">
         <div className="hidden lg:block"><Sidebar /></div>
