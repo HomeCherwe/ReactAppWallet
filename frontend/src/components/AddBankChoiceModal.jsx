@@ -12,6 +12,7 @@ export default function AddBankChoiceModal({ open, onClose, onManual }) {
   const [step, setStep] = useState('choice')
   const [connectedIds, setConnectedIds] = useState([])
   const [defaultCountry, setDefaultCountry] = useState('fr')
+  const [formOpen, setFormOpen] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -52,7 +53,7 @@ export default function AddBankChoiceModal({ open, onClose, onManual }) {
                   </span>
                 </div>
                 <p className="text-sm text-white/70 mt-1">
-                  Транзакції й баланс підтягуються автоматично. Monobank, Revolut, Wise, BNP Paribas, Monzo та ще 80+ банків.
+                  Транзакції й баланс підтягуються автоматично. Monobank, Revolut, Wise, BNP Paribas, Monzo, 80+ банків і Binance.
                 </p>
                 <p className="text-xs text-white/40 mt-2 flex items-center gap-1">
                   <ShieldCheck size={13} /> Open Banking · лише читання · без доступу до пароля
@@ -81,18 +82,21 @@ export default function AddBankChoiceModal({ open, onClose, onManual }) {
         </div>
       ) : (
         <div className="grid gap-3">
-          <button
-            type="button"
-            onClick={() => setStep('choice')}
-            className="inline-flex items-center gap-1 text-sm text-white/55 hover:text-white w-fit"
-          >
-            <ArrowLeft size={15} /> Назад
-          </button>
+          {!formOpen && (
+            <button
+              type="button"
+              onClick={() => setStep('choice')}
+              className="inline-flex items-center gap-1 text-sm text-white/55 hover:text-white w-fit"
+            >
+              <ArrowLeft size={15} /> Назад
+            </button>
+          )}
           <ConnectBankCatalog
             active={open}
             connectedIds={connectedIds}
             defaultCountry={defaultCountry}
             onConnected={onClose}
+            onFormOpenChange={setFormOpen}
           />
         </div>
       )}

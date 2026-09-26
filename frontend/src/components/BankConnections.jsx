@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ArrowLeft, ExternalLink, Eye, EyeOff, Landmark, RefreshCw, Search, ShieldCheck, Unplug } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, CheckCircle2, ExternalLink, Eye, EyeOff, Landmark, RefreshCw, Search, ShieldCheck, Unplug } from 'lucide-react'
 import toast from 'react-hot-toast'
 import BaseModal from './BaseModal'
 import ConfirmModal from './ConfirmModal'
@@ -12,6 +12,7 @@ import {
   startBankConnection,
   syncBankConnections,
 } from '../api/bankConnections'
+import { connectBinance, disconnectBinance, isBinanceConnected, syncBinance } from '../api/binance'
 
 const COUNTRIES = {
   fr: '🇫🇷 Франція',
@@ -30,7 +31,11 @@ const COUNTRIES = {
   fi: '🇫🇮 Фінляндія',
   lt: '🇱🇹 Литва',
   ee: '🇪🇪 Естонія',
+  crypto: '🪙 Крипто',
 }
+
+// Crypto exchanges sit in the same catalog under the "Крипто" tab
+const BINANCE = { provider_id: 'binance', name: 'Binance', country: 'crypto', auth: 'binance' }
 
 const CONNECT_ERRORS = {
   access_denied: 'Доступ не надано в банку',
@@ -70,6 +75,171 @@ function BankLogo({ src, name, size = 40 }) {
 
 // Fired after a bank was connected without leaving the page (token banks like Monobank)
 export const BANK_CONNECTED_EVENT = 'bank-connected'
+// Fired when Binance was connected or disconnected ({ detail: { connected } })
+export const CRYPTO_CHANGED_EVENT = 'crypto-changed'
+
+function BinanceMark({ size = 40 }) {
+  return (
+    <div
+      className="rounded-xl bg-[#1E2026] border border-white/10 flex items-center justify-center flex-shrink-0"
+      style={{ width: size, height: size }}
+    >
+      <svg viewBox="0 0 24 24" width={size * 0.58} height={size * 0.58} fill="#F0B90B" aria-hidden="true">
+        <path d="M16.624 13.9202l2.7175 2.7154-7.353 7.353-7.353-7.352 2.7175-2.7164 4.6355 4.6595 4.6356-4.6595zm4.6366-4.6366L24 12l-2.7154 2.7164L18.5682 12l2.6924-2.7164zm-9.272.001l2.7163 2.6914-2.7164 2.7174v-.001L9.2721 12l2.7164-2.7154zm-9.2722-.001L5.4088 12l-2.6914 2.6924L0 12l2.7164-2.7164zM11.9885.0115l7.353 7.329-2.7174 2.7154-4.6356-4.6356-4.6355 4.6595-2.7174-2.7154 7.353-7.353z" />
+      </svg>
+    </div>
+  )
+}
+
+/** Binance: a read-only API key; the balance goes into the "Binance · Spot" card */
+function BinanceConnectForm({ connected, onBack, onChanged }) {
+  const [apiKey, setApiKey] = useState('')
+  const [secret, setSecret] = useState('')
+  const [show, setShow] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const submit = async (e) => {
+    e.preventDefault()
+    if (!apiKey.trim() || !secret.trim()) return
+    setBusy(true)
+    try {
+      await connectBinance(apiKey.trim(), secret.trim())
+      setApiKey('')
+      setSecret('')
+      toast.success('Binance підключено! Баланс з’явиться на картці Binance')
+      onChanged(true)
+    } catch (err) {
+      toast.error(`Binance: ${err.message}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const disconnect = async () => {
+    setBusy(true)
+    try {
+      await disconnectBinance()
+      toast.success('Binance відключено. Картка й історія залишились')
+      onChanged(false)
+    } catch (err) {
+      toast.error(`Не вдалося відключити Binance: ${err.message}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const steps = [
+    <>
+      Відкрийте в Binance{' '}
+      <a
+        href="https://www.binance.com/uk-UA/my/settings/api-management"
+        target="_blank"
+        rel="noreferrer"
+        className="text-orange-400 font-medium inline-flex items-center gap-0.5 hover:underline"
+      >
+        Профіль → API Management <ExternalLink size={12} />
+      </a>
+    </>,
+    <>Натисніть <b>Create API</b> → <b>System generated</b>, назвіть ключ (наприклад, MyWallet) і пройдіть перевірку</>,
+    <>Залиште увімкненим лише <b>Enable Reading</b> — без торгівлі й виведення коштів</>,
+    <>Скопіюйте <b>API Key</b> і <b>Secret Key</b> і вставте нижче. Secret показується тільки один раз</>,
+  ]
+
+  const input = 'w-full border border-white/[0.14] rounded-xl px-3 py-2.5 font-mono text-sm focus:ring-2 focus:ring-orange-400 outline-none'
+
+  return (
+    <form onSubmit={submit} className="grid gap-4">
+      <button
+        type="button"
+        onClick={onBack}
+        className="inline-flex items-center gap-1 text-sm text-white/55 hover:text-white w-fit"
+      >
+        <ArrowLeft size={15} /> Назад
+      </button>
+
+      <div className="flex items-center gap-3">
+        <BinanceMark size={48} />
+        <div className="flex-1 min-w-0">
+          <div className="font-semibold text-white">Binance</div>
+          <div className="text-xs text-white/55">Криптобіржа · API-ключ лише для читання</div>
+        </div>
+        {connected && (
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-400">
+            <CheckCircle2 size={14} /> Підключено
+          </span>
+        )}
+      </div>
+
+      <ol className="grid gap-2 text-sm text-white/85">
+        {steps.map((text, i) => (
+          <li key={i} className="flex gap-2.5">
+            <span className="w-5 h-5 rounded-full bg-orange-500/15 text-orange-300 text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
+              {i + 1}
+            </span>
+            <span>{text}</span>
+          </li>
+        ))}
+      </ol>
+
+      <div className="grid gap-2">
+        <input
+          type="text"
+          autoComplete="off"
+          spellCheck={false}
+          className={input}
+          placeholder="API Key"
+          value={apiKey}
+          onChange={e => setApiKey(e.target.value)}
+        />
+        <div className="relative">
+          <input
+            type={show ? 'text' : 'password'}
+            autoComplete="off"
+            spellCheck={false}
+            className={`${input} pr-10`}
+            placeholder="Secret Key"
+            value={secret}
+            onChange={e => setSecret(e.target.value)}
+          />
+          <button
+            type="button"
+            onClick={() => setShow(v => !v)}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/85"
+            title={show ? 'Сховати' : 'Показати'}
+          >
+            {show ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
+      </div>
+
+      <button
+        type="submit"
+        disabled={busy || !apiKey.trim() || !secret.trim()}
+        className="w-full py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 text-white font-semibold shadow-sm hover:from-orange-600 hover:to-orange-700 disabled:opacity-50 flex items-center justify-center gap-2"
+      >
+        {busy && <RefreshCw size={16} className="animate-spin" />}
+        {busy ? 'Перевіряємо ключ…' : connected ? 'Оновити ключі' : 'Підключити Binance'}
+      </button>
+
+      {connected && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={disconnect}
+          className="w-full py-2.5 rounded-xl bg-white/[0.05] border border-white/10 text-[#FF453A] font-semibold hover:bg-white/[0.08] disabled:opacity-50"
+        >
+          Відключити Binance
+        </button>
+      )}
+
+      <p className="text-xs text-white/40 flex gap-1.5">
+        <ShieldCheck size={14} className="flex-shrink-0 mt-px" />
+        Ключ лише для читання: застосунок бачить тільки баланс і не може торгувати чи виводити кошти. Видалити ключ можна
+        будь-коли в Binance → API Management.
+      </p>
+    </form>
+  )
+}
 
 /** Monobank: connected with a personal token from api.monobank.ua (read-only: balance and statement). */
 function TokenConnectForm({ provider, onBack, onDone }) {
@@ -176,17 +346,30 @@ function TokenConnectForm({ provider, onBack, onDone }) {
 }
 
 /** Bank catalog (TrueLayer + Monobank): country tabs, search, logos. Tapping a bank starts the connection. */
-export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCountry, onConnected }) {
+export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCountry, onConnected, onFormOpenChange }) {
   const [providers, setProviders] = useState(null)
   const [error, setError] = useState(false)
   const [country, setCountry] = useState(defaultCountry || 'fr')
   const [query, setQuery] = useState('')
   const [connectingId, setConnectingId] = useState(null)
   const [tokenProvider, setTokenProvider] = useState(null)
+  const [binanceOpen, setBinanceOpen] = useState(false)
+  const [binanceConnected, setBinanceConnected] = useState(false)
 
   useEffect(() => {
-    if (!active) setTokenProvider(null)
+    if (!active) {
+      setTokenProvider(null)
+      setBinanceOpen(false)
+      return
+    }
+    isBinanceConnected().then(setBinanceConnected)
   }, [active])
+
+  // A connect form has its own "Назад", so the modal can hide its one
+  const formOpen = binanceOpen || !!tokenProvider
+  useEffect(() => {
+    onFormOpenChange?.(formOpen)
+  }, [formOpen, onFormOpenChange])
 
   useEffect(() => {
     if (!active || providers) return
@@ -195,17 +378,23 @@ export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCo
   }, [active, providers])
 
   const countries = useMemo(() => {
-    const present = new Set((providers || []).map(p => p.country))
+    const present = new Set([...(providers || []).map(p => p.country), 'crypto'])
     return Object.keys(COUNTRIES).filter(c => present.has(c))
   }, [providers])
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const list = providers || []
+    const list = [...(providers || []), BINANCE]
     return q ? list.filter(p => p.name.toLowerCase().includes(q)) : list.filter(p => p.country === country)
   }, [providers, country, query])
+  // The crypto tab doesn't need the bank list from the server
+  const waitsForProviders = query.trim() !== '' || country !== 'crypto'
 
   const connect = async (p) => {
+    if (p.auth === 'binance') {
+      setBinanceOpen(true)
+      return
+    }
     if (p.auth === 'token') {
       setTokenProvider(p)
       return
@@ -218,6 +407,21 @@ export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCo
       toast.error(`Не вдалося підключити ${p.name}: ${e.message}`)
       setConnectingId(null)
     }
+  }
+
+  if (binanceOpen) {
+    return (
+      <BinanceConnectForm
+        connected={binanceConnected}
+        onBack={() => setBinanceOpen(false)}
+        onChanged={(connected) => {
+          setBinanceOpen(false)
+          setBinanceConnected(connected)
+          window.dispatchEvent(new CustomEvent(CRYPTO_CHANGED_EVENT, { detail: { connected } }))
+          if (connected) onConnected?.('Binance')
+        }}
+      />
+    )
   }
 
   if (tokenProvider) {
@@ -266,14 +470,14 @@ export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCo
         )}
 
         <div className="max-h-[50vh] overflow-y-auto -mx-1">
-          {error ? (
+          {error && waitsForProviders ? (
             <div className="py-8 text-center text-sm text-white/55">
               Не вдалося завантажити список банків.{' '}
               <button className="text-orange-400 font-medium" onClick={() => setProviders(null)}>
                 Спробувати ще раз
               </button>
             </div>
-          ) : !providers ? (
+          ) : !providers && waitsForProviders ? (
             <div className="py-10 flex justify-center">
               <RefreshCw size={20} className="animate-spin text-orange-400" />
             </div>
@@ -281,21 +485,27 @@ export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCo
             <div className="py-8 text-center text-sm text-white/55">Нічого не знайдено</div>
           ) : (
             visible.map(p => {
-              const connected = connectedIds.includes(p.provider_id)
+              const isBinance = p.auth === 'binance'
+              const connected = isBinance ? binanceConnected : connectedIds.includes(p.provider_id)
               return (
                 <button
                   key={p.provider_id}
                   type="button"
-                  disabled={connected || !!connectingId}
+                  // Binance stays clickable when connected: that's where its keys are changed or removed
+                  disabled={(connected && !isBinance) || !!connectingId}
                   onClick={() => connect(p)}
                   className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl text-left hover:bg-white/[0.03] disabled:hover:bg-transparent disabled:cursor-default"
                 >
-                  <BankLogo src={p.logo} name={p.name} />
+                  {isBinance ? <BinanceMark /> : <BankLogo src={p.logo} name={p.name} />}
                   <div className="flex-1 min-w-0">
                     <div className="font-medium text-white truncate">{p.name}</div>
-                    {(query || p.auth === 'token') && (
+                    {(query || p.auth === 'token' || isBinance) && (
                       <div className="text-xs text-white/55">
-                        {[query && (COUNTRIES[p.country] || p.country.toUpperCase()), p.auth === 'token' && 'через токен api.monobank.ua']
+                        {[
+                          query && (COUNTRIES[p.country] || p.country.toUpperCase()),
+                          p.auth === 'token' && 'через токен api.monobank.ua',
+                          isBinance && 'API-ключ лише для читання',
+                        ]
                           .filter(Boolean)
                           .join(' · ')}
                       </div>
@@ -315,7 +525,9 @@ export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCo
         </div>
 
         <p className="text-xs text-white/40">
-          {country === 'ua' && !query
+          {country === 'crypto' && !query
+            ? 'Binance підключається через API-ключ лише для читання — застосунок бачить тільки баланс, він з’являється на картці Binance.'
+            : country === 'ua' && !query
             ? 'Monobank підключається через персональний токен — лише читання, без терміну дії.'
             : 'Підключення через TrueLayer (Open Banking). Ви входите у свій банк напряму — застосунок не бачить ваш пароль. Доступ лише на читання, діє 90 днів.'}
         </p>
@@ -330,11 +542,13 @@ export function ConnectBankCatalog({ active = true, connectedIds = [], defaultCo
  */
 export default function BankConnections({ onChanged }) {
   const [connections, setConnections] = useState(null)
+  const [binance, setBinance] = useState(false)
   const [busyId, setBusyId] = useState(null)
   const [toDisconnect, setToDisconnect] = useState(null)
   const [reconnectToken, setReconnectToken] = useState(null)
 
   const load = useCallback(async () => {
+    isBinanceConnected().then(setBinance)
     try {
       setConnections(await listBankConnections())
     } catch (e) {
@@ -342,6 +556,35 @@ export default function BankConnections({ onChanged }) {
       setConnections([])
     }
   }, [])
+
+  const syncBinanceNow = useCallback(async () => {
+    setBusyId('binance')
+    try {
+      const res = await syncBinance()
+      toast.success(res?.synced ? 'Binance: баланс оновлено' : 'Binance: змін немає')
+      if (res?.synced) {
+        onChanged?.()
+        txBus.emit({ type: 'SYNC' })
+      }
+    } catch (e) {
+      toast.error(`Binance: ${e.message}`)
+    } finally {
+      setBusyId(null)
+    }
+  }, [onChanged])
+
+  // Binance connected or disconnected from the "Додати банк" catalog
+  useEffect(() => {
+    const onCrypto = (e) => {
+      setBinance(!!e.detail?.connected)
+      if (e.detail?.connected) {
+        onChanged?.() // the Binance card may be new
+        txBus.emit({ type: 'SYNC' })
+      }
+    }
+    window.addEventListener(CRYPTO_CHANGED_EVENT, onCrypto)
+    return () => window.removeEventListener(CRYPTO_CHANGED_EVENT, onCrypto)
+  }, [onChanged])
 
   const syncOne = useCallback(async (c) => {
     setBusyId(c.id)
@@ -431,7 +674,8 @@ export default function BankConnections({ onChanged }) {
     setToDisconnect(null)
     setBusyId(c.id)
     try {
-      await disconnectBankConnection(c.id)
+      if (c.id === 'binance') await disconnectBinance()
+      else await disconnectBankConnection(c.id)
       toast.success(`${c.provider_name} відключено`)
       await load()
       onChanged?.()
@@ -444,7 +688,8 @@ export default function BankConnections({ onChanged }) {
 
   // Hidden while loading and when nothing is connected (connecting starts from "Додати банк"),
   // so the cards page doesn't jump for users without connected banks
-  if (!connections || connections.length === 0) return null
+  if (!connections || (connections.length === 0 && !binance)) return null
+  const total = connections.length + (binance ? 1 : 0)
 
   const banksLabel = (n) => {
     const mod10 = n % 10
@@ -464,11 +709,11 @@ export default function BankConnections({ onChanged }) {
           </div>
           <div className="min-w-0">
             <h3 className="font-semibold text-white leading-tight">Підключені банки</h3>
-            <p className="text-xs text-white/55">Автоматична синхронізація через Open Banking</p>
+            <p className="text-xs text-white/55">Транзакції й баланс підтягуються автоматично</p>
           </div>
         </div>
         <span className="text-xs font-semibold text-orange-300 bg-orange-500/10 border border-orange-500/25 px-2.5 py-1 rounded-full whitespace-nowrap">
-          {banksLabel(connections.length)}
+          {banksLabel(total)}
         </span>
       </div>
 
@@ -541,6 +786,35 @@ export default function BankConnections({ onChanged }) {
             </div>
           )
         })}
+
+        {binance && (
+          <div className="relative flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.021] p-3 pl-4 hover:border-orange-500/35 hover:bg-orange-500/[0.04] transition-colors">
+            <span className="absolute left-0 top-3 bottom-3 w-1 rounded-r bg-green-500" />
+            <BinanceMark />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-white truncate">Binance</div>
+              <div className="text-xs text-white/55 truncate">Криптобіржа · баланс через API</div>
+            </div>
+            <button
+              type="button"
+              disabled={busyId === 'binance'}
+              onClick={syncBinanceNow}
+              title="Синхронізувати"
+              className="p-2 rounded-lg text-white/70 bg-surface/90 border border-white/10 hover:border-orange-500/35 hover:text-orange-400 disabled:opacity-50 transition-colors"
+            >
+              <RefreshCw size={15} className={busyId === 'binance' ? 'animate-spin' : ''} />
+            </button>
+            <button
+              type="button"
+              disabled={busyId === 'binance'}
+              onClick={() => setToDisconnect({ id: 'binance', provider_name: 'Binance' })}
+              title="Відключити"
+              className="p-2 rounded-lg text-white/40 bg-surface/90 border border-white/10 hover:border-red-500/35 hover:text-red-400 disabled:opacity-50 transition-colors"
+            >
+              <Unplug size={15} />
+            </button>
+          </div>
+        )}
       </div>
 
       <BaseModal
