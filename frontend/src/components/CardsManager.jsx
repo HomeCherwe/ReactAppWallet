@@ -897,7 +897,7 @@ return (
     <motion.div
       initial={false}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white/[0.04] backdrop-blur-xl rounded-3xl p-3 sm:p-5 shadow-glass relative flex flex-col h-auto sm:h-[calc(100vh-2rem)] border border-white/10"
+      className="bg-gradient-to-b from-white/[0.075] to-white/[0.025] backdrop-blur-xl rounded-3xl p-3 sm:p-5 shadow-glass relative flex flex-col h-auto sm:h-[calc(100vh-2rem)] border border-white/10"
     >
       <div className="flex items-center justify-between mb-4 shrink-0">
         <div className="text-lg font-bold tracking-tight">Ваші картки</div>

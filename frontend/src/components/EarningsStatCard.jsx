@@ -397,7 +397,7 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
   const currencySymbol = getCurrencySymbol()
   
   // Determine color and sign based on mode
-  const amountColor = mode === 'earning' ? 'text-emerald-400' : 'text-rose-400'
+  const amountColor = mode === 'earning' ? 'text-green-400' : 'text-rose-400'
   const amountSign = mode === 'earning' ? '+' : '-'
   
   return (
@@ -405,8 +405,16 @@ export default function EarningsStatCard({ title, mode, currency: initialCurrenc
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4 }}
-      className="rounded-3xl bg-white/[0.04] backdrop-blur-xl shadow-glass p-4 sm:p-5 border border-white/10"
+      className={`relative overflow-hidden rounded-3xl bg-gradient-to-b from-white/[0.075] to-white/[0.025] backdrop-blur-xl shadow-glass p-4 sm:p-5 border ${
+        mode === 'earning' ? 'border-green-500/20' : 'border-rose-500/20'
+      }`}
     >
+      {/* Soft accent glow in the corner */}
+      <div
+        className={`pointer-events-none absolute -z-10 -top-16 -right-16 h-40 w-40 rounded-full blur-3xl ${
+          mode === 'earning' ? 'bg-green-500/20' : 'bg-rose-500/20'
+        }`}
+      />
       <div className="flex items-center justify-between mb-2">
         <div className="text-sm text-white/55">{title}</div>
         <CurrencySelect

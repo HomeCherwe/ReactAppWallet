@@ -179,7 +179,7 @@ export default function ArchivesPage() {
     <motion.div 
       initial={{ opacity: 0, y: 12 }} 
       animate={{ opacity: 1, y: 0 }} 
-      className="bg-white/[0.04] backdrop-blur-xl rounded-3xl p-5 shadow-glass min-h-[400px] border border-white/10"
+      className="bg-gradient-to-b from-white/[0.075] to-white/[0.025] backdrop-blur-xl rounded-3xl p-5 shadow-glass min-h-[400px] border border-white/10"
     >
       <div className="mb-4">
         <div className="flex items-center justify-between mb-3">

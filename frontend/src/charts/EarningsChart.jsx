@@ -8,6 +8,7 @@ import EditTxModal from '../components/transactions/EditTxModal'
 import BaseModal from '../components/BaseModal'
 import { deleteTransaction, archiveTransaction } from '../api/transactions'
 import { useEffect, useMemo, useState, useRef } from 'react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { supabase } from '../lib/supabase'
 import { apiFetch } from '../utils.jsx'
@@ -217,6 +218,31 @@ function dayKey(dt) {
   const d = new Date(dt)
   // Use LOCAL date so midnight local time stays on the correct day (avoids UTC offset issues)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+const pad2 = (n) => String(n).padStart(2, '0')
+const localIso = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+
+/**
+ * The week (Mon–Sun) or month `offset` periods back from `today` (0 = the current one), with a
+ * label for the navigator.
+ */
+function periodRange(period, offset, today) {
+  const short = (d) => d.toLocaleDateString('uk-UA', { day: 'numeric', month: 'short' })
+  if (period === 'week') {
+    const start = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+    start.setDate(start.getDate() - ((start.getDay() + 6) % 7) + offset * 7)
+    const end = new Date(start)
+    end.setDate(end.getDate() + 6)
+    const label = start.getMonth() === end.getMonth()
+      ? `${start.getDate()} – ${short(end)}`
+      : `${short(start)} – ${short(end)}`
+    return { from: localIso(start), to: localIso(end), label }
+  }
+  const start = new Date(today.getFullYear(), today.getMonth() + offset, 1)
+  const end = new Date(today.getFullYear(), today.getMonth() + offset + 1, 0)
+  const month = start.toLocaleDateString('uk-UA', { month: 'long' })
+  return { from: localIso(start), to: localIso(end), label: `${month[0].toUpperCase()}${month.slice(1)} ${start.getFullYear()}` }
 }
 
 function fmtLabel(iso) {
@@ -440,16 +466,19 @@ export default function EarningsChart(){
   
   // Dashboard settings
   const showUsdtInChart = getNestedSetting('dashboard.showUsdtInChart', true)
-  const [from, setFrom] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0,10)
-  })
-  const [to, setTo] = useState(() => new Date().toISOString().slice(0,10))
-  // Applied dates - used for filtering
-  const [appliedFrom, setAppliedFrom] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0,10)
-  })
-  const [appliedTo, setAppliedTo] = useState(() => new Date().toISOString().slice(0,10))
-  const [loading, setLoading] = useState(false)
+  // Period: the current week/month (offset 0) or one of the previous ones
+  const [period, setPeriod] = useState('month') // 'week' | 'month'
+  const [offset, setOffset] = useState(0)
+  // Today's date, so offset 0 moves on by itself when a new week / month starts
+  const [today, setToday] = useState(() => localIso(new Date()))
+  const range = useMemo(
+    () => periodRange(period, offset, new Date(`${today}T12:00:00`)),
+    [period, offset, today]
+  )
+  const rangeRef = useRef(range)
+  rangeRef.current = range
+  const loadedOnceRef = useRef(false)
+const [loading, setLoading] = useState(false)
   const [txs, setTxs] = useState([])
   const [currency, setCurrency] = useState(() => {
     try { return localStorage.getItem('wallet:chart:currency') || 'UAH' } catch { return 'UAH' }
@@ -483,9 +512,8 @@ export default function EarningsChart(){
     const chart = settings?.chart || {}
     if (chart.currency) setCurrency(chart.currency)
     if (chart.mode) setMode(chart.mode)
-    if (chart.from) setFrom(chart.from)
-    if (chart.appliedFrom) setAppliedFrom(chart.appliedFrom)
-    setPrefsLoaded(true)
+    if (chart.period === 'week' || chart.period === 'month') setPeriod(chart.period)
+setPrefsLoaded(true)
   }, [initialized, settings])
 
   // displayData is what is currently visible. We render a single chart and
@@ -594,12 +622,22 @@ export default function EarningsChart(){
 
   // initialize displayData when component mounts
   useEffect(() => {
-    setDisplayData(computeChartData(txs, mode, appliedFrom, appliedTo, currency))
+    setDisplayData(computeChartData(txs, mode, range.from, range.to, currency))
   }, [])
 
   // keep display in sync; when animKey changes, the hook will update
   // displayData and bump chartKey to retrigger Recharts animation once.
-  useChartSync(txs, mode, appliedFrom, appliedTo, currency, animKey, setDisplayData, prevAnimKeyRef, setChartKey)
+  useChartSync(txs, mode, range.from, range.to, currency, animKey, setDisplayData, prevAnimKeyRef, setChartKey)
+
+  useEffect(() => {
+    const tick = () => setToday(localIso(new Date()))
+    const id = setInterval(tick, 60 * 1000)
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', tick)
+    }
+  }, [])
 
   const fetchData = async ({ showLoading = true } = {}) => {
     // Скасовуємо попередній запит, якщо він є
@@ -612,7 +650,8 @@ export default function EarningsChart(){
     abortControllerRef.current = abortController
 
     if (showLoading) setLoading(true)
-    
+
+    const { from, to } = rangeRef.current
     const fromTs = new Date(from).toISOString()
     const toTs = new Date(new Date(to).getTime() + 24*60*60*1000 - 1).toISOString()
     
@@ -710,29 +749,26 @@ export default function EarningsChart(){
         setTxs([])
       }
     } finally {
-      if (!abortController.signal.aborted) {
-        if (showLoading) setLoading(false)
-      }
+      // Always clear it: a quiet reload may have aborted the request that turned it on
+      if (!abortController.signal.aborted) setLoading(false)
     }
   }
 
-  useEffect(() => { 
-    fetchData({ showLoading: true }) 
-  }, [])
+  // Load the selected period right away (no Apply button)
+  useEffect(() => {
+    fetchData({ showLoading: !loadedOnceRef.current })
+    if (loadedOnceRef.current) setAnimKey(k => k + 1)
+    loadedOnceRef.current = true
+  }, [range.from, range.to])
 
   // Зберегти налаштування в БД при зміні (через store з debounce)
   useEffect(() => {
     if (!prefsLoaded) return // Не зберігаємо налаштування поки вони не завантажились
     
     // Оновлюємо через store (автоматично зберігається через debounce)
-    updateNestedSetting('chart', {
-      currency,
-      mode,
-      from,
-      appliedFrom
-      // to та appliedTo не зберігаємо - завжди сьогоднішня дата
-    })
-  }, [currency, mode, from, appliedFrom, prefsLoaded, updateNestedSetting])
+    // The period type is saved; the chart always opens on the current week / month
+    updateNestedSetting('chart', { currency, mode, period })
+  }, [currency, mode, period, prefsLoaded, updateNestedSetting])
 
   // handler for clicking a bar (desktop) — open day modal for clicked iso
   const handleBarClick = (data) => {
@@ -776,8 +812,6 @@ export default function EarningsChart(){
     }
   }, [])
 
-  // Period changes are applied only when user clicks Apply. Presets update the
-  // from/to inputs but do NOT trigger fetch automatically.
 
   // computeChartData is used by both the component and the sync hook. Keep it
   // at module scope so hooks and effects can reference it without hoisting
@@ -828,68 +862,100 @@ export default function EarningsChart(){
   }
 
   return (
-    <motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} className="bg-white/[0.04] backdrop-blur-xl rounded-3xl p-3 md:p-5 shadow-glass border border-white/10">
-      <div className="flex flex-col sm:flex-row items-center sm:items-center gap-2 sm:gap-3 mb-2">
-          <div className="flex items-center gap-2 justify-center w-full sm:w-auto">
-          <button onClick={() => { setMode('earning'); setAnimKey(k => k + 1); }} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${mode==='earning' ? 'bg-surface-raised text-white' : 'bg-white/[0.06]'}`}>Дохід</button>
-          <button onClick={() => { setMode('spending'); setAnimKey(k => k + 1); }} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${mode==='spending' ? 'bg-surface-raised text-white' : 'bg-white/[0.06]'}`}>Витрата</button>
+    <motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} className="bg-gradient-to-b from-white/[0.075] to-white/[0.025] backdrop-blur-xl rounded-3xl p-3 md:p-5 shadow-glass border border-white/10">
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        {/* Income / spending */}
+        <div className="flex rounded-full bg-white/[0.06] p-0.5">
+          {[{ id: 'earning', label: 'Доходи' }, { id: 'spending', label: 'Витрати' }].map(o => (
+            <button
+              key={o.id}
+              onClick={() => { setMode(o.id); setAnimKey(k => k + 1) }}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-colors ${
+                mode === o.id
+                  ? (o.id === 'earning' ? 'bg-green-500/20 text-green-300' : 'bg-rose-500/20 text-rose-300')
+                  : 'text-white/55 hover:text-white'
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
         </div>
-        <div className="ml-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 text-xs w-full sm:w-auto">
-          {/* Currency selector with icon */}
-          <div className="flex items-center gap-2 border rounded px-2 py-1 bg-surface/90 flex-1 sm:flex-none">
-            <select aria-label="Currency" className="appearance-none bg-transparent text-sm font-semibold w-full sm:w-auto" value={currency} onChange={e=>{
-              const v = e.target.value
-              setCurrency(v)
-              // Збереження в БД відбувається через useEffect
-              setAnimKey(k => k + 1)
-              // Не викликаємо fetchData тут, оскільки це змінить відображені дані
-              // Дані оновлюються через useChartSync
-            }}>
-              <option>ALL</option>
-              <option>UAH</option>
-              <option>EUR</option>
-              <option>USD</option>
-              <option>USDT</option>
-            </select>
-          </div>
 
-          {/* From date with calendar icon */}
-          <div className="flex items-center gap-2 border rounded px-2 py-1 bg-surface/90 flex-1 sm:flex-none">
-            <input aria-label="From date" type="date" value={from} onChange={e=>setFrom(e.target.value)} className="text-sm font-semibold appearance-none bg-transparent w-full sm:w-auto" />
-          </div>
-
-          {/* To date with calendar icon */}
-          <div className="flex items-center gap-2 border rounded px-2 py-1 bg-surface/90 flex-1 sm:flex-none">
-            <input aria-label="To date" type="date" value={to} onChange={e=>setTo(e.target.value)} className="text-sm font-semibold appearance-none bg-transparent w-full sm:w-auto" />
-          </div>
-
-          <button onClick={() => { 
-            setAppliedFrom(from)
-            setAppliedTo(to)
-            fetchData({ showLoading: true }); 
-            setAnimKey(k => k + 1) 
-          }} className="btn btn-soft text-xs px-3 w-full sm:w-auto">Застосувати</button>
+        {/* Week / month */}
+        <div className="flex rounded-full bg-white/[0.06] p-0.5">
+          {[{ id: 'week', label: 'Тиждень' }, { id: 'month', label: 'Місяць' }].map(o => (
+            <button
+              key={o.id}
+              onClick={() => { setPeriod(o.id); setOffset(0) }}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-colors ${
+                period === o.id ? 'bg-white/[0.14] text-white' : 'text-white/55 hover:text-white'
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
         </div>
+
+        <select
+          aria-label="Currency"
+          className="ml-auto text-xs font-bold rounded-full px-3 py-1.5 bg-white/[0.06] border border-white/10 focus:outline-none focus:ring-2 focus:ring-brand"
+          value={currency}
+          onChange={e => {
+            setCurrency(e.target.value) // saved to the DB by the effect above
+            setAnimKey(k => k + 1)
+          }}
+        >
+          <option value="ALL">Всі валюти</option>
+          <option>UAH</option>
+          <option>EUR</option>
+          <option>USD</option>
+          <option>USDT</option>
+        </select>
       </div>
 
-      {/* Period total */}
-      <div className="flex justify-end mb-1">
+      {/* ‹ period › and its total */}
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setOffset(o => o - 1)}
+            className="h-8 w-8 grid place-items-center rounded-full bg-white/[0.06] hover:bg-white/10 text-white/80 transition-colors"
+            aria-label="Попередній період"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <button
+            onClick={() => setOffset(0)}
+            className="px-2 min-w-[132px] text-center"
+            title="До поточного періоду"
+          >
+            <div className="text-sm font-bold leading-tight">{range.label}</div>
+            <div className={`text-[10px] font-semibold leading-tight ${offset === 0 ? 'text-brand' : 'text-white/40'}`}>
+              {offset === 0 ? (period === 'week' ? 'Цей тиждень' : 'Цей місяць') : 'Натисніть — до поточного'}
+            </div>
+          </button>
+          <button
+            onClick={() => setOffset(o => Math.min(0, o + 1))}
+            disabled={offset >= 0}
+            className="h-8 w-8 grid place-items-center rounded-full bg-white/[0.06] hover:bg-white/10 text-white/80 transition-colors disabled:opacity-30 disabled:hover:bg-white/[0.06]"
+            aria-label="Наступний період"
+          >
+            <ChevronRight size={16} />
+          </button>
+        </div>
+
         {currency === 'ALL' && periodTotalsByCurrency && periodTotalsByCurrency.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2 justify-end">
             {periodTotalsByCurrency.map(({ currency: cur, total }) => (
               <div key={cur} className="flex items-center gap-1.5">
-                <div 
-                  className="w-3 h-3 rounded" 
-                  style={{ backgroundColor: getCurrencyColor(cur) }}
-                />
-                <div className={`${mode==='spending' ? 'text-red-400' : 'text-green-400'} text-xs sm:text-sm font-semibold`}>
+                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: getCurrencyColor(cur) }} />
+                <div className={`${mode==='spending' ? 'text-rose-400' : 'text-green-400'} text-xs sm:text-sm font-bold tabular-nums`}>
                   {mode==='spending' ? '-' : '+'}{total.toLocaleString()} {cur}
                 </div>
               </div>
             ))}
           </div>
         ) : (
-          <div className={`${mode==='spending' ? 'text-red-400' : 'text-green-400'} text-xs sm:text-sm font-semibold`}>
+          <div className={`${mode==='spending' ? 'text-rose-400' : 'text-green-400'} text-sm font-bold tabular-nums`}>
             {mode==='spending' ? '-' : '+'}{periodTotal.toLocaleString()} {currency}
           </div>
         )}

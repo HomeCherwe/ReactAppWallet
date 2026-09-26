@@ -359,7 +359,7 @@ export default function SubscriptionsPage() {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white/[0.04] backdrop-blur-xl rounded-3xl shadow-glass p-4 sm:p-6 border border-white/10"
+      className="bg-gradient-to-b from-white/[0.075] to-white/[0.025] backdrop-blur-xl rounded-3xl shadow-glass p-4 sm:p-6 border border-white/10"
     >
       {/* Загальна витрата на місяць */}
       {subscriptions.length > 0 && (

@@ -380,7 +380,7 @@ export default function ProfilePage() {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="bg-white/[0.04] backdrop-blur-xl rounded-3xl shadow-glass p-6 border border-white/10"
+      className="bg-gradient-to-b from-white/[0.075] to-white/[0.025] backdrop-blur-xl rounded-3xl shadow-glass p-6 border border-white/10"
     >
       <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
         <User size={24} />

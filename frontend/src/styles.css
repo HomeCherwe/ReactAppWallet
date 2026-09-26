@@ -87,7 +87,7 @@ body::before {
 
   /* Glass card — the building block of every screen (like the iPhone tiles) */
   .glass-card {
-    @apply bg-white/[0.04] border border-white/10 rounded-3xl backdrop-blur-xl shadow-glass;
+    @apply bg-gradient-to-b from-white/[0.075] to-white/[0.025] border border-white/10 rounded-3xl backdrop-blur-xl shadow-glass;
   }
 
   /* Responsive button sizes */

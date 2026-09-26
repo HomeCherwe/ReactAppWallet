@@ -1055,7 +1055,7 @@ export default function MonthlyPayment() {
   }
 
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="bg-white/[0.04] backdrop-blur-xl rounded-3xl p-5 shadow-glass min-h-[400px] border border-white/10">
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="bg-gradient-to-b from-white/[0.075] to-white/[0.025] backdrop-blur-xl rounded-3xl p-5 shadow-glass min-h-[400px] border border-white/10">
 
       {/* A bank's 90-day access ran out */}
       {expiredBanks.length > 0 && (
@@ -1268,19 +1268,19 @@ export default function MonthlyPayment() {
           <div ref={listRef} className="space-y-6">
             {/* Pinned Section */}
             {pinnedTxs.length > 0 && (
-              <div className="bg-white/[0.03] rounded-3xl border border-white/10 overflow-hidden mb-6">
+              <div className="rounded-3xl overflow-hidden mb-6 border border-brand/30 bg-gradient-to-b from-brand/[0.13] to-brand/[0.03] shadow-[0_10px_30px_rgba(255,107,0,0.10)]">
                 <button
                   onClick={() => setPinnedExpanded(!pinnedExpanded)}
-                  className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-white/[0.04] transition-colors"
+                  className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-brand/[0.06] transition-colors"
                 >
                   <div className="flex items-center gap-2">
-                    <span className="h-7 w-7 rounded-lg bg-brand/15 grid place-items-center"><Pin size={14} className="text-brand" /></span>
+                    <span className="h-8 w-8 rounded-xl bg-gradient-to-br from-brand to-brand-deep grid place-items-center shadow-brand"><Pin size={15} className="text-white" /></span>
                     <span className="font-semibold text-white">Закріплені транзакції</span>
-                    <span className="bg-white/10 text-white/80 text-xs font-bold px-2 py-0.5 rounded-full">
+                    <span className="bg-brand/20 text-brand-light text-xs font-bold px-2 py-0.5 rounded-full">
                       {pinnedTxs.length}
                     </span>
                   </div>
-                  <div className="text-white/50">
+                  <div className="text-brand-light">
                     {pinnedExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
                   </div>
                 </button>

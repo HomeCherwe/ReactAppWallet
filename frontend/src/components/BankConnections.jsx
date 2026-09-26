@@ -456,7 +456,7 @@ export default function BankConnections({ onChanged }) {
 
   return (
     // Same card look as the other blocks on the cards page (white, rounded, soft shadow)
-    <div className="bg-white/[0.04] backdrop-blur-xl rounded-3xl shadow-glass p-4 sm:p-5 mb-4 border border-white/10">
+    <div className="bg-gradient-to-b from-white/[0.075] to-white/[0.025] backdrop-blur-xl rounded-3xl shadow-glass p-4 sm:p-5 mb-4 border border-white/10">
       <div className="flex items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-400 to-orange-600 text-white flex items-center justify-center shadow-sm flex-shrink-0">

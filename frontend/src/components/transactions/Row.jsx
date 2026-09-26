@@ -4,6 +4,19 @@ import { fmtDate, fmtAmount } from '../../utils/format'
 import { Trash2, RotateCcw, Link2Off } from 'lucide-react'
 
 import { useSettingsStore } from '../../store/useSettingsStore'
+import { getCategoryIcon } from '../../utils/categoryIcon'
+
+/** Category emoji in a tinted square, like the iPhone list: orange = expense, green = income */
+function CategoryIcon({ tx, compact }) {
+  const amount = Number(tx.amount || 0)
+  const tint = tx.is_transfer ? 'bg-sky-500/15' : amount > 0 ? 'bg-green-500/15' : 'bg-brand/15'
+  const size = compact ? 'h-8 w-8 text-[15px] rounded-[10px]' : 'h-10 w-10 text-[19px] rounded-xl'
+  return (
+    <div className={`${size} ${tint} shrink-0 grid place-items-center select-none`}>
+      {tx.is_transfer ? '🔄' : getCategoryIcon(tx.category, amount)}
+    </div>
+  )
+}
 
 export default function Row({
   tx,
@@ -89,7 +102,7 @@ export default function Row({
         className={`flex items-center justify-between ${pad} ${round} transition ${bg} ${hover} ${onDetails ? 'cursor-pointer' : ''}`}
         onClick={onDetails ? onRowClick : undefined}
       >
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 min-w-0">
         {onSelect && (
           <input
             type="checkbox"
@@ -105,7 +118,8 @@ export default function Row({
             className="w-4 h-4 rounded border-white/[0.14] text-brand focus:ring-brand cursor-pointer"
           />
         )}
-        <div>
+        <CategoryIcon tx={tx} compact={compact} />
+        <div className="min-w-0">
           <div className={`font-semibold ${titleText} flex items-center gap-2`}>
             {tx.category || 'Без категорії'}
             {tx.is_transfer && (
@@ -213,7 +227,7 @@ export default function Row({
       className={`flex items-center justify-between ${pad} ${round} transition ${bg} ${hover} ${onDetails ? 'cursor-pointer' : ''}`}
       onClick={onDetails ? onRowClick : undefined}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 min-w-0">
         {onSelect && (
           <input
             type="checkbox"
@@ -229,7 +243,8 @@ export default function Row({
             className="w-4 h-4 rounded border-white/[0.14] text-brand focus:ring-brand cursor-pointer"
           />
         )}
-        <div>
+        <CategoryIcon tx={tx} compact={compact} />
+        <div className="min-w-0">
           <div className={`font-semibold ${titleText} flex items-center gap-2`}>
             {tx.category || 'Без категорії'}
           </div>

@@ -310,7 +310,7 @@ export default function TotalsCard({ title = 'Total balance' }) {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="rounded-3xl bg-white/[0.04] backdrop-blur-xl shadow-glass overflow-hidden border border-white/10"
+      className="rounded-3xl bg-gradient-to-b from-white/[0.075] to-white/[0.025] backdrop-blur-xl shadow-glass overflow-hidden border border-white/10"
     >
       <div className="p-3 border-b border-white/[0.06]">
         <div className="flex items-center justify-between">
