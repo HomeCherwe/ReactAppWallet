@@ -52,6 +52,7 @@ import { useMenuOverlay } from '../store/useMenuOverlay'
 import { syncBanks } from '../store/useBankSyncStore'
 import { checkForAppUpdate } from '../utils/appUpdate'
 import QuickActionPopup from '../components/QuickActionPopup'
+import AppStatusBanner from '../components/AppStatusBanner'
 import AddTransactionModal from '../components/AddTransactionModal'
 import AddAccountFlow from '../components/AddAccountFlow'
 import CardTransactionsSheet from '../components/CardTransactionsSheet'
@@ -547,6 +548,8 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
           </View>
         </View>
 
+        {/* New build of the app to install (and, later, the signing reminder) */}
+        <AppStatusBanner />
 
         {/* Balance Card */}
         <View style={styles.balanceCardWrapper}>

@@ -94,7 +94,8 @@ export default function BaseModal({
           transition={springTransition}
         >
           <div
-            className="relative rounded-t-[28px] sm:rounded-[28px] bg-surface-raised/95 backdrop-blur-2xl border border-white/10 border-b-0 sm:border-b pointer-events-auto w-full shadow-[0_-10px_40px_rgba(0,0,0,0.5)] sm:shadow-[0_25px_60px_rgba(0,0,0,0.6)]"
+            // Never taller than the screen: the header stays, the content scrolls
+            className="relative flex flex-col max-h-[calc(100dvh-12px)] sm:max-h-[calc(100dvh-32px)] rounded-t-[28px] sm:rounded-[28px] bg-surface-raised/95 backdrop-blur-2xl border border-white/10 border-b-0 sm:border-b pointer-events-auto w-full shadow-[0_-10px_40px_rgba(0,0,0,0.5)] sm:shadow-[0_25px_60px_rgba(0,0,0,0.6)]"
             style={{
               maxWidth: maxWidthValue,
               paddingBottom: 'env(safe-area-inset-bottom, 0px)',
@@ -102,9 +103,9 @@ export default function BaseModal({
             onMouseDown={(e) => e.stopPropagation()}
           >
             {/* Sheet grabber (phone) */}
-            <div className="sm:hidden mx-auto mt-2 h-1 w-10 rounded-full bg-white/25" />
+            <div className="sm:hidden mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-white/25" />
             {(title || showCloseButton) && (
-              <div className="flex items-center justify-between px-5 pt-5 pb-0">
+              <div className="flex items-center justify-between gap-3 px-5 pt-5 pb-0 shrink-0">
                 {title && (
                   typeof title === 'string' ? (
                     <div className="text-lg font-bold tracking-tight">{title}</div>
@@ -123,7 +124,7 @@ export default function BaseModal({
                 {!title && showCloseButton && <div />}
               </div>
             )}
-            <div className="p-5 pt-3">
+            <div className="p-5 pt-3 min-h-0 overflow-y-auto overscroll-contain">
               {children}
             </div>
           </div>
