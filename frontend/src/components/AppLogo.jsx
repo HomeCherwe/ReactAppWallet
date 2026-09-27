@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { ArrowDown, Smartphone, Wallet } from 'lucide-react'
 import IosAppGuide from './IosAppGuide'
-import { useIosApp } from '../utils/iosApp'
+import { useIosAppStatus } from '../utils/iosApp'
 import { useSettingsStore } from '../store/useSettingsStore'
 
 const INTRO_CYCLES = 3
@@ -46,7 +46,8 @@ function useIntro(enabled) {
  * outline. A click opens the install guide (always — it's also where the newest build is).
  */
 export default function AppLogo({ size = 36, withLabel = false }) {
-  const installed = !!useIosApp()?.installed
+  // The app reported itself within the last 2 weeks (see useIosAppStatus)
+  const installed = useIosAppStatus().active
   // Wait for the settings, so people who have the app don't see a flash of the promo
   const settingsReady = useSettingsStore(state => state.initialized)
   const reduceMotion = useReducedMotion()

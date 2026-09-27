@@ -7,6 +7,20 @@ import { apiFetch } from '../utils.jsx'
 let syncDebounceTimer = null
 let pendingChanges = {} // Зберігаємо тільки змінені поля
 
+// Coming back to the tab re-reads the DB at most this often (the iPhone app writes there too)
+const REFRESH_MIN_INTERVAL_MS = 60 * 1000
+let lastRefreshAt = 0
+
+const DB_TIMEOUT_MS = 5000
+const fetchDbSettings = () =>
+  Promise.race([
+    apiFetch('/api/preferences'),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('DB fetch timeout')), DB_TIMEOUT_MS)),
+  ])
+
+const writeCache = (userId, settings) =>
+  localStorage.setItem('settings-cache', JSON.stringify({ userId, settings, timestamp: Date.now() }))
+
 /**
  * Zustand store для користувацьких налаштувань
  * Локальний стейт → джерело правди у UI
@@ -38,7 +52,8 @@ export const useSettingsStore = create((set, get) => ({
               const parsed = JSON.parse(cached)
               
               if (parsed.settings && typeof parsed.settings === 'object') {
-                // Встановлюємо налаштування ОДРАЗУ з localStorage
+                // Show the cached settings right away, then catch up with the DB in the background:
+                // the iPhone app writes there too (iosApp, primaryCurrency, …)
                 set({
                   settings: parsed.settings,
                   userId: parsed.userId || null,
@@ -46,7 +61,8 @@ export const useSettingsStore = create((set, get) => ({
                   loading: false,
                   error: null
                 })
-                return // ВИХОДИМО - налаштування вже завантажені
+                get().refreshFromDatabase()
+                return
               }
             } catch (e) {
               console.error('[useSettingsStore] ❌ Помилка парсингу кешу:', e)
@@ -78,11 +94,8 @@ export const useSettingsStore = create((set, get) => ({
 
           // Завантажуємо з БД тільки для синхронізації (в фоні, неблокуюче)
           try {
-            const dbPromise = apiFetch('/api/preferences')
-            const dbTimeout = new Promise((_, reject) => {
-              setTimeout(() => reject(new Error('DB fetch timeout')), 5000) // 5 секунд
-            })
-            const dbSettings = await Promise.race([dbPromise, dbTimeout]) || {}
+            const dbSettings = await fetchDbSettings() || {}
+            lastRefreshAt = Date.now()
             
             // Отримуємо поточні налаштування з localStorage
             let cachedSettings = {}
@@ -96,10 +109,12 @@ export const useSettingsStore = create((set, get) => ({
               }
             }
             
-            // Об'єднуємо: localStorage має пріоритет (джерело правди), БД тільки додає нові поля
+            // The DB is the source of truth (every change here is saved there within a second);
+            // only changes not saved yet stay on top
             const mergedSettings = {
-              ...dbSettings, // Спочатку БД (базові значення)
-              ...cachedSettings // Потім localStorage (локальні зміни мають пріоритет)
+              ...cachedSettings,
+              ...dbSettings,
+              ...pendingChanges
             }
             
             // Оновлюємо store тільки якщо є нові дані з БД
@@ -156,6 +171,21 @@ export const useSettingsStore = create((set, get) => ({
             loading: false, 
             initialized: true 
           })
+        }
+      },
+
+      // Catch up with the DB: its values win, except local changes that aren't saved yet
+      refreshFromDatabase: async () => {
+        lastRefreshAt = Date.now()
+        try {
+          const dbSettings = await fetchDbSettings()
+          if (!dbSettings || typeof dbSettings !== 'object' || Object.keys(dbSettings).length === 0) return
+          const state = get()
+          const settings = { ...state.settings, ...dbSettings, ...pendingChanges }
+          set({ settings })
+          if (state.userId) writeCache(state.userId, settings)
+        } catch (e) {
+          // Offline or slow: keep what we have, the next visit tries again
         }
       },
 
@@ -310,6 +340,16 @@ export const useSettingsStore = create((set, get) => ({
       }
     })
   )
+
+// Back to the tab: pick up what changed elsewhere (e.g. the iPhone app reported it's installed)
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    const store = useSettingsStore.getState()
+    if (document.visibilityState !== 'visible' || !store.initialized || !store.userId) return
+    if (Date.now() - lastRefreshAt < REFRESH_MIN_INTERVAL_MS) return
+    store.refreshFromDatabase()
+  })
+}
 
 // Автоматична ініціалізація при зміні auth стану
 if (typeof window !== 'undefined') {
