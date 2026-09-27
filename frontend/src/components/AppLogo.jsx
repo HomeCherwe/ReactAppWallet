@@ -5,7 +5,7 @@ import IosAppGuide from './IosAppGuide'
 import { useIosApp } from '../utils/iosApp'
 import { useSettingsStore } from '../store/useSettingsStore'
 
-const INTRO_CYCLES = 2
+const INTRO_CYCLES = 3
 const PHONE_MS = 1700 // the iPhone face stays this long
 const WALLET_MS = 1100 // then the wallet again
 
