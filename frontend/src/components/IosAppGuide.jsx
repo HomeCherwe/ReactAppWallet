@@ -9,7 +9,6 @@ import {
   ILOADER_URL,
   ITUNES_URL,
   LOCALDEVVPN_URL,
-  SIDELOADLY_URL,
   SIDESTORE_URL,
   isIPhoneBrowser,
   markIosAppInstalled,
@@ -47,27 +46,22 @@ const STEPS = [
     ),
     details: (
       <>
-        <li>Завантажте й встановіть iTunes за посиланням вище — саме з сайту Apple, версія з Microsoft Store не підходить.</li>
+        <li>Завантажте й встановіть iTunes за посиланням вище (або з Microsoft Store — теж підходить).</li>
         <li>Входити в iTunes не потрібно: він лише дає комп’ютеру «бачити» iPhone по кабелю.</li>
-        <li>
-          Якщо Sideloadly напише, що бракує iCloud, — встановіть і його, теж з сайту Apple (посилання є на{' '}
-          <A href={SIDELOADLY_URL}>sideloadly.io</A>). Входити в iCloud теж не треба.
-        </li>
       </>
     ),
   },
   {
-    title: 'Встановіть Sideloadly на комп’ютер',
+    title: 'Встановіть iLoader на комп’ютер',
     short: (
       <>
-        <A href={SIDELOADLY_URL}>sideloadly.io</A> — для Windows і Mac.
+        <A href={ILOADER_URL}>iloader.app</A> — для Windows, Mac і Linux.
       </>
     ),
     details: (
       <>
-        <li>Завантажте версію для своєї системи і встановіть.</li>
-        <li>Відкрийте Sideloadly — у полі <b>Apple account</b> введіть свій Apple ID. Це єдине місце на комп’ютері, де він потрібен.</li>
-        <li>Пароль і код підтвердження вводяться тут же — вони йдуть тільки до Apple.</li>
+        <li>Завантажте інсталятор для своєї системи (для Windows — MSI або EXE) і встановіть.</li>
+        <li>Качайте тільки з iloader.app або його GitHub — інших офіційних джерел немає.</li>
       </>
     ),
   },
@@ -77,32 +71,29 @@ const STEPS = [
     details: (
       <>
         <li>Введіть код-пароль iPhone, якщо попросить.</li>
-        <li>У Sideloadly зверху має з’явитися назва вашого iPhone.</li>
+        <li>Телефон має лишатися розблокованим і підключеним, поки iLoader не закінчить.</li>
       </>
     ),
   },
   {
-    title: 'Поставте SideStore на iPhone',
+    title: 'Поставте SideStore через iLoader',
     short: (
       <>
-        У Sideloadly є кнопка встановлення <A href={SIDESTORE_URL}>SideStore</A> — з нього потім ставиться MyWallet.
+        Увійдіть в iLoader з Apple ID → виберіть iPhone → <b>Install SideStore</b>. З{' '}
+        <A href={SIDESTORE_URL}>SideStore</A> потім ставиться MyWallet.
       </>
     ),
     details: (
       <>
-        <li>У Sideloadly перевірте, що вибрано ваш iPhone і Apple ID, і натисніть кнопку встановлення SideStore.</li>
-        <li>Введіть пароль Apple ID і код підтвердження, якщо попросить. Дочекайтесь, поки встановлення завершиться.</li>
+        <li>
+          Відкрийте iLoader і увійдіть своїм Apple ID (<b>Sign in</b>). Пароль і код підтвердження йдуть тільки до Apple.
+        </li>
+        <li>Виберіть свій iPhone у списку пристроїв.</li>
+        <li>
+          Натисніть <b>Install SideStore (Stable)</b> і дочекайтесь, поки встановлення завершиться. Сертифікат і pairing
+          file iLoader додає сам.
+        </li>
         <li>Далі комп’ютер уже не потрібен — усе робиться на телефоні.</li>
-      </>
-    ),
-  },
-  {
-    title: 'Увімкніть режим розробника',
-    short: 'Параметри → Приватність і безпека → Режим розробника.',
-    details: (
-      <>
-        <li>Пункт з’являється після встановлення SideStore — він у самому низу розділу.</li>
-        <li>Увімкніть, iPhone перезавантажиться. Після ввімкнення підтвердіть «Увімкнути» і введіть код-пароль.</li>
       </>
     ),
   },
@@ -112,7 +103,17 @@ const STEPS = [
     details: (
       <>
         <li>У розділі «Програма розробника» виберіть свій Apple ID.</li>
-        <li>Натисніть «Довіряти …» і підтвердіть. Тепер SideStore відкривається.</li>
+        <li>Натисніть «Довіряти …» і підтвердіть.</li>
+      </>
+    ),
+  },
+  {
+    title: 'Увімкніть режим розробника',
+    short: 'Параметри → Приватність і безпека → Режим розробника.',
+    details: (
+      <>
+        <li>Пункт у самому низу розділу — він з’являється після встановлення SideStore.</li>
+        <li>Увімкніть, iPhone перезавантажиться. Після перезавантаження підтвердіть «Увімкнути» і введіть код-пароль.</li>
       </>
     ),
   },
@@ -136,12 +137,12 @@ const STEPS = [
     short: 'SideStore → увійдіть з Apple ID → My Apps → «+» → MyWallet.ipa.',
     details: (
       <>
-        <li>Відкрийте SideStore і увійдіть тим самим Apple ID, що в Sideloadly.</li>
+        <li>Відкрийте SideStore і увійдіть тим самим Apple ID, що в iLoader.</li>
         <li>У вкладці <b>My Apps</b> натисніть <b>SideStore «7 DAYS»</b>, щоб оновити його підпис, і прийміть запити.</li>
         <li>Натисніть <b>«+»</b> угорі й виберіть MyWallet.ipa з «Файли → Завантаження». Дочекайтесь встановлення.</li>
         <li>
-          Якщо SideStore просить pairing file — перевстановіть його через офіційний{' '}
-          <A href={ILOADER_URL}>iloader</A> (він додає цей файл сам).
+          Якщо SideStore пише про pairing file — підключіть iPhone до комп’ютера і ще раз поставте SideStore через
+          iLoader: він оновить цей файл.
         </li>
       </>
     ),
