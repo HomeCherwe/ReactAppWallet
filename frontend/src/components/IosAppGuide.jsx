@@ -85,16 +85,14 @@ const STEPS = [
     title: 'Поставте SideStore на iPhone',
     short: (
       <>
-        Через Sideloadly встановіть <A href={SIDESTORE_URL}>SideStore</A> — з нього потім ставиться MyWallet.
+        У Sideloadly є кнопка встановлення <A href={SIDESTORE_URL}>SideStore</A> — з нього потім ставиться MyWallet.
       </>
     ),
     details: (
       <>
-        <li>
-          Завантажте <b>SideStore.ipa</b> (Stable) з <A href={SIDESTORE_URL}>sidestore.io</A>.
-        </li>
-        <li>Перетягніть його у вікно Sideloadly, перевірте Apple ID і натисніть <b>Start</b>.</li>
-        <li>Введіть пароль Apple ID і код підтвердження, якщо попросить. Дочекайтесь «Done».</li>
+        <li>Окремо завантажувати SideStore не треба — Sideloadly ставить його сам.</li>
+        <li>У Sideloadly перевірте, що вибрано ваш iPhone і Apple ID, і натисніть кнопку встановлення SideStore.</li>
+        <li>Введіть пароль Apple ID і код підтвердження, якщо попросить. Дочекайтесь, поки встановлення завершиться.</li>
         <li>Далі комп’ютер уже не потрібен — усе робиться на телефоні.</li>
       </>
     ),
