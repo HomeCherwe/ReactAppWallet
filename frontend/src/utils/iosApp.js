@@ -9,6 +9,10 @@ const IOS_RELEASE_API = `https://api.github.com/repos/${REPO}/releases/tags/ios-
 // Before the first release exists: the build runs (open one → Artifacts)
 export const IOS_BUILDS_URL = `https://github.com/${REPO}/actions/workflows/build-mobile-ios.yml?query=branch%3Amain+is%3Asuccess`
 export const SIDELOADLY_URL = 'https://sideloadly.io/'
+export const ITUNES_URL = 'https://www.apple.com/itunes/download/win64'
+export const SIDESTORE_URL = 'https://sidestore.io/'
+export const LOCALDEVVPN_URL = 'https://apps.apple.com/app/localdevvpn/id6755608044'
+export const ILOADER_URL = 'https://github.com/nab138/iloader/releases/latest'
 
 let releaseRequest = null // one request per page load
 

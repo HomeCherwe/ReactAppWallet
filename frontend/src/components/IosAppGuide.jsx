@@ -1,10 +1,16 @@
-import { CheckCircle2, Download, ExternalLink, Laptop, Smartphone, Wallet } from 'lucide-react'
+import { useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
+import { CheckCircle2, ChevronDown, Download, ExternalLink, Laptop, Smartphone, Wallet } from 'lucide-react'
 import toast from 'react-hot-toast'
 import BaseModal from './BaseModal'
 import {
   IOS_BUILDS_URL,
   IOS_IPA_URL,
+  ILOADER_URL,
+  ITUNES_URL,
+  LOCALDEVVPN_URL,
   SIDELOADLY_URL,
+  SIDESTORE_URL,
   isIPhoneBrowser,
   markIosAppInstalled,
   useIosApp,
@@ -12,54 +18,191 @@ import {
 } from '../utils/iosApp'
 
 const link = 'text-brand font-semibold inline-flex items-center gap-0.5 hover:underline'
+const A = ({ href, children }) => (
+  <a href={href} target="_blank" rel="noreferrer" className={link} onClick={e => e.stopPropagation()}>
+    {children} <ExternalLink size={12} />
+  </a>
+)
 
+// The way it's done in practice: the computer is needed once, to put SideStore on the iPhone;
+// after that MyWallet is installed and refreshed right on the phone (SideStore + LocalDevVPN)
 const STEPS = [
   {
     title: 'Завантажте файл додатку',
-    text: (
+    short: 'Кнопка вище — MyWallet.ipa, завжди найновіша збірка.',
+    details: (
       <>
-        Кнопка вище — файл <b>MyWallet.ipa</b> на комп’ютер. Там завжди найновіша збірка.
+        <li>Найзручніше — прямо на iPhone у Safari: файл збережеться у «Файли → Завантаження».</li>
+        <li>Якщо завантажили на комп’ютер — перекиньте файл на iPhone (AirDrop, iCloud Drive, Telegram у «Збережене»).</li>
+        <li>Він знадобиться на кроці 9, коли SideStore уже стоятиме на телефоні.</li>
+      </>
+    ),
+  },
+  {
+    title: 'Встановіть iTunes на комп’ютер',
+    short: (
+      <>
+        Для Windows: <A href={ITUNES_URL}>iTunes з сайту Apple</A>. На Mac не потрібно.
+      </>
+    ),
+    details: (
+      <>
+        <li>Завантажте й встановіть iTunes за посиланням вище, потім відкрийте його.</li>
+        <li>
+          Увійдіть у свій Apple ID: меню <b>Обліковий запис → Увійти</b> (той самий Apple ID, що на iPhone).
+        </li>
+        <li>iTunes потрібен, щоб комп’ютер «бачив» iPhone по кабелю. Більше нічого (iCloud тощо) ставити не треба.</li>
       </>
     ),
   },
   {
     title: 'Встановіть Sideloadly на комп’ютер',
-    text: (
+    short: (
       <>
-        <a href={SIDELOADLY_URL} target="_blank" rel="noreferrer" className={link}>
-          sideloadly.io <ExternalLink size={12} />
-        </a>{' '}
-        — для Windows і Mac. На Windows також потрібні iTunes та iCloud з сайту Apple (не з Microsoft Store).
+        <A href={SIDELOADLY_URL}>sideloadly.io</A> — для Windows і Mac.
+      </>
+    ),
+    details: (
+      <>
+        <li>Завантажте версію для своєї системи і встановіть.</li>
+        <li>Відкрийте Sideloadly — у полі <b>Apple account</b> вводиться ваш Apple ID.</li>
+        <li>Пароль і код підтвердження ви вводите лише в Sideloadly — він іде тільки до Apple.</li>
       </>
     ),
   },
   {
     title: 'Підключіть iPhone кабелем',
-    text: 'Розблокуйте телефон і натисніть «Довіряти цьому комп’ютеру».',
+    short: 'Розблокуйте телефон і натисніть «Довіряти цьому комп’ютеру».',
+    details: (
+      <>
+        <li>Введіть код-пароль iPhone, якщо попросить.</li>
+        <li>У Sideloadly зверху має з’явитися назва вашого iPhone.</li>
+      </>
+    ),
   },
   {
-    title: 'Перетягніть .ipa у Sideloadly',
-    text: 'Введіть свій Apple ID (пароль вводиться лише в Sideloadly, для Apple) і натисніть Start.',
+    title: 'Поставте SideStore на iPhone',
+    short: (
+      <>
+        Через Sideloadly встановіть <A href={SIDESTORE_URL}>SideStore</A> — з нього потім ставиться MyWallet.
+      </>
+    ),
+    details: (
+      <>
+        <li>
+          Завантажте <b>SideStore.ipa</b> (Stable) з <A href={SIDESTORE_URL}>sidestore.io</A>.
+        </li>
+        <li>Перетягніть його у вікно Sideloadly, перевірте Apple ID і натисніть <b>Start</b>.</li>
+        <li>Введіть пароль Apple ID і код підтвердження, якщо попросить. Дочекайтесь «Done».</li>
+        <li>Далі комп’ютер уже не потрібен — усе робиться на телефоні.</li>
+      </>
+    ),
   },
   {
     title: 'Увімкніть режим розробника',
-    text: 'На iPhone: Параметри → Приватність і безпека → Режим розробника. Телефон перезавантажиться.',
+    short: 'Параметри → Приватність і безпека → Режим розробника.',
+    details: (
+      <>
+        <li>Пункт з’являється після встановлення SideStore — він у самому низу розділу.</li>
+        <li>Увімкніть, iPhone перезавантажиться. Після ввімкнення підтвердіть «Увімкнути» і введіть код-пароль.</li>
+      </>
+    ),
   },
   {
-    title: 'Довіртесь розробнику',
-    text: 'Параметри → Загальні → VPN і керування пристроями → ваш Apple ID → «Довіряти».',
+    title: 'Довіртеся розробнику',
+    short: 'Параметри → Загальні → VPN і керування пристроями.',
+    details: (
+      <>
+        <li>У розділі «Програма розробника» виберіть свій Apple ID.</li>
+        <li>Натисніть «Довіряти …» і підтвердіть. Тепер SideStore відкривається.</li>
+      </>
+    ),
+  },
+  {
+    title: 'Встановіть LocalDevVPN',
+    short: (
+      <>
+        <A href={LOCALDEVVPN_URL}>LocalDevVPN з App Store</A> — через нього SideStore ставить і оновлює додатки.
+      </>
+    ),
+    details: (
+      <>
+        <li>Відкрийте LocalDevVPN і натисніть <b>Connect</b>, дозвольте додати VPN.</li>
+        <li>Він нічого не шифрує й нікуди не відправляє — потрібен лише, щоб SideStore «говорив» з самим iPhone.</li>
+        <li>Вмикайте його щоразу, коли встановлюєте або оновлюєте додатки в SideStore.</li>
+      </>
+    ),
+  },
+  {
+    title: 'Встановіть MyWallet через SideStore',
+    short: 'SideStore → увійдіть з Apple ID → My Apps → «+» → MyWallet.ipa.',
+    details: (
+      <>
+        <li>Відкрийте SideStore і увійдіть тим самим Apple ID, що в Sideloadly.</li>
+        <li>У вкладці <b>My Apps</b> натисніть <b>SideStore «7 DAYS»</b>, щоб оновити його підпис, і прийміть запити.</li>
+        <li>Натисніть <b>«+»</b> угорі й виберіть MyWallet.ipa з «Файли → Завантаження». Дочекайтесь встановлення.</li>
+        <li>
+          Якщо SideStore просить pairing file — перевстановіть його через офіційний{' '}
+          <A href={ILOADER_URL}>iloader</A> (він додає цей файл сам).
+        </li>
+      </>
+    ),
   },
   {
     title: 'Відкрийте MyWallet',
-    text: 'Увійдіть тим самим Google-акаунтом — усі картки й транзакції вже там.',
+    short: 'Увійдіть тим самим Google-акаунтом — усі картки й транзакції вже там.',
+    details: null,
   },
 ]
 
-/** "MyWallet для iPhone": how to install the app (Sideloadly) and where to get the newest build */
+function StepRow({ step, index, open, onToggle }) {
+  return (
+    <li>
+      {/* A div, not a button: the short text can hold links */}
+      <div
+        role={step.details ? 'button' : undefined}
+        tabIndex={step.details ? 0 : undefined}
+        aria-expanded={step.details ? open : undefined}
+        onClick={step.details ? onToggle : undefined}
+        onKeyDown={step.details ? (e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onToggle())) : undefined}
+        className={`w-full flex gap-3 px-3.5 py-3 text-left ${step.details ? 'hover:bg-white/[0.03] cursor-pointer' : ''}`}
+      >
+        <span className="h-7 w-7 shrink-0 rounded-full bg-brand/15 text-orange-300 text-sm font-bold grid place-items-center">
+          {index + 1}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[15px] font-semibold text-white">{step.title}</span>
+          <span className="block text-[13px] text-white/60 mt-0.5 leading-snug">{step.short}</span>
+        </span>
+        {step.details && (
+          <ChevronDown size={18} className={`shrink-0 mt-1 text-white/40 transition-transform ${open ? 'rotate-180' : ''}`} />
+        )}
+      </div>
+      <AnimatePresence initial={false}>
+        {open && step.details && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <ul className="ml-[52px] mr-3.5 mb-3 grid gap-1.5 text-[13px] text-white/70 leading-snug list-disc pl-4 marker:text-brand/70">
+              {step.details}
+            </ul>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </li>
+  )
+}
+
+/** "MyWallet для iPhone": how to install the app (SideStore) and where to get the newest build */
 export default function IosAppGuide({ open, onClose }) {
   const iosApp = useIosApp()
   const installed = !!iosApp?.installed
   const onIPhone = isIPhoneBrowser()
+  const [openStep, setOpenStep] = useState(null)
   // undefined while checking, null until the first build is published to the release
   const build = useLatestIosBuild(open)
   const buildInfo = build
@@ -105,7 +248,8 @@ export default function IosAppGuide({ open, onClose }) {
           <div className="flex items-start gap-2.5 rounded-2xl bg-white/[0.05] border border-white/10 px-3.5 py-3 text-sm">
             <Laptop size={18} className="text-brand shrink-0 mt-px" />
             <div className="text-white/75">
-              Додаток встановлюється з комп’ютера: відкрийте цю сторінку на Windows або Mac і підключіть iPhone кабелем.
+              Комп’ютер потрібен один раз — поставити SideStore (кроки 2–5). MyWallet.ipa можна завантажити прямо тут, на
+              iPhone.
             </div>
           </div>
         )}
@@ -125,24 +269,24 @@ export default function IosAppGuide({ open, onClose }) {
 
         <ol className="rounded-2xl overflow-hidden border border-white/[0.08] bg-white/[0.03] divide-y divide-white/[0.06]">
           {STEPS.map((step, i) => (
-            <li key={step.title} className="flex gap-3 px-3.5 py-3">
-              <span className="h-7 w-7 shrink-0 rounded-full bg-brand/15 text-orange-300 text-sm font-bold grid place-items-center">
-                {i + 1}
-              </span>
-              <div className="min-w-0">
-                <div className="text-[15px] font-semibold text-white">{step.title}</div>
-                <div className="text-[13px] text-white/60 mt-0.5 leading-snug">{step.text}</div>
-              </div>
-            </li>
+            <StepRow
+              key={step.title}
+              step={step}
+              index={i}
+              open={openStep === i}
+              onToggle={() => setOpenStep(o => (o === i ? null : i))}
+            />
           ))}
         </ol>
 
         <div className="flex items-start gap-2.5 rounded-2xl bg-brand/[0.08] border border-brand/25 px-3.5 py-3 text-[13px] text-white/75">
           <Smartphone size={18} className="text-brand shrink-0 mt-px" />
           <div>
-            <b className="text-white">Раз на 7 днів</b> безкоштовний Apple ID потребує переустановки: повторіть крок 4 (або
-            увімкніть у Sideloadly автоматичне оновлення). Дані не зникнуть. Оновлення коду додаток завантажує сам при
-            запуску.
+            <b className="text-white">Раз на 7 днів</b> підпис безкоштовного Apple ID треба оновити: увімкніть LocalDevVPN →
+            SideStore → My Apps → натисніть «7 DAYS» (або Refresh All). Комп’ютер не потрібен, дані не зникнуть.
+            <br />
+            <b className="text-white">Нова версія:</b> завантажте свіжий MyWallet.ipa і встановіть його через «+» у SideStore
+            поверх старого. Дрібні оновлення додаток завантажує сам при запуску.
           </div>
         </div>
 
