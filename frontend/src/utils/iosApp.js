@@ -45,6 +45,31 @@ export function useIosApp() {
   return useSettingsStore(state => state.settings?.iosApp) || null
 }
 
+// Not opened for this long → probably deleted: the site advertises the app again
+const STALE_AFTER_DAYS = 14
+
+/**
+ * Whether the user has the app *now*: it reports itself on every launch (lastSeenAt), and the
+ * guide's "У мене вже є додаток" counts too (markedFromWebAt). Nothing for 14 days → not anymore.
+ */
+export function iosAppStatusOf(iosApp, now = Date.now()) {
+  const times = [iosApp?.lastSeenAt, iosApp?.markedFromWebAt].map(t => (t ? new Date(t).getTime() : NaN)).filter(t => !isNaN(t))
+  const lastActive = times.length ? Math.max(...times) : null
+  const daysSince = lastActive ? (now - lastActive) / 864e5 : null
+  const active = !!iosApp?.installed && daysSince != null && daysSince < STALE_AFTER_DAYS
+  return {
+    iosApp: iosApp || null,
+    active,
+    // Had it, but hasn't opened it for two weeks
+    stale: !!iosApp?.installed && !active,
+    daysSince: daysSince == null ? null : Math.floor(daysSince),
+  }
+}
+
+export function useIosAppStatus() {
+  return iosAppStatusOf(useIosApp())
+}
+
 export function markIosAppInstalled() {
   const current = useSettingsStore.getState().settings?.iosApp || {}
   useSettingsStore.getState().updateSetting('iosApp', { ...current, installed: true, markedFromWebAt: new Date().toISOString() })

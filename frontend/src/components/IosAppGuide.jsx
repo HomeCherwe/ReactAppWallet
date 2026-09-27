@@ -13,7 +13,7 @@ import {
   SIDESTORE_URL,
   isIPhoneBrowser,
   markIosAppInstalled,
-  useIosApp,
+  useIosAppStatus,
   useLatestIosBuild,
 } from '../utils/iosApp'
 
@@ -197,8 +197,8 @@ function StepRow({ step, index, open, onToggle }) {
 
 /** "MyWallet для iPhone": how to install the app (SideStore) and where to get the newest build */
 export default function IosAppGuide({ open, onClose }) {
-  const iosApp = useIosApp()
-  const installed = !!iosApp?.installed
+  // "installed" = the app reported itself within the last 2 weeks; "stale" = it used to, then went quiet
+  const { iosApp, active: installed, stale, daysSince } = useIosAppStatus()
   const onIPhone = isIPhoneBrowser()
   const [openStep, setOpenStep] = useState(null)
   // The iPhone app writes when its 7-day signature runs out (preferences.iosApp.signatureExpiresAt)
@@ -252,6 +252,20 @@ export default function IosAppGuide({ open, onClose }) {
                 </div>
               )}
               <div className="text-white/55 text-xs mt-0.5">Нову збірку можна завантажити тут у будь-який момент.</div>
+            </div>
+          </div>
+        )}
+
+        {stale && (
+          <div className="flex items-start gap-2.5 rounded-2xl bg-white/[0.05] border border-white/10 px-3.5 py-3 text-sm">
+            <Smartphone size={18} className="text-brand shrink-0 mt-px" />
+            <div>
+              <div className="font-semibold text-white">
+                MyWallet на iPhone {daysSince != null ? `не відкривався ${daysSince} дн.` : 'давно не відкривався'}
+              </div>
+              <div className="text-white/55 text-xs mt-0.5">
+                Якщо ви його видалили або підпис закінчився — встановіть знову за кроками нижче.
+              </div>
             </div>
           </div>
         )}
