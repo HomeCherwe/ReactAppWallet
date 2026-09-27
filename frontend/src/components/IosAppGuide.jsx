@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { CheckCircle2, ChevronDown, Download, ExternalLink, Laptop, Smartphone, Wallet } from 'lucide-react'
+import { CheckCircle2, ChevronDown, Download, ExternalLink, Laptop, RefreshCw, Smartphone, Wallet } from 'lucide-react'
 import toast from 'react-hot-toast'
 import BaseModal from './BaseModal'
 import {
@@ -277,14 +277,38 @@ export default function IosAppGuide({ open, onClose }) {
           ))}
         </ol>
 
+        <div className="text-xs font-bold uppercase tracking-[0.05em] text-white/55 px-1 -mb-2">Після встановлення</div>
+
+        {/* Most updates: nothing to do */}
+        <div className="flex items-start gap-2.5 rounded-2xl bg-green-500/10 border border-green-500/25 px-3.5 py-3 text-[13px] text-white/75">
+          <RefreshCw size={18} className="text-green-400 shrink-0 mt-px" />
+          <div>
+            <div className="text-[15px] font-semibold text-green-300">Оновлення приходять самі</div>
+            Нові функції й виправлення додаток завантажує сам, коли ви його відкриваєте. Нічого робити не треба.
+          </div>
+        </div>
+
+        {/* Every 7 days: re-sign from the phone */}
         <div className="flex items-start gap-2.5 rounded-2xl bg-brand/[0.08] border border-brand/25 px-3.5 py-3 text-[13px] text-white/75">
           <Smartphone size={18} className="text-brand shrink-0 mt-px" />
           <div>
-            <b className="text-white">Раз на 7 днів</b> підпис безкоштовного Apple ID треба оновити: увімкніть LocalDevVPN →
-            SideStore → My Apps → натисніть «7 DAYS» (або Refresh All). Комп’ютер не потрібен, дані не зникнуть.
-            <br />
-            <b className="text-white">Нова версія:</b> завантажте свіжий MyWallet.ipa і встановіть його через «+» у SideStore
-            поверх старого. Дрібні оновлення додаток завантажує сам при запуску.
+            <div className="text-[15px] font-semibold text-white">Раз на 7 днів — продовжити підпис</div>
+            Безкоштовний Apple ID підписує додаток на 7 днів. Увімкніть LocalDevVPN → відкрийте SideStore → My Apps →
+            натисніть «7 DAYS» біля MyWallet. Комп’ютер не потрібен, дані не зникнуть.
+          </div>
+        </div>
+
+        {/* Rarely: a new build has to be installed by hand */}
+        <div className="flex items-start gap-2.5 rounded-2xl bg-white/[0.04] border border-white/10 px-3.5 py-3 text-[13px] text-white/75">
+          <Download size={18} className="text-white/60 shrink-0 mt-px" />
+          <div>
+            <div className="text-[15px] font-semibold text-white">Зрідка — нова збірка вручну</div>
+            Інколи оновлення не може прийти само, і потрібен новий файл. Тоді:
+            <ol className="list-decimal pl-4 mt-1.5 grid gap-0.5 marker:text-white/40">
+              <li>Завантажте MyWallet.ipa кнопкою вгорі — там завжди найновіша збірка (дата під кнопкою).</li>
+              <li>Увімкніть LocalDevVPN, відкрийте SideStore → My Apps → «+» і виберіть цей файл.</li>
+              <li>Він встановиться поверх старого — картки, транзакції й вхід залишаться.</li>
+            </ol>
           </div>
         </div>
 
