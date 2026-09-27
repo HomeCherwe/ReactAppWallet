@@ -201,6 +201,15 @@ export default function IosAppGuide({ open, onClose }) {
   const installed = !!iosApp?.installed
   const onIPhone = isIPhoneBrowser()
   const [openStep, setOpenStep] = useState(null)
+  // The iPhone app writes when its 7-day signature runs out (preferences.iosApp.signatureExpiresAt)
+  const signatureLeft = (() => {
+    const expires = iosApp?.signatureExpiresAt ? new Date(iosApp.signatureExpiresAt) : null
+    if (!expires || isNaN(expires)) return null
+    const hours = (expires - Date.now()) / 36e5
+    const when = expires.toLocaleString('uk-UA', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+    if (hours <= 0) return { soon: true, text: `Підпис закінчився ${when} — оновіть його в SideStore` }
+    return { soon: hours <= 36, text: `Підпис дійсний до ${when}` }
+  })()
   // undefined while checking, null until the first build is published to the release
   const build = useLatestIosBuild(open)
   const buildInfo = build
@@ -237,6 +246,11 @@ export default function IosAppGuide({ open, onClose }) {
             <CheckCircle2 size={18} className="text-green-400 shrink-0 mt-px" />
             <div>
               <div className="font-semibold text-green-300">Додаток уже встановлено{iosApp?.version ? ` · версія ${iosApp.version}` : ''}</div>
+              {signatureLeft && (
+                <div className={`text-xs mt-0.5 font-semibold ${signatureLeft.soon ? 'text-orange-300' : 'text-white/70'}`}>
+                  {signatureLeft.text}
+                </div>
+              )}
               <div className="text-white/55 text-xs mt-0.5">Нову збірку можна завантажити тут у будь-який момент.</div>
             </div>
           </div>
