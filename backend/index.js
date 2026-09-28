@@ -841,7 +841,7 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       category_in,
       has_pinned_tag,
       limit,
-      fields = 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, merchant_address, merchant_lat, merchant_lng, is_transfer, transfer_role, transfer_id'
+      fields = 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, merchant_address, merchant_lat, merchant_lng, is_transfer, transfer_role, transfer_id, status'
     } = req.query
 
     // Filter out 'currency' field if it doesn't exist in the table
@@ -852,13 +852,14 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       'transfer_id', 'user_id', 'transaction_id_card',
       'refund_for',
       'is_debt', 'debt_party', 'debt_direction',
-      'merchant_name', 'merchant_address', 'merchant_lat', 'merchant_lng'
+      'merchant_name', 'merchant_address', 'merchant_lat', 'merchant_lng',
+      'status'
     ]
     const requestedFields = fields.split(',').map(f => f.trim())
     const validFields = requestedFields.filter(f => allowedFields.includes(f))
 
     // Use valid fields, fallback to default if all were filtered out
-    const safeFields = validFields.length > 0 ? validFields.join(', ') : 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, merchant_address, merchant_lat, merchant_lng, is_transfer, transfer_role, transfer_id'
+    const safeFields = validFields.length > 0 ? validFields.join(', ') : 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, merchant_address, merchant_lat, merchant_lng, is_transfer, transfer_role, transfer_id, status'
 
     let q = supabase
       .from('transactions')

@@ -30,7 +30,9 @@ export interface BankConnection {
 
 export interface BankSyncResult {
   added: number
-  results: { id: string; provider_name: string; added: number; error?: string }[]
+  /** Pending transactions that settled, changed or went away (nothing new, but the lists change) */
+  changed: number
+  results: { id: string; provider_name: string; added: number; changed?: number; error?: string }[]
 }
 
 const HAS_BANKS_KEY = 'bank_connections_active'
@@ -122,7 +124,7 @@ export async function syncConnectedBanks(connectionId?: string): Promise<BankSyn
     )
     if (!res?.success) throw new Error(res?.error || 'Не вдалося синхронізувати банки')
     await AsyncStorage.setItem(LAST_SYNC_KEY, String(Date.now()))
-    return { added: res.added ?? 0, results: res.results ?? [] }
+    return { added: res.added ?? 0, changed: res.changed ?? 0, results: res.results ?? [] }
   } finally {
     clearTimeout(timer)
   }

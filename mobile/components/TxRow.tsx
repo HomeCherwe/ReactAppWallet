@@ -164,6 +164,8 @@ function TxRow({
   ).current
 
   const isIncome = amount > 0
+  // Not settled at the bank yet (TrueLayer banks): grey, with an "В обробці" pill
+  const pending = tx.status === 'pending'
   const currency = tx.currency || card?.currency
   // Expense with refunds: amount_stat = amount + refunds (what it really cost)
   const stat = tx.amount_stat == null ? null : Number(tx.amount_stat)
@@ -263,17 +265,17 @@ function TxRow({
           ]}
         >
           {nested && <View style={styles.nestLine} />}
-          <View style={[styles.iconWrap, isIncome && styles.iconWrapGreen, nested && styles.iconWrapNested]}>
+          <View style={[styles.iconWrap, isIncome && styles.iconWrapGreen, nested && styles.iconWrapNested, pending && styles.iconWrapPending]}>
             {nested ? (
               <Icon name="undo" size={15} color={Colors.green} strokeWidth={2.4} />
             ) : (
-              <Text style={styles.iconEmoji}>{getCategoryIcon(tx.category ?? null, amount)}</Text>
+              <Text style={[styles.iconEmoji, pending && styles.iconEmojiPending]}>{getCategoryIcon(tx.category ?? null, amount)}</Text>
             )}
           </View>
 
           <View style={[styles.info, !last && styles.infoBorder]}>
             <View style={styles.infoText}>
-              <Text style={styles.txTitle} numberOfLines={1}>
+              <Text style={[styles.txTitle, pending && styles.txTitlePending]} numberOfLines={1}>
                 {isPinned && <Text style={styles.pinMark}>📌 </Text>}
                 {title}
               </Text>
@@ -298,10 +300,17 @@ function TxRow({
                     nested && styles.amountNested,
                     isIncome && styles.amountGreen,
                     tx.exclude_from_stats && !nested && styles.amountMuted,
+                    pending && styles.amountPending,
                   ]}
                 >
                   {hidden ? '••••' : `${isIncome ? '+' : '−'}${fmtMoney(amount, currency)}`}
                 </Text>
+              )}
+              {pending && mode === 'normal' && (
+                <View style={styles.pendingPill}>
+                  <View style={styles.pendingDot} />
+                  <Text style={styles.pendingPillText}>В обробці</Text>
+                </View>
               )}
               {mode === 'pickable' && (
                 <View style={styles.pickPill}>
@@ -508,6 +517,39 @@ const styles = StyleSheet.create({
   },
   amountMuted: {
     opacity: 0.45,
+  },
+  iconWrapPending: {
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  iconEmojiPending: {
+    opacity: 0.5,
+  },
+  txTitlePending: {
+    color: Colors.white60,
+  },
+  amountPending: {
+    color: Colors.white40,
+  },
+  pendingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 100,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  pendingDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: Colors.white40,
+  },
+  pendingPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.white60,
   },
   pickHint: {
     fontSize: 11,

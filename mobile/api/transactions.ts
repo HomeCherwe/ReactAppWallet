@@ -24,6 +24,8 @@ export interface Transaction {
   merchant_city?: string | null
   is_transfer?: boolean
   count_as_income?: boolean
+  /** 'pending' = not settled at the bank yet (TrueLayer banks); absent/'booked' otherwise */
+  status?: 'pending' | 'booked'
 }
 
 export interface ListTransactionsParams {
