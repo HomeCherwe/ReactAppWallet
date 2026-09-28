@@ -498,6 +498,9 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
       {/* Scroll */}
       <Animated.ScrollView
         scrollEnabled={!menuOpen}
+        // The search field: taps on filters/rows work while the keyboard is up, a scroll hides it
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -795,6 +798,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
             refunds={allRefunds}
             pinned={pinned.items}
             pinnedCategories={pinnedCategories}
+            search={txFeed.search}
           />
         </View>
 

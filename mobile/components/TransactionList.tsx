@@ -5,10 +5,11 @@ import Toast from 'react-native-toast-message'
 import { Colors, Radius } from '../constants/theme'
 import { Transaction } from '../api/transactions'
 import { Card } from '../api/cards'
-import { TxFilter } from '../hooks/useTransactionFeed'
+import { FeedSearch, TxFilter } from '../hooks/useTransactionFeed'
 import { triggerErrorHaptic, triggerLightHaptic, triggerMediumHaptic, triggerSuccessHaptic } from '../utils/haptics'
 import { TransactionRowsSkeleton } from './Skeleton'
 import BankSyncIndicator from './BankSyncIndicator'
+import TxSearchBar from './TxSearchBar'
 import TxRow, { RowMode, closeSwipedRow, fmtMoney } from './TxRow'
 import { MenuAction, MenuFrame, openMenu as openMenuOverlay } from '../store/useMenuOverlay'
 import { pinStateOf, txDisplayTitle } from '../utils/pinned'
@@ -91,6 +92,8 @@ interface TransactionListProps {
   onRefundForChange: (tx: Transaction | null) => void
   /** Refunds of loaded expenses, by expense id: shown nested under the expense */
   refunds?: Record<string, Transaction[]>
+  /** Search field + period/card/category filters over the list */
+  search?: FeedSearch
 }
 
 export default React.memo(TransactionList)
@@ -117,7 +120,10 @@ function TransactionList({
   refundFor,
   onRefundForChange,
   refunds = {},
+  search,
 }: TransactionListProps) {
+  // Searching: every match is in the list (pinned ones too), the pinned block steps aside
+  const searching = !!search?.active
   // ---- Pinned section: collapsible, remembered between launches ----
   const [pinnedCollapsed, setPinnedCollapsed] = useState(false)
   const chevron = useRef(new Animated.Value(1)).current
@@ -329,9 +335,11 @@ function TransactionList({
   const regular = useMemo(() => {
     const loaded = new Set(transactions.map(t => t.id))
     return transactions.filter(
-      t => pinStateOf(t, pinnedCategories) === 'none' && !(t.refund_for && (loaded.has(t.refund_for) || refunds[t.refund_for]))
+      t =>
+        (searching || pinStateOf(t, pinnedCategories) === 'none') &&
+        !(t.refund_for && (loaded.has(t.refund_for) || refunds[t.refund_for]))
     )
-  }, [transactions, pinnedCategories, refunds])
+  }, [transactions, pinnedCategories, refunds, searching])
 
   const groups = useMemo(() => {
     const out: DayGroup[] = []
@@ -362,8 +370,30 @@ function TransactionList({
         <BankSyncIndicator />
       </View>
 
+      {search && <TxSearchBar search={search} cards={cards} />}
 
-      {!loading && pinnedTop.length > 0 && (
+      {onFilterChange && (
+        <View style={styles.segment}>
+          {FILTERS.map(f => {
+            const active = f.id === filter
+            return (
+              <Pressable
+                key={f.id}
+                style={[styles.segmentBtn, active && styles.segmentBtnActive]}
+                onPress={() => {
+                  if (!active) triggerLightHaptic()
+                  onFilterChange(f.id)
+                }}
+              >
+                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{f.label}</Text>
+              </Pressable>
+            )
+          })}
+        </View>
+      )}
+
+
+      {!loading && !searching && pinnedTop.length > 0 && (
         <View style={styles.pinnedWrap}>
           <Pressable onPress={togglePinned} style={({ pressed }) => [styles.pinnedHeader, pressed && styles.pinnedHeaderPressed]}>
             <Text style={styles.pinnedEmoji}>📌</Text>
@@ -420,43 +450,29 @@ function TransactionList({
         </View>
       )}
 
-      {onFilterChange && (
-        <View style={styles.segment}>
-          {FILTERS.map(f => {
-            const active = f.id === filter
-            return (
-              <Pressable
-                key={f.id}
-                style={[styles.segmentBtn, active && styles.segmentBtnActive]}
-                onPress={() => {
-                  if (!active) triggerLightHaptic()
-                  onFilterChange(f.id)
-                }}
-              >
-                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{f.label}</Text>
-              </Pressable>
-            )
-          })}
-        </View>
-      )}
-
       {loading ? (
         <TransactionRowsSkeleton />
-      ) : regular.length === 0 && (pinned.length === 0 || !hasMore) ? (
+      ) : regular.length === 0 && (searching || pinned.length === 0 || !hasMore) ? (
         <View style={styles.stateWrap}>
-          <Text style={styles.stateEmoji}>{error ? '⚠️' : '🧾'}</Text>
+          <Text style={styles.stateEmoji}>{error ? '⚠️' : searching ? '🔍' : '🧾'}</Text>
           <Text style={styles.stateText}>
             {error
               ? 'Не вдалося завантажити транзакції'
-              : pinned.length > 0
-                ? 'Усі транзакції — у закріплених'
-                : 'Транзакцій поки немає'}
+              : searching
+                ? 'Нічого не знайдено'
+                : pinned.length > 0
+                  ? 'Усі транзакції — у закріплених'
+                  : 'Транзакцій поки немає'}
           </Text>
-          {error && onRetry && (
+          {error && onRetry ? (
             <Pressable onPress={onRetry} style={styles.retryBtn}>
               <Text style={styles.retryText}>Спробувати ще раз</Text>
             </Pressable>
-          )}
+          ) : searching && search ? (
+            <Pressable onPress={search.reset} style={styles.retryBtn}>
+              <Text style={styles.retryText}>Скинути пошук і фільтри</Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : (
         <>
@@ -520,7 +536,7 @@ function TransactionList({
                 <Text style={styles.retryText}>Не вдалося завантажити · Повторити</Text>
               </Pressable>
             ) : !hasMore ? (
-              <Text style={styles.footerText}>Це всі транзакції</Text>
+              <Text style={styles.footerText}>{searching ? 'Це все, що знайдено' : 'Це всі транзакції'}</Text>
             ) : null}
           </View>
         </>
@@ -655,6 +671,7 @@ const styles = StyleSheet.create({
   },
   pinnedWrap: {
     marginHorizontal: 12,
+    marginTop: 6,
     marginBottom: 8,
     borderRadius: 16,
     overflow: 'hidden',

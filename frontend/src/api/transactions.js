@@ -21,6 +21,47 @@ export async function listTransactions({ from = 0, to = 9, search = '', transact
   return await apiFetch(`/api/transactions?${params}`)
 }
 
+const timeZone = (() => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Kyiv'
+  } catch {
+    return 'Europe/Kyiv'
+  }
+})()
+
+/**
+ * Server-side search (SQL function search_transactions, same as the iPhone app): words over
+ * merchant, note, category, card, address, amount ("250"), date ("12.09"), month ("вересень"),
+ * plus period / card / category / type filters. No archived rows; transfers included like this list.
+ */
+export async function searchTransactions({
+  offset = 0,
+  limit = 50,
+  query = '',
+  from = null,
+  to = null,
+  cardIds = [],
+  categories = [],
+  transactionType = 'all',
+  excludeCardIds = [],
+} = {}) {
+  const { data, error } = await supabase.rpc('search_transactions', {
+    p_query: query.trim() || null,
+    p_from: from,
+    p_to: to,
+    p_card_ids: cardIds.length ? cardIds : null,
+    p_categories: categories.length ? categories : null,
+    p_type: transactionType,
+    p_exclude_card_ids: excludeCardIds.length ? excludeCardIds : null,
+    p_tz: timeZone,
+    p_limit: limit,
+    p_offset: offset,
+    p_include_transfers: true,
+  })
+  if (error) throw error
+  return data || []
+}
+
 /**
  * Fetch transactions for a specific card with optional date range and pagination
  */

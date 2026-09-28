@@ -142,6 +142,49 @@ export async function listFeedTransactions({
   return (data || []) as Transaction[]
 }
 
+export interface SearchParams {
+  offset: number
+  limit: number
+  /** Words to find: merchant, note, category, card, address, amount ("250"), date ("12.09"), month ("вересень") */
+  query?: string
+  from?: string | null
+  to?: string | null
+  cardIds?: string[]
+  categories?: string[]
+  transactionType?: 'all' | 'expense' | 'income'
+  /** Hidden cards: left out unless picked in cardIds */
+  excludeCardIds?: string[]
+}
+
+const deviceTimeZone = (() => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Kyiv'
+  } catch {
+    return 'Europe/Kyiv'
+  }
+})()
+
+/**
+ * Server-side search (SQL function search_transactions): same rows as the home feed — no archived
+ * ones, no transfers — narrowed by the query and filters, newest first.
+ */
+export async function searchTransactions(p: SearchParams): Promise<Transaction[]> {
+  const { data, error } = await supabase.rpc('search_transactions', {
+    p_query: p.query?.trim() || null,
+    p_from: p.from ?? null,
+    p_to: p.to ?? null,
+    p_card_ids: p.cardIds?.length ? p.cardIds : null,
+    p_categories: p.categories?.length ? p.categories : null,
+    p_type: p.transactionType ?? 'all',
+    p_exclude_card_ids: p.excludeCardIds?.length ? p.excludeCardIds : null,
+    p_tz: deviceTimeZone, // "12.09" means that day where the user is
+    p_limit: p.limit,
+    p_offset: p.offset,
+  })
+  if (error) throw error
+  return (data || []) as Transaction[]
+}
+
 /** Refunds linked to these expenses (refund_for), oldest first — shown nested under them. */
 export async function listRefundsFor(expenseIds: string[]): Promise<Transaction[]> {
   if (expenseIds.length === 0) return []
