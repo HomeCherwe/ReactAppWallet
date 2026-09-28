@@ -535,7 +535,8 @@ const MANUAL_MATCH_DAYS = 3
 /**
  * Pairs bank rows with rows of the card that have no bank id: same amount (to the cent), date within
  * MANUAL_MATCH_DAYS; a similar description and a closer date win. Parts of a split transaction
- * ("Розділено…") are never paired. Returns Map(bank row → hand-made row), each used once.
+ * ("Розділено…") and archived rows are never paired (the same rules as find_possible_duplicates).
+ * Returns Map(bank row → hand-made row), each used once.
  */
 async function findManualTwins(supabase, cardId, rows) {
   const twins = new Map()
@@ -548,6 +549,7 @@ async function findManualTwins(supabase, cardId, rows) {
     .eq('card_id', cardId)
     .is('transaction_id_card', null)
     .eq('status', 'booked')
+    .not('archives', 'is', true) // archived by the user: not counted anywhere, not a twin
     .gte('created_at', new Date(Math.min(...times) - pad).toISOString())
     .lte('created_at', new Date(Math.max(...times) + pad).toISOString())
   if (error) throw error

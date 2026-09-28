@@ -16,6 +16,7 @@ import { listBankConnections } from '../../api/bankConnections'
 import { useBankSyncStore } from '../../store/useBankSyncStore'
 import BankSyncIndicator from '../BankSyncIndicator'
 import FilterChip from '../FilterChip'
+import PossibleDuplicates from './PossibleDuplicates'
 import { txBus } from '../../utils/txBus'
 import { listCards } from '../../api/cards'
 import { useSettingsStore } from '../../store/useSettingsStore'
@@ -1221,6 +1222,8 @@ export default function MonthlyPayment() {
             </AnimatePresence>
           </div>
         </div>
+
+        <PossibleDuplicates />
 
         <form onSubmit={(e) => e.preventDefault()}>
           <div className="relative">
