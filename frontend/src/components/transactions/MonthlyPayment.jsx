@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
-import { X, Trash2, AlertTriangle, Landmark, ChevronDown, ChevronUp , Pin} from 'lucide-react'
+import { X, Trash2, AlertTriangle, Landmark, ChevronDown, ChevronUp , Pin, Search } from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
 import ConfirmModal from '../ConfirmModal'
 import DeleteTxModal from './DeleteTxModal'
@@ -10,7 +10,8 @@ import DetailsModal from './DetailsModal'
 import EditTxModal from './EditTxModal'
 import SplitTxModal from './SplitTxModal'
 import { apiFetch, getApiUrl } from '../../utils.jsx'
-import { listTransactions, updateTransaction, deleteTransaction, archiveTransaction, deleteTransactions, getTransactionCategories } from '../../api/transactions'
+import { listTransactions, searchTransactions, updateTransaction, deleteTransaction, archiveTransaction, deleteTransactions, getTransactionCategories } from '../../api/transactions'
+import { PERIODS, periodRange } from '../../utils/periods'
 import { listBankConnections } from '../../api/bankConnections'
 import { useBankSyncStore } from '../../store/useBankSyncStore'
 import BankSyncIndicator from '../BankSyncIndicator'
@@ -19,6 +20,39 @@ import { listCards } from '../../api/cards'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { fmtAmount } from '../../utils/format'
 import useMonoRates from '../../hooks/useMonoRates'
+
+const TYPE_FILTERS = [
+  { id: 'all', label: 'Всі' },
+  { id: 'expense', label: 'Витрати' },
+  { id: 'income', label: 'Доходи' },
+]
+
+/** A filter chip (same look as the iPhone app): its name, or the picked value when set; a native select underneath */
+function FilterSelect({ label, value, options, onChange, active }) {
+  const current = options.find(o => o.value === value)
+  return (
+    <label
+      className={`relative inline-flex items-center gap-1.5 h-8 pl-3 pr-2.5 rounded-full border text-xs font-semibold cursor-pointer transition max-w-[240px] ${
+        active ? 'bg-brand/15 border-brand/45 text-brand-light' : 'bg-white/[0.06] border-white/10 text-white/80 hover:bg-white/10'
+      }`}
+    >
+      <span className="truncate">{active ? current?.label ?? label : label}</span>
+      <ChevronDown size={13} className={`shrink-0 ${active ? 'text-brand-light' : 'text-white/40'}`} />
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        aria-label={label}
+        className="absolute inset-0 w-full opacity-0 cursor-pointer [&>option]:bg-[#1c1c1f] [&>option]:text-white"
+      >
+        {options.map(o => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
 
 export default function MonthlyPayment() {
   // Використовуємо новий store
@@ -95,6 +129,14 @@ export default function MonthlyPayment() {
   const [expiredBanks, setExpiredBanks] = useState([]) // names of banks whose 90-day access ran out
 
   const [searchQuery, setSearchQuery] = useState('')
+  // Search (same as the iPhone app): the query goes to the server after a pause in typing
+  const [sentQuery, setSentQuery] = useState('')
+  const [period, setPeriod] = useState('all')
+  const [cardFilter, setCardFilter] = useState('')
+  const [cardList, setCardList] = useState([])
+  // A query, period or card → server-side search (search_transactions); otherwise the plain list
+  const searchMode = sentQuery !== '' || period !== 'all' || !!cardFilter
+  const fetchIdRef = useRef(0) // drops responses of superseded requests
   const [hasMore, setHasMore] = useState(true)
   const pageSize = 50 // Increased page size for better infinite scroll
   const [offset, setOffset] = useState(0) // Keep for tracking, but use rows.length for actual fetching
@@ -186,6 +228,8 @@ export default function MonthlyPayment() {
 
   // Split rawVisibleRows into pinned and regular based on category setting or manual pinning tag in note
   const { pinnedTxs, regularTxs } = useMemo(() => {
+    // Searching: every match is in the list, the pinned block steps aside (like the iPhone app)
+    if (searchMode) return { pinnedTxs: [], regularTxs: rawVisibleRows }
     const pinned = []
     const regular = []
     
@@ -220,7 +264,7 @@ export default function MonthlyPayment() {
     }
     
     return { pinnedTxs: pinned, regularTxs: regular }
-  }, [rawVisibleRows, pinnedRows, pinnedCategories, rows])
+  }, [rawVisibleRows, pinnedRows, pinnedCategories, rows, searchMode])
 
   const lastPinnedLengthRef = useRef(0)
   useEffect(() => {
@@ -248,7 +292,10 @@ export default function MonthlyPayment() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [refundPickExpenseId])
 
-  async function fetchPage({ append = false, search = '', txType = transactionType, category = selectedCategory } = {}) {
+  async function fetchPage({ append = false, txType = transactionType, category = selectedCategory } = {}) {
+    // A new first page supersedes everything in flight; a next page belongs to the current one
+    const requestId = append ? fetchIdRef.current : ++fetchIdRef.current
+    const stale = () => requestId !== fetchIdRef.current
     if (append) setLoadingMore(true)
 
     // Use current rows length as offset (safe with inserts/deletes)
@@ -258,14 +305,43 @@ export default function MonthlyPayment() {
     // Get current user
     const { data: { user } } = await supabase.auth.getUser()
 
-    const [txs, cards] = await Promise.all([
-      listTransactions({ from, to, search, transactionType: txType, category, excludeUsdt: !showUsdt }),
-      user ? listCards() : []
-    ])
+    const usdtCardIds = showUsdt ? [] : cardList.filter(c => String(c.currency).toUpperCase() === 'USDT').map(c => c.id)
+    let txs
+    let cards
+    try {
+      [txs, cards] = await Promise.all([
+        searchMode
+          ? searchTransactions({
+              offset: from,
+              limit: pageSize,
+              query: sentQuery,
+              ...periodRange(period),
+              cardIds: cardFilter ? [cardFilter] : [],
+              categories: category ? [category] : [],
+              transactionType: txType,
+              excludeCardIds: usdtCardIds,
+            })
+          : listTransactions({ from, to, transactionType: txType, category, excludeUsdt: !showUsdt }),
+        user ? listCards() : []
+      ])
+    } catch (e) {
+      console.error('Failed to load transactions:', e)
+      if (!stale()) {
+        if (append) setLoadingMore(false)
+        else setInitialLoading(false)
+        toast.error('Не вдалося завантажити транзакції')
+      }
+      return
+    }
+    if (stale()) {
+      if (append) setLoadingMore(false)
+      return
+    }
     // map by card id so we can lookup currency by card_id (transactions store card_id)
     const map = {}
     cards.forEach(c => { map[c.id] = c.currency || 'EUR' })
     setCardMap(map)
+    setCardList(cards)
 
     // Always fetch linked refund children for loaded expense parents so nested refunds survive refresh
     // even when filters are not strictly "expense".
@@ -291,14 +367,16 @@ export default function MonthlyPayment() {
       refundChildren = []
     }
 
-    // Fetch pinned transactions globally if not appending
-    if (!append) {
+    // Fetch pinned transactions globally if not appending (not while searching: matches are in the list)
+    if (!append && searchMode) {
+      setPinnedRows([])
+    } else if (!append) {
       const pinnedRequests = []
       const validPinnedCats = (Array.isArray(pinnedCategories) ? pinnedCategories : []).filter(c => c && c.trim() !== '')
       if (validPinnedCats.length > 0) {
-        pinnedRequests.push(listTransactions({ from: 0, to: 9999, categoryIn: validPinnedCats, excludeUsdt: !showUsdt, search }))
+        pinnedRequests.push(listTransactions({ from: 0, to: 9999, categoryIn: validPinnedCats, excludeUsdt: !showUsdt }))
       }
-      pinnedRequests.push(listTransactions({ from: 0, to: 9999, hasPinnedTag: true, excludeUsdt: !showUsdt, search }))
+      pinnedRequests.push(listTransactions({ from: 0, to: 9999, hasPinnedTag: true, excludeUsdt: !showUsdt }))
       
       try {
         const pinnedResults = await Promise.all(pinnedRequests)
@@ -309,6 +387,10 @@ export default function MonthlyPayment() {
       }
     }
 
+    if (stale()) {
+      if (append) setLoadingMore(false)
+      return
+    }
     const mergedTxs = dedupeById([...(txs || []), ...(refundChildren || [])])
 
     if (append) {
@@ -413,11 +495,18 @@ export default function MonthlyPayment() {
   }, [initialized, settings]) // Тільки для фільтрів, не для категорій
 
   useEffect(() => {
+    const t = setTimeout(() => setSentQuery(searchQuery.trim()), 300)
+    return () => clearTimeout(t)
+  }, [searchQuery])
+
+  useEffect(() => {
     // Wait for filters to be loaded from DB before fetching
     if (!filtersLoaded) return
 
-    fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })
-  }, [transactionType, selectedCategory, showUsdt, filtersLoaded]) // Re-fetch when filters or USDT toggle change
+    setSelectedIds(new Set())
+    lastSelectedIndexRef.current = null
+    fetchPage({ append: false, txType: transactionType, category: selectedCategory })
+  }, [transactionType, selectedCategory, showUsdt, filtersLoaded, sentQuery, period, cardFilter]) // Re-fetch when filters, search or USDT toggle change
 
   const txMatchesCurrentView = useCallback((tx) => {
     if (!tx) return false
@@ -452,10 +541,10 @@ export default function MonthlyPayment() {
 
       // If user is searching, it's hard to reliably match server search locally.
       // In that case, debounce a refresh (keeping current UI).
-      if (searchQuery && searchQuery.trim()) {
+      if (searchMode) {
         if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current)
         refreshDebounceRef.current = setTimeout(() => {
-          fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })
+          fetchPage({ append: false, txType: transactionType, category: selectedCategory })
         }, 250)
         return
       }
@@ -498,7 +587,7 @@ export default function MonthlyPayment() {
       // Fallback: debounce a refresh for unexpected events
       if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current)
       refreshDebounceRef.current = setTimeout(() => {
-        fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })
+        fetchPage({ append: false, txType: transactionType, category: selectedCategory })
       }, 250)
     })
 
@@ -506,13 +595,19 @@ export default function MonthlyPayment() {
       if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current)
       if (typeof unsubscribe === 'function') unsubscribe()
     }
-  }, [searchQuery, transactionType, selectedCategory, showUsdt, txMatchesCurrentView])
+  }, [searchMode, sentQuery, period, cardFilter, cardList, transactionType, selectedCategory, showUsdt, txMatchesCurrentView])
 
   const handleSearch = (query) => {
     setSearchQuery(query)
-    offsetRef.current = 0
-    setOffset(0)
-    fetchPage({ append: false, search: query, txType: transactionType, category: selectedCategory })
+    if (!query) setSentQuery('') // cleared: back to the list right away
+  }
+
+  const resetSearch = () => {
+    setSearchQuery('')
+    setSentQuery('')
+    setPeriod('all')
+    setCardFilter('')
+    setSelectedCategory('')
   }
 
   // Save filters to DB when they change (через store з debounce) - тільки якщо значення дійсно змінилося
@@ -554,8 +649,8 @@ export default function MonthlyPayment() {
       return
     }
     // Викликаємо fetchPage для завантаження наступної порції
-    fetchPage({ append: true, search: searchQuery, txType: transactionType, category: selectedCategory })
-  }, [hasMore, loadingMore, searchQuery, transactionType, selectedCategory, showUsdt])
+    fetchPage({ append: true, txType: transactionType, category: selectedCategory })
+  }, [hasMore, loadingMore, searchMode, sentQuery, period, cardFilter, cardList, transactionType, selectedCategory, showUsdt])
 
   // Infinite scroll with Intersection Observer
   useEffect(() => {
@@ -1155,30 +1250,91 @@ export default function MonthlyPayment() {
 
         <form onSubmit={(e) => e.preventDefault()}>
           <div className="relative">
+            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
             <input
               type="text"
-              placeholder="Пошук по сумі, категорії, банку, опису, даті..."
+              placeholder="Мерчант, сума, 12.09, вересень…"
               value={searchQuery}
               onChange={(e) => handleSearch(e.target.value)}
-              className="w-full px-4 py-2.5 bg-white/[0.06] border border-white/10 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
+              className="w-full pl-10 pr-10 py-2.5 bg-white/[0.06] border border-white/10 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
             />
             {searchQuery && (
               <button
                 type="button"
+                aria-label="Очистити пошук"
                 onClick={() => handleSearch('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/70"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/70"
               >
                 <X size={16} />
               </button>
             )}
           </div>
         </form>
+
+        {/* Filters under the search, like the iPhone app */}
+        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+          <FilterSelect
+            label="Період"
+            value={period}
+            onChange={setPeriod}
+            active={period !== 'all'}
+            options={PERIODS.map(p => ({ value: p.id, label: p.label }))}
+          />
+          <FilterSelect
+            label="Картка"
+            value={cardFilter}
+            onChange={setCardFilter}
+            active={!!cardFilter}
+            options={[
+              { value: '', label: 'Усі картки' },
+              ...[...cardList]
+                .sort((a, b) => String(a.name).localeCompare(String(b.name), 'uk'))
+                .map(c => ({ value: c.id, label: c.currency ? `${c.name} · ${c.currency}` : c.name })),
+            ]}
+          />
+          <FilterSelect
+            label="Категорія"
+            value={selectedCategory}
+            onChange={v => handleFilterChange(transactionType, v)}
+            active={!!selectedCategory}
+            options={[{ value: '', label: 'Усі категорії' }, ...categories.map(c => ({ value: c, label: c }))]}
+          />
+          <div className="inline-flex p-0.5 rounded-full bg-white/[0.06] border border-white/10">
+            {TYPE_FILTERS.map(f => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => handleFilterChange(f.id, selectedCategory)}
+                className={`h-7 px-3 rounded-full text-xs font-semibold transition ${
+                  transactionType === f.id ? 'bg-brand text-white' : 'text-white/65 hover:text-white'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          {(searchMode || searchQuery || selectedCategory) && (
+            <button type="button" onClick={resetSearch} className="h-8 px-2 text-xs font-semibold text-white/55 hover:text-white">
+              Скинути
+            </button>
+          )}
+        </div>
       </div>
 
       {initialLoading && visibleRows.length === 0 ? (
         <div className="text-sm text-white/55">Завантаження...</div>
       ) : visibleRows.length === 0 ? (
-        <div className="text-sm text-white/55">No transactions yet</div>
+        searchMode || selectedCategory ? (
+          <div className="py-10 text-center">
+            <div className="text-3xl mb-2">🔍</div>
+            <div className="text-sm text-white/60">Нічого не знайдено</div>
+            <button type="button" onClick={resetSearch} className="mt-3 text-sm font-semibold text-brand hover:underline">
+              Скинути пошук і фільтри
+            </button>
+          </div>
+        ) : (
+          <div className="text-sm text-white/55">Транзакцій поки немає</div>
+        )
       ) : (
         <>
           {visibleRows.length > 0 && (
@@ -1225,42 +1381,6 @@ export default function MonthlyPayment() {
                       Показувати USDT
                     </span>
                   </label>
-                </div>
-
-                {/* Filters */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  {/* Transaction type filter */}
-                  <select
-                    value={transactionType}
-                    onChange={(e) => {
-                      handleFilterChange(e.target.value, selectedCategory)
-                      setSelectedIds(new Set()) // Clear selection when filter changes
-                      lastSelectedIndexRef.current = null // Reset last selected index
-                    }}
-                    className="text-xs font-semibold border border-white/10 rounded-full px-3 py-1.5 bg-white/[0.06] focus:outline-none focus:ring-2 focus:ring-brand"
-                  >
-                    <option value="all">Всі</option>
-                    <option value="expense">Витрати</option>
-                    <option value="income">Доходи</option>
-                  </select>
-
-                  {/* Category filter */}
-                  <select
-                    value={selectedCategory}
-                    onChange={(e) => {
-                      handleFilterChange(transactionType, e.target.value)
-                      setSelectedIds(new Set()) // Clear selection when filter changes
-                      lastSelectedIndexRef.current = null // Reset last selected index
-                    }}
-                    className="text-xs font-semibold border border-white/10 rounded-full px-3 py-1.5 bg-white/[0.06] focus:outline-none focus:ring-2 focus:ring-brand min-w-[120px]"
-                  >
-                    <option value="">Всі категорії</option>
-                    {categories.map((cat) => (
-                      <option key={cat} value={cat}>
-                        {cat}
-                      </option>
-                    ))}
-                  </select>
                 </div>
               </div>
             </div>
@@ -1512,7 +1632,7 @@ export default function MonthlyPayment() {
         currency={activeCurrency}
         onClose={() => { setSplitOpen(false); setSplitTx(null) }}
         onSplitComplete={() => {
-          fetchPage({ append: false, search: searchQuery, txType: transactionType, category: selectedCategory })
+          fetchPage({ append: false, txType: transactionType, category: selectedCategory })
         }}
       />
 

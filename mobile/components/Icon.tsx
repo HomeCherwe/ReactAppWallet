@@ -27,6 +27,8 @@ const PATHS = {
   pinOff: ['M12 17v5', 'M15 9.34V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H7.89', 'M2 2l20 20', 'M9 9v1.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h11'],
   split: ['M16 3h5v5', 'M8 3H3v5', 'M12 22v-8.3a4 4 0 0 0-1.17-2.87L3 3', 'M15 9l6-6'],
   tag: ['M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2v7.17a2 2 0 0 0 .59 1.41l8.7 8.71a2.43 2.43 0 0 0 3.42 0l6.58-6.58a2.43 2.43 0 0 0 0-3.42z', 'M7.5 7.5h.01'],
+  search: ['M21 21l-4.3-4.3'],
+  chevronDown: ['M6 9l6 6 6-6'],
   tapHand: ['M9 11V5a2 2 0 0 1 4 0v6', 'M13 10V8a2 2 0 0 1 4 0v5a7 7 0 0 1-7 7h-.5a6 6 0 0 1-5.2-3L3 14.5a2 2 0 0 1 3.4-2L9 15'],
 } as const
 
@@ -46,6 +48,7 @@ export default function Icon({
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       {name === 'key' && <Circle cx={7.5} cy={15.5} r={5.5} stroke={color} strokeWidth={strokeWidth} />}
+      {name === 'search' && <Circle cx={11} cy={11} r={7} stroke={color} strokeWidth={strokeWidth} />}
       {PATHS[name].map((d, i) => (
         <Path key={i} d={d} stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
       ))}
