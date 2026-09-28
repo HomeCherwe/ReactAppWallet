@@ -403,6 +403,183 @@ async function fetchTransactions(client, base, days, now) {
   return []
 }
 
+// ---------------------------------------------------------------------------
+// Pending (not settled yet) transactions: shown right away, replaced by the settled one later
+// ---------------------------------------------------------------------------
+const PENDING_MATCH_DAYS = 5
+// The settled amount may differ a little from the pending one (exchange rate, tip)
+const PENDING_AMOUNT_TOLERANCE = 0.05
+
+/**
+ * The account's pending transactions. /transactions doesn't include them, and not every bank
+ * offers them: null then (and when the request fails), so no pending row is removed on a guess.
+ */
+async function fetchPending(client, base) {
+  try {
+    return (await client.get(`${base}/transactions/pending`))?.results || []
+  } catch (e) {
+    if (e instanceof ConsentExpiredError) throw e
+    if (![400, 403, 404, 501].includes(e.response?.status)) {
+      console.warn(`[Banks] ${base}: pending transactions unavailable:`, e.response?.data?.error || e.message)
+    }
+    return null
+  }
+}
+
+// Some banks give pending transactions no id: one made from its details stays the same between syncs
+const pendingIdOf = t =>
+  t.transaction_id ||
+  `pending:${crypto.createHash('sha1').update(`${t.timestamp}|${t.amount}|${t.currency}|${t.description}`).digest('hex').slice(0, 24)}`
+
+const textWords = s =>
+  String(s || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(w => w.length >= 3 && !/^\d+$/.test(w))
+
+/** Whether two bank descriptions look like the same merchant; null when one of them has none */
+function similarDescription(a, b) {
+  const wa = textWords(a)
+  const wb = textWords(b)
+  if (wa.length === 0 || wb.length === 0) return null
+  const set = new Set(wa)
+  if (wb.some(w => set.has(w))) return true
+  const ja = wa.join('')
+  const jb = wb.join('')
+  return ja.includes(jb) || jb.includes(ja)
+}
+
+/**
+ * The pending row a settled transaction replaces: same card and sign, amount within a few percent,
+ * date within PENDING_MATCH_DAYS, a similar description. Rows the bank still lists as pending are
+ * the last choice — a settled transaction normally leaves that list.
+ */
+function findPendingMatch(row, candidates, stillPending) {
+  const amount = Number(row.amount)
+  const at = new Date(row.created_at).getTime()
+  let best = null
+  for (const p of candidates) {
+    const pAmount = Number(p.amount)
+    if (Math.sign(pAmount) !== Math.sign(amount)) continue
+    const diff = Math.abs(Math.abs(pAmount) - Math.abs(amount))
+    if (diff > Math.max(Math.abs(amount) * PENDING_AMOUNT_TOLERANCE, 0.01)) continue
+    const days = Math.abs(new Date(p.created_at).getTime() - at) / 86400000
+    if (days > PENDING_MATCH_DAYS) continue
+    const similar = similarDescription(p.merchant_name || p.note, row.merchant_name || row.note)
+    if (similar === false) continue
+    // Best first: left the bank's pending list, similar description, closest amount, closest date
+    const rank = [stillPending.has(p.transaction_id_card) ? 1 : 0, similar ? 0 : 1, diff, days]
+    if (!best || rankedBefore(rank, best.rank)) best = { p, rank }
+  }
+  return best?.p || null
+}
+
+function rankedBefore(a, b) {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i]
+  return false
+}
+
+/**
+ * Imports one bank account's transactions into its card:
+ * - a settled transaction replaces its pending version in place, so what the user set on it
+ *   (category, note, pin, refund) stays and nothing is doubled;
+ * - new pending ones are added with status 'pending';
+ * - pending ones the bank no longer lists and that didn't settle (cancelled holds) are removed.
+ * `pendingRows` is null when the bank doesn't list pending transactions: then none are touched.
+ * Returns the inserted settled rows, the number of new rows (settled + pending) and of pending
+ * rows that settled, changed or were removed (so the apps reload their lists).
+ */
+async function importCardTransactions(supabase, userId, cardId, bookedRows, pendingRows) {
+  const ids = [...bookedRows, ...(pendingRows || [])].map(r => r.transaction_id_card)
+  const known = new Map() // bank id → { id, status } of rows already imported
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('id, transaction_id_card, status')
+      .eq('user_id', userId)
+      .in('transaction_id_card', ids.slice(i, i + 200))
+    if (error) throw error
+    for (const r of data || []) known.set(r.transaction_id_card, r)
+  }
+
+  const { data: pendingInDb, error: pendingError } = await supabase
+    .from('transactions')
+    .select('id, amount, amount_stat, created_at, note, merchant_name, transaction_id_card')
+    .eq('card_id', cardId)
+    .eq('status', 'pending')
+  if (pendingError) throw pendingError
+  const open = new Map((pendingInDb || []).map(p => [p.id, p])) // pending rows not settled yet
+  const stillPending = new Set((pendingRows || []).map(r => r.transaction_id_card))
+
+  // Keeps an expense's refunds subtracted when its amount changes
+  const amountPatch = (p, amount) => ({
+    amount,
+    ...(p.amount_stat != null && { amount_stat: Math.round((Number(p.amount_stat) + amount - Number(p.amount)) * 100) / 100 }),
+  })
+
+  let changed = 0
+  const freshBooked = []
+  for (const row of bookedRows) {
+    const k = known.get(row.transaction_id_card)
+    if (k && k.status !== 'pending') continue // imported before
+    const p = k ? open.get(k.id) : findPendingMatch(row, [...open.values()], stillPending)
+    if (!p) {
+      if (!k) freshBooked.push(row)
+      continue
+    }
+    const { error } = await supabase
+      .from('transactions')
+      .update({
+        status: 'booked',
+        transaction_id_card: row.transaction_id_card,
+        created_at: row.created_at,
+        ...amountPatch(p, row.amount),
+        ...(!p.merchant_name && row.merchant_name && { merchant_name: row.merchant_name }),
+      })
+      .eq('id', p.id)
+    if (error) throw error
+    open.delete(p.id)
+    changed++
+  }
+
+  const freshPending = []
+  const listed = new Set() // pending rows the bank still lists
+  for (const row of pendingRows || []) {
+    const k = known.get(row.transaction_id_card)
+    if (!k) {
+      freshPending.push(row)
+      continue
+    }
+    listed.add(k.id)
+    const p = open.get(k.id)
+    // A hold can change before it settles (e.g. a tip added)
+    if (p && Number(p.amount) !== row.amount) {
+      const { error } = await supabase.from('transactions').update(amountPatch(p, row.amount)).eq('id', p.id)
+      if (error) throw error
+      changed++
+    }
+  }
+
+  const fresh = [...freshBooked, ...freshPending]
+  if (fresh.length > 0) {
+    const { error } = await supabase.from('transactions').insert(fresh)
+    if (error) throw error
+  }
+
+  if (pendingRows) {
+    const dropped = [...open.keys()].filter(id => !listed.has(id))
+    if (dropped.length > 0) {
+      const { error } = await supabase.from('transactions').delete().in('id', dropped).eq('status', 'pending')
+      if (error) throw error
+      changed += dropped.length
+    }
+  }
+
+  return { booked: freshBooked, added: fresh.length, changed }
+}
+
 /** Days to read on a regular sync: since the last successful one, so nothing is skipped after a long break. */
 function regularSyncDays(lastSyncAt, now) {
   if (!lastSyncAt) return FIRST_SYNC_DAYS
@@ -423,6 +600,7 @@ async function syncConnection(supabase, conn, psuHeaders) {
   const now = new Date()
   const to = now.toISOString().split('.')[0] + 'Z'
   let added = 0
+  let changed = 0
 
   for (const item of items) {
     // First import for this account: never linked, or linked to a card that is still empty
@@ -433,26 +611,34 @@ async function syncConnection(supabase, conn, psuHeaders) {
     // Fetch before creating anything, so a rejected request leaves no half-made card behind
     const base = item.kind === 'card' ? `cards/${item.account_id}` : `accounts/${item.account_id}`
     const txs = await fetchTransactions(client, base, firstImport ? FIRST_SYNC_DAYS : regularSyncDays(conn.last_sync_at, now), now)
+    const pending = await fetchPending(client, base)
     const { cardId } = await ensureCardForItem(supabase, userId, conn, item, links || [])
     // Starting balance only for a card with no history yet (never overwrite an existing card's)
     const setStartingBalance = firstImport && (await countCardTransactions(supabase, cardId)) === 0
 
+    const toRow = (t, status, transactionId) => ({
+      user_id: userId,
+      amount: signedAmount(t),
+      category: `${conn.provider_name} Sync`,
+      note: t.meta?.user_comments ? `${t.description} | ${t.meta.user_comments}` : t.description,
+      archives: false,
+      card: conn.provider_name,
+      card_id: cardId,
+      transaction_id_card: transactionId,
+      created_at: t.timestamp,
+      merchant_name: t.merchant_name || null,
+      status,
+    })
     // Transactions imported before are skipped (matched by the bank's transaction id)
-    const rows = await insertNewTransactions(supabase, userId, txs
-      .filter(t => t.transaction_id)
-      .map(t => ({
-        user_id: userId,
-        amount: signedAmount(t),
-        category: `${conn.provider_name} Sync`,
-        note: t.meta?.user_comments ? `${t.description} | ${t.meta.user_comments}` : t.description,
-        archives: false,
-        card: conn.provider_name,
-        card_id: cardId,
-        transaction_id_card: t.transaction_id,
-        created_at: t.timestamp,
-        merchant_name: t.merchant_name || null,
-      })))
-    added += rows.length
+    const { booked: rows, added: newRows, changed: changedRows } = await importCardTransactions(
+      supabase,
+      userId,
+      cardId,
+      txs.filter(t => t.transaction_id).map(t => toRow(t, 'booked', t.transaction_id)),
+      pending && pending.map(t => toRow(t, 'pending', pendingIdOf(t)))
+    )
+    added += newRows
+    changed += changedRows
 
     // First import into an empty card: set its starting balance so the app matches the bank
     if (setStartingBalance) {
@@ -477,7 +663,7 @@ async function syncConnection(supabase, conn, psuHeaders) {
     .from('bank_connections')
     .update({ status: 'active', last_sync_at: now.toISOString(), last_error: null, updated_at: now.toISOString() })
     .eq('id', conn.id)
-  return added
+  return { added, changed }
 }
 
 // ---------------------------------------------------------------------------
@@ -724,12 +910,14 @@ async function migrateLegacyRevolut(supabase, userId) {
   }
 }
 
-/** Syncs every active connection of the user. Used by the apps and by /api/syncTrueLayer. */
-/** Syncs one connection of any kind (TrueLayer or Monobank). */
+/**
+ * Syncs one connection of any kind (TrueLayer or Monobank). Returns { added, changed }: new rows,
+ * and existing pending ones that settled, changed or were removed.
+ */
 async function syncAnyConnection(supabase, conn, psuHeaders) {
   try {
     return conn.provider_id === MONOBANK_ID
-      ? await syncMonobankConnection(supabase, conn)
+      ? { added: await syncMonobankConnection(supabase, conn), changed: 0 }
       : await syncConnection(supabase, conn, psuHeaders)
   } catch (e) {
     if (e instanceof MonoTokenError) {
@@ -760,7 +948,7 @@ export async function syncAllBankConnections(supabase, userId, psuHeaders = {}, 
   const results = []
   for (const conn of conns || []) {
     try {
-      results.push({ id: conn.id, provider_name: conn.provider_name, added: await syncAnyConnection(supabase, conn, psuHeaders) })
+      results.push({ id: conn.id, provider_name: conn.provider_name, ...(await syncAnyConnection(supabase, conn, psuHeaders)) })
     } catch (e) {
       const expired = e instanceof ConsentExpiredError
       const message = expired ? 'consent_expired' : e.response?.data?.error || e.message
@@ -768,10 +956,14 @@ export async function syncAllBankConnections(supabase, userId, psuHeaders = {}, 
         await supabase.from('bank_connections').update({ last_error: String(message).slice(0, 300) }).eq('id', conn.id)
       }
       console.error(`[Banks] Sync failed for ${conn.provider_name}:`, message)
-      results.push({ id: conn.id, provider_name: conn.provider_name, added: 0, error: message })
+      results.push({ id: conn.id, provider_name: conn.provider_name, added: 0, changed: 0, error: message })
     }
   }
-  return { added: results.reduce((s, r) => s + r.added, 0), results }
+  return {
+    added: results.reduce((s, r) => s + r.added, 0),
+    changed: results.reduce((s, r) => s + r.changed, 0),
+    results,
+  }
 }
 
 function publicConnection(c, accounts = []) {
@@ -976,8 +1168,8 @@ export function registerBankConnections(app, { supabase, getUserFromToken, getUs
           .maybeSingle()
         if (!conn) return res.status(404).json({ success: false, error: 'Connection not found' })
         try {
-          const added = await syncAnyConnection(supabase, conn, psu)
-          return res.json({ success: true, added, results: [{ id: conn.id, provider_name: conn.provider_name, added }] })
+          const { added, changed } = await syncAnyConnection(supabase, conn, psu)
+          return res.json({ success: true, added, changed, results: [{ id: conn.id, provider_name: conn.provider_name, added, changed }] })
         } catch (e) {
           const message = e instanceof ConsentExpiredError ? 'consent_expired' : e.response?.data?.error || e.message
           return res.json({ success: false, added: 0, error: message })

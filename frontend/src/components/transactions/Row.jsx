@@ -6,12 +6,22 @@ import { Trash2, RotateCcw, Link2Off } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { getCategoryVisual } from '../../utils/categoryIcon'
 
+/** Not settled at the bank yet (TrueLayer banks) — same pill as the iPhone app */
+function PendingBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-white/[0.08] text-white/60 whitespace-nowrap">
+      <span className="h-1.5 w-1.5 rounded-full bg-white/40" />
+      В обробці
+    </span>
+  )
+}
+
 /** iOS-Settings-style icon: a white glyph on a colored rounded square */
 function CategoryIcon({ tx, compact }) {
   const { Icon, color } = getCategoryVisual(tx.category, Number(tx.amount || 0), tx.is_transfer)
   return (
     <div
-      className={`${compact ? 'h-8 w-8 rounded-[9px]' : 'h-10 w-10 rounded-[11px]'} shrink-0 grid place-items-center shadow-[inset_0_1px_0_rgba(255,255,255,0.25)]`}
+      className={`${compact ? 'h-8 w-8 rounded-[9px]' : 'h-10 w-10 rounded-[11px]'} shrink-0 grid place-items-center shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] ${tx.status === 'pending' ? 'grayscale opacity-50' : ''}`}
       style={{ background: `linear-gradient(180deg, ${color}, ${color}d9)` }}
     >
       <Icon size={compact ? 16 : 20} strokeWidth={2.2} className="text-white" />
@@ -37,6 +47,8 @@ export default function Row({
 }) {
   const hideAllBalances = useSettingsStore(state => state.settings.hideAllBalances ?? false)
   const isExp = Number(tx.amount) < 0
+  const pending = tx.status === 'pending'
+  const amountColor = pending ? 'text-white/45' : isExp ? '' : 'text-green-400'
   const pad = compact ? 'p-2' : 'p-3'
   const round = compact ? 'rounded-xl' : 'rounded-2xl'
   const titleText = compact ? 'text-[13px]' : 'text-[15px]'
@@ -121,8 +133,9 @@ export default function Row({
         )}
         <CategoryIcon tx={tx} compact={compact} />
         <div className="min-w-0">
-          <div className={`font-semibold ${titleText} flex items-center gap-2`}>
+          <div className={`font-semibold ${titleText} flex items-center gap-2 ${pending ? 'text-white/60' : ''}`}>
             {tx.category || 'Без категорії'}
+            {pending && <PendingBadge />}
             {tx.is_transfer && (
               <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-brand/10 text-brand-light border border-brand/[0.12]">
                 ⇄ Переказ
@@ -161,7 +174,7 @@ export default function Row({
             )}
           </div>
         ) : (
-          <div className={`font-semibold ${titleText} ${isExp ? '' : 'text-green-400'}`}>
+          <div className={`font-semibold ${titleText} ${amountColor}`}>
             {hideAllBalances ? '***' : `${!isExp ? '+' : ''}${fmtAmount(tx.amount, currency)}`}
           </div>
         )}
@@ -246,8 +259,9 @@ export default function Row({
         )}
         <CategoryIcon tx={tx} compact={compact} />
         <div className="min-w-0">
-          <div className={`font-semibold ${titleText} flex items-center gap-2`}>
+          <div className={`font-semibold ${titleText} flex items-center gap-2 ${pending ? 'text-white/60' : ''}`}>
             {tx.category || 'Без категорії'}
+            {pending && <PendingBadge />}
           </div>
           <div className={`${metaText} text-white/55`}>
             {[tx.card].filter(Boolean).join(' · ') || '—'} · {fmtDate(tx.created_at)}
@@ -276,7 +290,7 @@ export default function Row({
             )}
           </div>
         ) : (
-          <div className={`font-semibold ${titleText} ${isExp ? '' : 'text-green-400'}`}>
+          <div className={`font-semibold ${titleText} ${amountColor}`}>
             {!isExp ? '+' : ''}{fmtAmount(tx.amount, currency)}
           </div>
         )}

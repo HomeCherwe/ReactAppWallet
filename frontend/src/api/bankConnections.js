@@ -23,14 +23,14 @@ export async function startBankConnection(providerId, returnUrl) {
   return url
 }
 
-/** Syncs one bank (by id) or all connected banks. Returns { added, results }. */
+/** Syncs one bank (by id) or all connected banks. Returns { added, changed, results } (changed: pending ones that settled or went away). */
 export async function syncBankConnections(connectionId) {
   const res = await apiFetch('/api/bank-connections/sync', {
     method: 'POST',
     body: JSON.stringify({ user_present: true, ...(connectionId && { connection_id: connectionId }) }),
   })
   if (!res?.success) throw new Error(res?.error || 'Не вдалося синхронізувати банки')
-  return { added: res.added ?? 0, results: res.results ?? [] }
+  return { added: res.added ?? 0, changed: res.changed ?? 0, results: res.results ?? [] }
 }
 
 export async function disconnectBankConnection(connectionId) {

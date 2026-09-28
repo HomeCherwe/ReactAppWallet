@@ -36,7 +36,13 @@ export default function DetailsModal({ open, tx, currency, onClose, onEdit, onSp
                 <span className="text-white/55">Дата</span>
                 <span>{fmtDate(tx?.created_at)}</span>
               </div>
-              
+              {tx?.status === 'pending' && (
+                <div className="flex justify-between">
+                  <span className="text-white/55">Статус</span>
+                  <span className="text-white/60">В обробці — банк ще не провів</span>
+                </div>
+              )}
+
               <div>
                 <div className="text-white/55 mb-1">Нотатки</div>
                 <div className="rounded-xl border p-3 bg-white/[0.03] min-h-[50px] whitespace-pre-line">

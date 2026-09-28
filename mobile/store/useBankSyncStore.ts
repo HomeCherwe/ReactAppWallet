@@ -42,10 +42,11 @@ export function syncBanks(): Promise<number> {
   useBankSyncStore.setState({ phase: 'syncing' })
 
   inFlight = syncConnectedBanks()
-    .then(({ added }) => {
+    .then(({ added, changed }) => {
       useBankSyncStore.setState({ phase: added > 0 ? 'result' : 'idle', added, lastSyncAt: Date.now() })
+      // Pending ones that settled or went away: nothing to announce, but the lists change
+      if (added > 0 || changed > 0) txBus.emit({ type: 'SYNCED', source: 'banks', count: added })
       if (added > 0) {
-        txBus.emit({ type: 'SYNCED', source: 'banks', count: added })
         resultTimer = setTimeout(() => useBankSyncStore.setState({ phase: 'idle' }), RESULT_VISIBLE_MS)
       }
       return added

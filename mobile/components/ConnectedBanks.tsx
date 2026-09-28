@@ -97,11 +97,11 @@ export default function ConnectedBanks({
   const syncOne = async (c: BankConnection) => {
     setBusyId(c.id)
     try {
-      const { added, results } = await syncConnectedBanks(c.id)
+      const { added, changed, results } = await syncConnectedBanks(c.id)
       const failed = results.find(r => r.error)
       if (failed) throw new Error(failed.error === 'consent_expired' ? 'Термін доступу сплив' : failed.error)
       triggerSuccessHaptic()
-      if (added > 0) {
+      if (added > 0 || changed > 0) {
         txBus.emit({ type: 'SYNCED', source: 'banks', count: added })
         onChanged?.()
       }

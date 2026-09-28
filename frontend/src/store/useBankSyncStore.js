@@ -36,7 +36,7 @@ export function syncBanks() {
   useBankSyncStore.setState({ phase: 'syncing' })
 
   // Every bank (TrueLayer ones and Monobank) is synced by the bank-connections endpoint
-  inFlight = Promise.allSettled([syncBankConnections().then(r => r.added)])
+  inFlight = Promise.allSettled([syncBankConnections()])
     .then(results => {
       const ok = results.filter(r => r.status === 'fulfilled')
       results
@@ -48,15 +48,19 @@ export function syncBanks() {
         throw new Error('Не вдалося синхронізувати банки')
       }
 
-      const added = ok.reduce((sum, r) => sum + (r.value || 0), 0)
+      const added = ok.reduce((sum, r) => sum + (r.value?.added || 0), 0)
+      // Pending ones that settled or went away: nothing new to announce, but the lists change
+      const changed = ok.reduce((sum, r) => sum + (r.value?.changed || 0), 0)
       const now = Date.now()
       try {
         localStorage.setItem(LAST_SYNC_KEY, String(now))
       } catch {}
       useBankSyncStore.setState({ phase: added > 0 ? 'result' : 'idle', added, lastSyncAt: now })
 
-      if (added > 0) {
+      if (added > 0 || changed > 0) {
         try { txBus.emit({ type: 'SYNC' }) } catch {} // lists/cards reload
+      }
+      if (added > 0) {
         resultTimer = setTimeout(() => useBankSyncStore.setState({ phase: 'idle' }), RESULT_VISIBLE_MS)
       }
       return added

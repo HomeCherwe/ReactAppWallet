@@ -79,6 +79,16 @@ export default function DetailsModal({
                 <Text style={styles.rowValue}>{fmtDate(tx.created_at)}</Text>
               </View>
 
+              {tx.status === 'pending' ? (
+                <>
+                  <View style={styles.rowDivider} />
+                  <View style={styles.row}>
+                    <Text style={styles.rowLabel}>Статус</Text>
+                    <Text style={[styles.rowValue, { color: Colors.white60 }]}>В обробці — банк ще не провів</Text>
+                  </View>
+                </>
+              ) : null}
+
               {tx.merchant_name ? (
                 <>
                   <View style={styles.rowDivider} />

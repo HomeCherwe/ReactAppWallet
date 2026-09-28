@@ -803,11 +803,11 @@ export default function BankConnections({ onChanged, reloadKey = 0, cards = [], 
     if (c.auth === 'binance') return syncBinanceNow()
     setBusyId(c.id)
     try {
-      const { added, results } = await syncBankConnections(c.id)
+      const { added, changed, results } = await syncBankConnections(c.id)
       const failed = results.find(r => r.error)
       if (failed) throw new Error(failed.error === 'consent_expired' ? 'термін доступу сплив' : failed.error)
       toast.success(added > 0 ? `${c.provider_name}: +${added}` : `${c.provider_name}: нових транзакцій немає`)
-      if (added > 0) onChanged?.()
+      if (added > 0 || changed > 0) onChanged?.()
     } catch (e) {
       toast.error(`Не вдалося синхронізувати ${c.provider_name}: ${e.message}`)
     } finally {
