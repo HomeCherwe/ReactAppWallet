@@ -16,6 +16,7 @@ interface QuickActionPopupProps {
   onAddCard: () => void
   onTransfer: () => void
   onAddGoal: () => void
+  onScan: () => void
 }
 
 export default function QuickActionPopup({
@@ -25,6 +26,7 @@ export default function QuickActionPopup({
   onAddCard,
   onTransfer,
   onAddGoal,
+  onScan,
 }: QuickActionPopupProps) {
   const actions = [
     {
@@ -37,6 +39,17 @@ export default function QuickActionPopup({
         onAddTransaction()
       },
       accent: true,
+    },
+    {
+      id: 'scan',
+      icon: '🧾',
+      title: 'Сканувати чек або скрін',
+      desc: 'GPT знайде транзакції на фото чи скріншоті банку',
+      onPress: () => {
+        onClose()
+        onScan()
+      },
+      accent: false,
     },
     {
       id: 'card',
