@@ -2,6 +2,7 @@ import { apiFetch } from '../utils.jsx'
 import { listCards, createCard } from './cards'
 import { listBanks, createBank } from './banks'
 import { invalidateCardsCache } from '../utils/dataCache'
+import { useSettingsStore } from '../store/useSettingsStore'
 
 // Keys live in user_preferences.binance_api; the backend never returns them, only masked
 const saveKeys = (api_key, api_secret) =>
@@ -29,6 +30,8 @@ export async function syncBinance() {
 /** Saves the keys, makes sure there is a "Binance · Spot" card and pulls the balance into it */
 export async function connectBinance(apiKey, apiSecret) {
   await saveKeys(apiKey, apiSecret)
+  // The backend pinned "Binance Sync" (Налаштування → Закріплені категорії)
+  useSettingsStore.getState().refreshFromDatabase()
 
   invalidateCardsCache()
   const cards = await listCards()
