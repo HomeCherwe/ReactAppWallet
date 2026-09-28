@@ -2,6 +2,7 @@ import * as WebBrowser from 'expo-web-browser'
 import { makeRedirectUri } from 'expo-auth-session'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { apiFetch } from '../lib/apiFetch'
+import { useSettingsStore } from '../store/useSettingsStore'
 
 // Banks connected through TrueLayer (Revolut, Wise, BNP, Monzo, …). Tokens stay on the backend.
 
@@ -83,6 +84,7 @@ export async function connectBank(providerId: string): Promise<ConnectResult> {
   const params = new URLSearchParams(result.url.split('?')[1] ?? '')
   if (params.get('bank_status') === 'ok') {
     await AsyncStorage.setItem(HAS_BANKS_KEY, '1')
+    reloadPinnedCategories()
     return { status: 'ok', bankName: params.get('bank_name') || '' }
   }
   return { status: 'error', message: params.get('bank_message') || 'unknown_error' }
@@ -98,7 +100,16 @@ export async function connectBankWithToken(
     body: JSON.stringify({ provider_id: providerId, token }),
   })
   await AsyncStorage.setItem(HAS_BANKS_KEY, '1')
+  reloadPinnedCategories()
   return res
+}
+
+/**
+ * A new bank's "<Bank> Sync" category was pinned by the backend: take the settings from the server,
+ * so the next settings save from this phone doesn't put the old list back.
+ */
+function reloadPinnedCategories() {
+  useSettingsStore.getState().initialize().catch(() => {})
 }
 
 export async function disconnectBank(connectionId: string): Promise<void> {

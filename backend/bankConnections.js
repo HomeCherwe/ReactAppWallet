@@ -118,6 +118,46 @@ async function enableMonoWebhook(token, base, connId) {
 }
 
 // ---------------------------------------------------------------------------
+// A newly connected bank's transactions arrive as "<Bank> Sync" (Revolut Sync, Monobank Sync, …).
+// That category is pinned, so they wait in "Закріплені" until the user sorts them.
+// ---------------------------------------------------------------------------
+export const syncCategoryOf = providerName => `${providerName} Sync`
+
+/** Adds the category to Налаштування → Закріплені категорії (preferences.dashboard.pinnedCategories). */
+export async function pinSyncCategory(supabase, userId, category) {
+  try {
+    const { data: row, error } = await supabase
+      .from('user_preferences')
+      .select('id, preferences')
+      .eq('user_id', userId)
+      .maybeSingle()
+    if (error) throw error
+    const prefs = row?.preferences || {}
+    const pinned = Array.isArray(prefs.dashboard?.pinnedCategories) ? prefs.dashboard.pinnedCategories : []
+    if (pinned.includes(category)) return
+    const preferences = { ...prefs, dashboard: { ...(prefs.dashboard || {}), pinnedCategories: [...pinned, category] } }
+    const { error: saveError } = row
+      ? await supabase.from('user_preferences').update({ preferences, updated_at: new Date().toISOString() }).eq('id', row.id)
+      : await supabase.from('user_preferences').insert([{ user_id: userId, preferences }])
+    if (saveError) throw saveError
+  } catch (e) {
+    // Only a convenience: the connection itself worked
+    console.warn(`[Banks] Could not pin "${category}":`, e.message)
+  }
+}
+
+/** Is this bank connected for the first time (not a reconnect after the consent ran out)? */
+async function isNewConnection(supabase, userId, providerId) {
+  const { data } = await supabase
+    .from('bank_connections')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('provider_id', providerId)
+    .maybeSingle()
+  return !data
+}
+
+// ---------------------------------------------------------------------------
 // Provider catalog (from TrueLayer, cached)
 // ---------------------------------------------------------------------------
 let providersCache = null
@@ -357,7 +397,13 @@ async function insertNewTransactions(supabase, userId, rows) {
       .in('transaction_id_card', ids.slice(i, i + 200))
     for (const r of data || []) existing.add(r.transaction_id_card)
   }
-  const fresh = rows.filter(r => r.transaction_id_card && !existing.has(r.transaction_id_card))
+  let fresh = rows.filter(r => r.transaction_id_card && !existing.has(r.transaction_id_card))
+  // Entered by hand before (or created by a subscription): link that row instead of adding another
+  for (const cardId of new Set(fresh.map(r => r.card_id))) {
+    const twins = await findManualTwins(supabase, cardId, fresh.filter(r => r.card_id === cardId))
+    for (const [row, manual] of twins) await linkManualTwin(supabase, manual, row)
+    fresh = fresh.filter(r => !twins.has(r))
+  }
   if (fresh.length > 0) {
     const { error } = await supabase.from('transactions').insert(fresh)
     if (error) throw error
@@ -481,12 +527,72 @@ function rankedBefore(a, b) {
   return false
 }
 
+// ---------------------------------------------------------------------------
+// Hand-made twins: a bank transaction the user already entered by hand (or a subscription created)
+// ---------------------------------------------------------------------------
+const MANUAL_MATCH_DAYS = 3
+
+/**
+ * Pairs bank rows with rows of the card that have no bank id: same amount (to the cent), date within
+ * MANUAL_MATCH_DAYS; a similar description and a closer date win. Parts of a split transaction
+ * ("Розділено…") and archived rows are never paired (the same rules as find_possible_duplicates).
+ * Returns Map(bank row → hand-made row), each used once.
+ */
+async function findManualTwins(supabase, cardId, rows) {
+  const twins = new Map()
+  if (!cardId || rows.length === 0) return twins
+  const times = rows.map(r => new Date(r.created_at).getTime())
+  const pad = MANUAL_MATCH_DAYS * 86400000
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('id, amount, created_at, note, merchant_name')
+    .eq('card_id', cardId)
+    .is('transaction_id_card', null)
+    .eq('status', 'booked')
+    .not('archives', 'is', true) // archived by the user: not counted anywhere, not a twin
+    .gte('created_at', new Date(Math.min(...times) - pad).toISOString())
+    .lte('created_at', new Date(Math.max(...times) + pad).toISOString())
+  if (error) throw error
+  const free = (data || []).filter(m => !/Розділено/i.test(m.note || ''))
+
+  for (const row of rows) {
+    const at = new Date(row.created_at).getTime()
+    let best = null
+    for (const m of free) {
+      if (Math.abs(Number(m.amount) - Number(row.amount)) > 0.005) continue
+      const days = Math.abs(new Date(m.created_at).getTime() - at) / 86400000
+      if (days > MANUAL_MATCH_DAYS) continue
+      const rank = [similarDescription(m.merchant_name || m.note, row.merchant_name || row.note) ? 0 : 1, days]
+      if (!best || rankedBefore(rank, best.rank)) best = { m, rank }
+    }
+    if (best) {
+      twins.set(row, best.m)
+      free.splice(free.indexOf(best.m), 1)
+    }
+  }
+  return twins
+}
+
+/** The hand-made row becomes the bank's: its id and date; the user's category and note stay. */
+async function linkManualTwin(supabase, manual, row) {
+  const { error } = await supabase
+    .from('transactions')
+    .update({
+      transaction_id_card: row.transaction_id_card,
+      created_at: row.created_at,
+      ...(!manual.merchant_name && row.merchant_name && { merchant_name: row.merchant_name }),
+    })
+    .eq('id', manual.id)
+  if (error) throw error
+}
+
 /**
  * Imports one bank account's transactions into its card:
  * - a settled transaction replaces its pending version in place, so what the user set on it
  *   (category, note, pin, refund) stays and nothing is doubled;
  * - new pending ones are added with status 'pending';
- * - pending ones the bank no longer lists and that didn't settle (cancelled holds) are removed.
+ * - pending ones the bank no longer lists and that didn't settle (cancelled holds) are removed;
+ * - one the user already entered by hand (or a subscription created) is linked, not added again.
  * `pendingRows` is null when the bank doesn't list pending transactions: then none are touched.
  * Returns the inserted settled rows, the number of new rows (settled + pending) and of pending
  * rows that settled, changed or were removed (so the apps reload their lists).
@@ -562,7 +668,17 @@ async function importCardTransactions(supabase, userId, cardId, bookedRows, pend
     }
   }
 
-  const fresh = [...freshBooked, ...freshPending]
+  // Entered by hand before: the hand-made row is linked instead of a second one being added.
+  // A pending one with a hand-made twin isn't added at all — the twin is linked once it settles.
+  const twins = await findManualTwins(supabase, cardId, [...freshBooked, ...freshPending])
+  for (const row of freshBooked) {
+    const m = twins.get(row)
+    if (!m) continue
+    await linkManualTwin(supabase, m, row)
+    changed++
+  }
+  const newBooked = freshBooked.filter(r => !twins.has(r))
+  const fresh = [...newBooked, ...freshPending.filter(r => !twins.has(r))]
   if (fresh.length > 0) {
     const { error } = await supabase.from('transactions').insert(fresh)
     if (error) throw error
@@ -577,7 +693,7 @@ async function importCardTransactions(supabase, userId, cardId, bookedRows, pend
     }
   }
 
-  return { booked: freshBooked, added: fresh.length, changed }
+  return { booked: newBooked, added: fresh.length, changed }
 }
 
 /** Days to read on a regular sync: since the last successful one, so nothing is skipped after a long break. */
@@ -619,7 +735,7 @@ async function syncConnection(supabase, conn, psuHeaders) {
     const toRow = (t, status, transactionId) => ({
       user_id: userId,
       amount: signedAmount(t),
-      category: `${conn.provider_name} Sync`,
+      category: syncCategoryOf(conn.provider_name),
       note: t.meta?.user_comments ? `${t.description} | ${t.meta.user_comments}` : t.description,
       archives: false,
       card: conn.provider_name,
@@ -774,6 +890,7 @@ async function markSynced(supabase, connId, now) {
 /** Creates/refreshes the user's Monobank connection from a personal token. */
 async function connectMonobank(supabase, userId, token, { base, logo }) {
   const info = await fetchClientInfo(token)
+  const firstTime = await isNewConnection(supabase, userId, MONOBANK_ID)
   const { data: conn, error } = await supabase
     .from('bank_connections')
     .upsert(
@@ -797,6 +914,8 @@ async function connectMonobank(supabase, userId, token, { base, logo }) {
   const items = accountsFromClientInfo(info)
   await saveMonoAccounts(supabase, conn, items)
   if (base) await enableMonoWebhook(token, base, conn.id)
+  // A reconnect keeps the user's choice (they may have unpinned it)
+  if (firstTime) await pinSyncCategory(supabase, userId, syncCategoryOf(MONOBANK_PROVIDER.name))
   return { conn, accounts: items.length }
 }
 
@@ -1130,6 +1249,7 @@ export function registerBankConnections(app, { supabase, getUserFromToken, getUs
         redirect_uri: callbackUrl(req),
       }))
       const provider = (await getProviders()).find(p => p.provider_id === st.p)
+      const firstTime = await isNewConnection(supabase, st.u, st.p)
 
       const { error } = await supabase.from('bank_connections').upsert(
         {
@@ -1147,6 +1267,8 @@ export function registerBankConnections(app, { supabase, getUserFromToken, getUs
         { onConflict: 'user_id,provider_id' }
       )
       if (error) throw error
+      // A reconnect keeps the user's choice (they may have unpinned it)
+      if (firstTime) await pinSyncCategory(supabase, st.u, syncCategoryOf(provider?.name || st.p))
       console.log(`[Banks] ${provider?.name || st.p} connected for user:`, st.u)
       back({ bank_status: 'ok', bank_name: provider?.name || '' })
     } catch (e) {

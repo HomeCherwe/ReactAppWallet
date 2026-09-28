@@ -234,7 +234,7 @@ export default function FloatingActionButton({
             </Section>
             <Section title="Скарбничка та інше">
               <Button label="Створити скарбничку" systemImage="archivebox.fill" onPress={onAddGoal} />
-              <Button label="Сканувати QR або чек" systemImage="qrcode.viewfinder" onPress={onScan} />
+              <Button label="Сканувати чек або скрін" systemImage="doc.text.viewfinder" onPress={onScan} />
             </Section>
           </Menu>
         </Host>

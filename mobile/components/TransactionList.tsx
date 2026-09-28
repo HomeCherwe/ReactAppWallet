@@ -10,6 +10,7 @@ import { triggerErrorHaptic, triggerLightHaptic, triggerMediumHaptic, triggerSuc
 import { TransactionRowsSkeleton } from './Skeleton'
 import BankSyncIndicator from './BankSyncIndicator'
 import TxSearchBar from './TxSearchBar'
+import PossibleDuplicates from './PossibleDuplicates'
 import TxRow, { RowMode, closeSwipedRow, fmtMoney } from './TxRow'
 import { MenuAction, MenuFrame, openMenu as openMenuOverlay } from '../store/useMenuOverlay'
 import { pinStateOf, txDisplayTitle } from '../utils/pinned'
@@ -369,6 +370,8 @@ function TransactionList({
         <Text style={styles.title}>Транзакції</Text>
         <BankSyncIndicator />
       </View>
+
+      <PossibleDuplicates hidden={hidden} />
 
       {search && <TxSearchBar search={search} cards={cards} />}
 

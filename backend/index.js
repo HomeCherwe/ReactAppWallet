@@ -8,7 +8,7 @@ import https from 'https'
 import cors from 'cors'
 import crypto from 'crypto'
 import { createClient } from '@supabase/supabase-js'
-import { registerBankConnections, syncAllBankConnections, psuHeadersFrom } from './bankConnections.js'
+import { registerBankConnections, syncAllBankConnections, psuHeadersFrom, pinSyncCategory } from './bankConnections.js'
 dotenv.config();
 
 const app = express();
@@ -2051,6 +2051,11 @@ app.post('/api/preferences/apis', getUserFromToken, async (req, res) => {
       if (error) throw error
     }
 
+    // Binance connected for the first time: its "Binance Sync" rows wait in "Закріплені" too
+    if (binance_api?.api_key && !currentBinance.api_key) {
+      await pinSyncCategory(supabase, req.user_id, 'Binance Sync')
+    }
+
     res.json({ success: true })
   } catch (error) {
     console.error('POST /api/preferences/apis error:', error)
@@ -2314,6 +2319,42 @@ function calculateNextExecution(frequency, day_of_week, day_of_month, last_execu
   return nextDate.toISOString()
 }
 
+/**
+ * The card's bank already brought this payment (a bank transaction of the same amount within 3 days
+ * of the due date, not tied to a subscription yet): the subscription takes it instead of adding a
+ * second one. A bank row still in its "<Bank> Sync" category gets the subscription's category.
+ * (The other order — subscription first, bank later — is handled by the bank sync.)
+ */
+async function linkBankTwinToSubscription(sub, amount) {
+  if (!sub.card_id) return false
+  const at = new Date(sub.next_execution_at).getTime()
+  const pad = 3 * 86400000
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('id, category')
+    .eq('card_id', sub.card_id)
+    .not('transaction_id_card', 'is', null)
+    .is('subscription_id', null)
+    .gte('amount', amount - 0.005)
+    .lte('amount', amount + 0.005)
+    .gte('created_at', new Date(at - pad).toISOString())
+    .lte('created_at', new Date(at + pad).toISOString())
+    .order('created_at', { ascending: true })
+    .limit(1)
+  const twin = !error && data?.[0]
+  if (!twin) return false
+  const { error: linkError } = await supabase
+    .from('transactions')
+    .update({
+      subscription_id: sub.id,
+      ...(/ Sync$/.test(twin.category || '') && { category: sub.category || 'Підписки' }),
+    })
+    .eq('id', twin.id)
+  if (linkError) throw linkError
+  console.log(`[Subscriptions] Sub ${sub.id}: linked the bank's transaction ${twin.id} instead of adding one`)
+  return true
+}
+
 // Функція для обробки підписок всіх користувачів (використовується в таймері)
 async function processAllUsersSubscriptions() {
   try {
@@ -2402,24 +2443,26 @@ async function processAllUsersSubscriptions() {
         // Використовуємо category з підписки, або 'Підписки' за замовчуванням
         const transactionCategory = sub.category || 'Підписки'
 
-        const { data: transaction, error: txError } = await supabase
-          .from('transactions')
-          .insert([{
-            user_id: sub.user_id,
-            amount,
-            card_id: sub.card_id,
-            card: cardDisplayName,
-            category: transactionCategory,
-            note: transactionNote,
-            created_at: sub.next_execution_at // Use scheduled date
-          }])
-          .select()
-          .single()
+        // The bank already brought it: take that one instead of adding a second
+        if (!(await linkBankTwinToSubscription(sub, amount))) {
+          const { error: txError } = await supabase
+            .from('transactions')
+            .insert([{
+              user_id: sub.user_id,
+              amount,
+              card_id: sub.card_id,
+              card: cardDisplayName,
+              category: transactionCategory,
+              note: transactionNote,
+              subscription_id: sub.id, // the duplicate check above looks for it
+              created_at: sub.next_execution_at // Use scheduled date
+            }])
 
-        if (txError) {
-          errors.push({ subscription: sub.id, user: sub.user_id, error: txError.message })
-          console.error(`[Auto Subscriptions] Error creating transaction for subscription ${sub.id}:`, txError)
-          continue
+          if (txError) {
+            errors.push({ subscription: sub.id, user: sub.user_id, error: txError.message })
+            console.error(`[Auto Subscriptions] Error creating transaction for subscription ${sub.id}:`, txError)
+            continue
+          }
         }
 
         // Calculate next execution
@@ -2609,24 +2652,25 @@ app.post('/api/subscriptions/process', getUserFromToken, async (req, res) => {
         // Використовуємо category з підписки, або 'Підписки' за замовчуванням
         const transactionCategory = sub.category || 'Підписки'
 
-        const { data: transaction, error: txError } = await supabase
-          .from('transactions')
-          .insert([{
-            user_id: req.user_id,
-            amount,
-            card_id: sub.card_id,
-            card: cardDisplayName,
-            category: transactionCategory,
-            note: transactionNote,
-            subscription_id: sub.id, // Link to subscription
-            created_at: sub.next_execution_at // Use scheduled date
-          }])
-          .select()
-          .single()
+        // The bank already brought it: take that one instead of adding a second
+        if (!(await linkBankTwinToSubscription(sub, amount))) {
+          const { error: txError } = await supabase
+            .from('transactions')
+            .insert([{
+              user_id: req.user_id,
+              amount,
+              card_id: sub.card_id,
+              card: cardDisplayName,
+              category: transactionCategory,
+              note: transactionNote,
+              subscription_id: sub.id, // Link to subscription
+              created_at: sub.next_execution_at // Use scheduled date
+            }])
 
-        if (txError) {
-          errors.push({ subscription: sub.id, error: txError.message })
-          continue
+          if (txError) {
+            errors.push({ subscription: sub.id, error: txError.message })
+            continue
+          }
         }
 
         // Calculate next execution

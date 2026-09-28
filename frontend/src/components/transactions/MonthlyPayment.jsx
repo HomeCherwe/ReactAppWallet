@@ -15,6 +15,8 @@ import { PERIODS, periodRange } from '../../utils/periods'
 import { listBankConnections } from '../../api/bankConnections'
 import { useBankSyncStore } from '../../store/useBankSyncStore'
 import BankSyncIndicator from '../BankSyncIndicator'
+import FilterChip from '../FilterChip'
+import PossibleDuplicates from './PossibleDuplicates'
 import { txBus } from '../../utils/txBus'
 import { listCards } from '../../api/cards'
 import { useSettingsStore } from '../../store/useSettingsStore'
@@ -26,33 +28,6 @@ const TYPE_FILTERS = [
   { id: 'expense', label: 'Витрати' },
   { id: 'income', label: 'Доходи' },
 ]
-
-/** A filter chip (same look as the iPhone app): its name, or the picked value when set; a native select underneath */
-function FilterSelect({ label, value, options, onChange, active }) {
-  const current = options.find(o => o.value === value)
-  return (
-    <label
-      className={`relative inline-flex items-center gap-1.5 h-8 pl-3 pr-2.5 rounded-full border text-xs font-semibold cursor-pointer transition max-w-[240px] ${
-        active ? 'bg-brand/15 border-brand/45 text-brand-light' : 'bg-white/[0.06] border-white/10 text-white/80 hover:bg-white/10'
-      }`}
-    >
-      <span className="truncate">{active ? current?.label ?? label : label}</span>
-      <ChevronDown size={13} className={`shrink-0 ${active ? 'text-brand-light' : 'text-white/40'}`} />
-      <select
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        aria-label={label}
-        className="absolute inset-0 w-full opacity-0 cursor-pointer [&>option]:bg-[#1c1c1f] [&>option]:text-white"
-      >
-        {options.map(o => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  )
-}
 
 export default function MonthlyPayment() {
   // Використовуємо новий store
@@ -1248,6 +1223,8 @@ export default function MonthlyPayment() {
           </div>
         </div>
 
+        <PossibleDuplicates />
+
         <form onSubmit={(e) => e.preventDefault()}>
           <div className="relative">
             <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
@@ -1273,30 +1250,28 @@ export default function MonthlyPayment() {
 
         {/* Filters under the search, like the iPhone app */}
         <div className="mt-2.5 flex flex-wrap items-center gap-2">
-          <FilterSelect
+          <FilterChip
             label="Період"
             value={period}
+            resetValue="all"
             onChange={setPeriod}
-            active={period !== 'all'}
             options={PERIODS.map(p => ({ value: p.id, label: p.label }))}
           />
-          <FilterSelect
+          <FilterChip
             label="Картка"
             value={cardFilter}
             onChange={setCardFilter}
-            active={!!cardFilter}
             options={[
               { value: '', label: 'Усі картки' },
               ...[...cardList]
                 .sort((a, b) => String(a.name).localeCompare(String(b.name), 'uk'))
-                .map(c => ({ value: c.id, label: c.currency ? `${c.name} · ${c.currency}` : c.name })),
+                .map(c => ({ value: c.id, label: c.name, hint: c.currency })),
             ]}
           />
-          <FilterSelect
+          <FilterChip
             label="Категорія"
             value={selectedCategory}
             onChange={v => handleFilterChange(transactionType, v)}
-            active={!!selectedCategory}
             options={[{ value: '', label: 'Усі категорії' }, ...categories.map(c => ({ value: c, label: c }))]}
           />
           <div className="inline-flex p-0.5 rounded-full bg-white/[0.06] border border-white/10">

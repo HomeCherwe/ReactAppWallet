@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import BaseModal from './BaseModal'
 import ConfirmModal from './ConfirmModal'
 import { txBus } from '../utils/txBus'
+import { useSettingsStore } from '../store/useSettingsStore'
 import { formatMoney } from '../utils/cardTheme'
 import {
   connectBankWithToken,
@@ -819,6 +820,8 @@ export default function BankConnections({ onChanged, reloadKey = 0, cards = [], 
   // Just connected: first sync right away (pulls the history), then refresh the lists
   const afterConnected = useCallback((name) => {
     toast.success(`${name} підключено! Завантажуємо транзакції…`)
+    // The backend pinned "<Bank> Sync" (Налаштування → Закріплені категорії)
+    useSettingsStore.getState().refreshFromDatabase()
     load().then(() =>
       syncBankConnections()
         .then(({ added }) => toast.success(added > 0 ? `Додано ${added} транзакцій` : 'Нових транзакцій немає'))

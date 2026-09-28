@@ -1,4 +1,4 @@
-import { apiFetch } from '../lib/apiFetch'
+import { apiFetch, getApiUrl } from '../lib/apiFetch'
 import { supabase } from '../lib/supabase'
 import { getCachedSumByCard, invalidateSumByCardCache } from '../utils/dataCache'
 import { isSyncCategory } from '../utils/cardExclusion'
@@ -140,6 +140,58 @@ export async function listFeedTransactions({
   const { data, error } = await q.order('created_at', { ascending: false }).range(from, to)
   if (error) throw error
   return (data || []) as Transaction[]
+}
+
+/** A transaction GPT found on a receipt photo or a bank screenshot (/api/scan-transactions) */
+export interface ScannedTransaction {
+  /** DD/MM/YYYY */
+  date: string
+  merchant: string
+  /** Always positive; `type` gives the sign */
+  amount: number
+  currency: string
+  category: string
+  type: 'expense' | 'income'
+  note: string
+}
+
+/**
+ * Sends receipt photos / bank screenshots to the backend, which asks GPT for every transaction on
+ * them (same as the web's scan). Multipart upload, so not through apiFetch (JSON only).
+ */
+export async function scanTransactions(
+  images: { uri: string; mimeType?: string | null; fileName?: string | null }[]
+): Promise<ScannedTransaction[]> {
+  const fd = new FormData()
+  images.forEach((img, i) => {
+    const type = img.mimeType || 'image/jpeg'
+    const name = img.fileName || `scan_${i}.${type.includes('png') ? 'png' : 'jpg'}`
+    fd.append('images', { uri: img.uri, name, type } as any)
+  })
+  const { data: { session } } = await supabase.auth.getSession()
+  // Reading several images takes GPT a while
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 120000)
+  try {
+    const res = await fetch(`${getApiUrl()}/api/scan-transactions`, {
+      method: 'POST',
+      body: fd,
+      headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
+      signal: controller.signal,
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({} as any))
+      if (res.status === 413) throw new Error('Зображення завеликі — оберіть менше або зробіть скріншот')
+      throw new Error(err.error || `Помилка сканування (${res.status})`)
+    }
+    const data = await res.json()
+    return (data.transactions || []) as ScannedTransaction[]
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw new Error('Розпізнавання триває задовго — спробуйте менше зображень')
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 export interface SearchParams {

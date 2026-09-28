@@ -822,6 +822,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         onAddCard={() => setAddCardVisible(true)}
         onTransfer={() => setTransferVisible(true)}
         onAddGoal={() => setAddCardVisible(true)}
+        onScan={() => setScanVisible(true)}
         onLongPress={() => setQuickActionPopupVisible(true)}
         onLongPressFallback={() => setQuickActionPopupVisible(true)}
       />
@@ -834,6 +835,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         onAddCard={() => setAddCardVisible(true)}
         onTransfer={() => setTransferVisible(true)}
         onAddGoal={() => setAddCardVisible(true)}
+        onScan={() => setScanVisible(true)}
       />
 
       <CardSettingsModal
