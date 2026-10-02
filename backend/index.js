@@ -47,7 +47,10 @@ const corsOptions = {
 app.use(cors(corsOptions)); // цього достатньо!
 
 // ✅ Allow JSON bodies
-app.use(express.json());
+// Scanning gets photos as JPEG data URLs in JSON (from the iPhone app): a bigger limit just there
+const jsonBody = express.json()
+const jsonScanBody = express.json({ limit: '6mb' })
+app.use((req, res, next) => (req.path === '/api/scan-transactions' ? jsonScanBody : jsonBody)(req, res, next));
 
 
 // server-side Supabase client (use service role key when available)
@@ -2895,17 +2898,31 @@ app.post('/api/parse-receipt', upload.single('image'), async (req, res) => {
 })
 
 // Scan transactions from receipt/bank statement/screenshot images
+// What OpenAI can read; iPhone photos (HEIC) are not among them
+const SCAN_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+const SCAN_DATA_URL = /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/
+
 app.post('/api/scan-transactions', getUserFromToken, upload.array('images', 10), async (req, res) => {
   try {
-    if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'At least one image is required' })
-    if (!process.env.OPENAI_API_KEY) return res.status(500).json({ error: 'OPENAI_API_KEY missing' })
+    // Files (web) or JPEG data URLs in JSON (the iPhone app converts its HEIC photos on the phone)
+    const files = req.files || []
+    const dataUrls = Array.isArray(req.body?.images)
+      ? req.body.images.filter(u => typeof u === 'string' && SCAN_DATA_URL.test(u)).slice(0, 10)
+      : []
+    if (files.length === 0 && dataUrls.length === 0) return res.status(400).json({ error: 'Додайте хоча б одне зображення' })
+    const unreadable = files.find(f => !SCAN_IMAGE_TYPES.includes(String(f.mimetype).toLowerCase()))
+    if (unreadable) {
+      return res.status(400).json({ error: `Формат ${unreadable.mimetype || 'файлу'} не підтримується — потрібен JPEG або PNG` })
+    }
+    if (!process.env.OPENAI_API_KEY) return res.status(500).json({ error: 'Сканування не налаштоване на сервері (OPENAI_API_KEY)' })
 
-    // Convert all images to base64 data URLs
-    const imageContents = req.files.map(file => {
-      const b64 = file.buffer.toString('base64')
-      const dataUrl = `data:${file.mimetype || 'image/jpeg'};base64,${b64}`
-      return { type: 'image_url', image_url: { url: dataUrl } }
-    })
+    const imageContents = [
+      ...files.map(file => ({
+        type: 'image_url',
+        image_url: { url: `data:${file.mimetype};base64,${file.buffer.toString('base64')}` },
+      })),
+      ...dataUrls.map(url => ({ type: 'image_url', image_url: { url } })),
+    ]
 
     const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
 
@@ -2958,7 +2975,7 @@ Return ONLY the JSON object { "transactions": [...] }. Nothing else.`
     const raw = await r.text()
     if (!r.ok) {
       console.error('[scan-transactions] OpenAI error:', raw)
-      return res.status(500).json({ error: 'openai_failed', details: raw })
+      return res.status(502).json({ error: 'Не вдалося розпізнати зображення — спробуйте інше фото', details: raw.slice(0, 500) })
     }
 
     let transactions = []
@@ -2985,7 +3002,7 @@ Return ONLY the JSON object { "transactions": [...] }. Nothing else.`
       }
     } catch (e) {
       console.error('[scan-transactions] Parse error:', e, raw)
-      return res.status(500).json({ error: 'parse_failed' })
+      return res.status(502).json({ error: 'Не вдалося прочитати відповідь розпізнавання — спробуйте ще раз' })
     }
 
     // Normalize each transaction
@@ -2999,7 +3016,7 @@ Return ONLY the JSON object { "transactions": [...] }. Nothing else.`
       note: tx.note || '',
     }))
 
-    console.log(`[scan-transactions] Extracted ${transactions.length} transactions from ${req.files.length} images`)
+    console.log(`[scan-transactions] Extracted ${transactions.length} transactions from ${imageContents.length} images`)
     return res.json({ transactions })
   } catch (e) {
     console.error('[scan-transactions] Error:', e)
