@@ -29,12 +29,15 @@ interface ScanReceiptModalProps {
   onSaved: () => void
 }
 
-type Picked = { uri: string; mimeType?: string | null; fileName?: string | null; fileSize?: number }
+// uri for the preview; base64 is always JPEG (the picker re-encodes HEIC/PNG), which GPT can read
+type Picked = { uri: string; base64: string }
 type Row = ScannedTransaction & { key: string; selected: boolean; amountText: string }
 
 const MAX_IMAGES = 5
-// The backend (Vercel) takes up to ~4.5 MB per request
-const MAX_TOTAL_BYTES = 4 * 1024 * 1024
+// Each image is its own request; the backend (Vercel) takes up to ~4.5 MB per request
+const MAX_IMAGE_CHARS = 4_000_000
+// Images read at the same time
+const SCAN_PARALLEL = 2
 const BASE_CATEGORIES = ['Продукти', 'Транспорт', 'Шопінг', "Здоров'я", 'Розваги', 'Комунальні', 'Кафе', 'Підписки', 'Інше']
 
 // "DD/MM/YYYY" → midday that day (so no time zone moves it to another date)
@@ -57,6 +60,7 @@ export default function ScanReceiptModal({ visible, cards, onClose, onSaved }: S
   const [expanded, setExpanded] = useState<string | null>(null)
   const [categories, setCategories] = useState<string[]>(BASE_CATEGORIES)
   const [saving, setSaving] = useState(false)
+  const [progress, setProgress] = useState({ done: 0, total: 0 })
 
   // Fresh start every time it opens
   useEffect(() => {
@@ -83,38 +87,62 @@ export default function ScanReceiptModal({ visible, cards, onClose, onSaved }: S
           Alert.alert('Немає доступу до камери', 'Дозвольте MyWallet доступ до камери в Параметрах iPhone.')
           return
         }
-        result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.5 })
+        result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.4, base64: true })
       } else {
         result = await ImagePicker.launchImageLibraryAsync({
           mediaTypes: ['images'],
-          quality: 0.6,
+          quality: 0.5,
+          base64: true,
           allowsMultipleSelection: true,
           selectionLimit: MAX_IMAGES,
         })
       }
       if (result.canceled || !result.assets?.length) return
+      const usable = result.assets.filter(a => a.base64 && a.base64.length <= MAX_IMAGE_CHARS)
+      if (usable.length < result.assets.length) {
+        Toast.show({
+          type: 'info',
+          text1: 'Частину зображень не додано',
+          text2: 'Вони завеликі — спробуйте скріншот замість фото',
+        })
+      }
+      if (usable.length === 0) return
       triggerLightHaptic()
-      setImages(prev =>
-        [
-          ...prev,
-          ...result.assets.map(a => ({ uri: a.uri, mimeType: a.mimeType, fileName: a.fileName, fileSize: a.fileSize })),
-        ].slice(0, MAX_IMAGES)
-      )
+      setImages(prev => [...prev, ...usable.map(a => ({ uri: a.uri, base64: a.base64 as string }))].slice(0, MAX_IMAGES))
     } catch (e: any) {
       Alert.alert('Помилка', e?.message || 'Не вдалося відкрити зображення')
     }
   }
 
+  // One request per image (each stays under the upload limit), a couple at a time
+  const scanAll = async (): Promise<ScannedTransaction[]> => {
+    const found: ScannedTransaction[] = []
+    let failed = 0
+    let lastError = ''
+    setProgress({ done: 0, total: images.length })
+    for (let i = 0; i < images.length; i += SCAN_PARALLEL) {
+      const batch = await Promise.allSettled(images.slice(i, i + SCAN_PARALLEL).map(img => scanTransactions(img.base64)))
+      for (const r of batch) {
+        if (r.status === 'fulfilled') found.push(...r.value)
+        else {
+          failed++
+          lastError = r.reason?.message || String(r.reason)
+        }
+      }
+      setProgress({ done: Math.min(i + SCAN_PARALLEL, images.length), total: images.length })
+    }
+    if (failed === images.length) throw new Error(lastError)
+    if (failed > 0) {
+      Toast.show({ type: 'info', text1: `Не вдалося прочитати ${failed} з ${images.length} зображень`, text2: lastError })
+    }
+    return found
+  }
+
   const scan = async () => {
     if (images.length === 0) return
-    const total = images.reduce((s, i) => s + (i.fileSize || 0), 0)
-    if (total > MAX_TOTAL_BYTES) {
-      Alert.alert('Завеликі зображення', 'Приберіть одне-два фото або надішліть скріншот замість фото.')
-      return
-    }
     setStep('scanning')
     try {
-      const found = await scanTransactions(images)
+      const found = await scanAll()
       if (found.length === 0) {
         triggerErrorHaptic()
         Toast.show({ type: 'info', text1: 'Транзакцій не знайдено', text2: 'Спробуйте чіткіше фото або інший скріншот' })
@@ -247,7 +275,10 @@ export default function ScanReceiptModal({ visible, cards, onClose, onSaved }: S
         <View style={styles.scanning}>
           <ActivityIndicator size="large" color={Colors.orange} />
           <Text style={styles.scanningText}>Шукаємо транзакції…</Text>
-          <Text style={styles.scanningSub}>Зазвичай це займає 10–30 секунд</Text>
+          <Text style={styles.scanningSub}>
+            {progress.total > 1 ? `Зображення ${Math.min(progress.done + 1, progress.total)} з ${progress.total} · ` : ''}
+            зазвичай 10–30 секунд
+          </Text>
         </View>
       )}
 
