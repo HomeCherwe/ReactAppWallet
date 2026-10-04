@@ -10,6 +10,7 @@ import SheetModal from './SheetModal'
 import { GlassPressable } from './LiquidGlass'
 import TxRow, { fmtMoney } from './TxRow'
 import TxSheet from './TxSheet'
+import { useExcludedCategories } from '../utils/statsCategories'
 
 type PeriodId = 'week' | 'month' | '3m' | 'year' | 'all'
 
@@ -171,6 +172,7 @@ export default function CardTransactionsSheet({ card, balance, hidden, onClose, 
       .finally(() => setLoadingMore(false))
   }, [query, loading, loadingMore, hasMore, txs.length])
 
+  const excludedCats = useExcludedCategories()
   const sections = useMemo(() => {
     const out: { key: string; title: string; total: number; data: Transaction[] }[] = []
     for (const t of txs) {
@@ -182,10 +184,11 @@ export default function CardTransactionsSheet({ card, balance, hidden, onClose, 
         out.push(s)
       }
       s.data.push(t)
-      if (includeAll || !t.exclude_from_stats) s.total += Number(includeAll ? t.amount : t.amount_stat ?? t.amount)
+      const counted = !t.exclude_from_stats && !(t.category && excludedCats.includes(t.category))
+      if (includeAll || counted) s.total += Number(includeAll ? t.amount : t.amount_stat ?? t.amount)
     }
     return out
-  }, [txs, includeAll])
+  }, [txs, includeAll, excludedCats])
 
   if (!c) return null
   const cur = c.currency

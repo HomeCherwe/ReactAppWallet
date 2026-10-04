@@ -12,6 +12,7 @@ import SplitTxModal from './SplitTxModal'
 import { apiFetch, getApiUrl } from '../../utils.jsx'
 import { listTransactions, searchTransactions, updateTransaction, deleteTransaction, archiveTransaction, deleteTransactions, getTransactionCategories } from '../../api/transactions'
 import { PERIODS, periodRange } from '../../utils/periods'
+import { isCategoryExcluded } from '../../utils/statsCategories'
 import { listBankConnections } from '../../api/bankConnections'
 import { useBankSyncStore } from '../../store/useBankSyncStore'
 import BankSyncIndicator from '../BankSyncIndicator'
@@ -167,6 +168,8 @@ export default function MonthlyPayment() {
 
   const isExcludedFromStats = (tx) => {
     return tx?.exclude_from_stats === true || tx?.exclude_from_stats === 'true' || tx?.exclude_from_stats === 1 ||
+      // Category listed in Налаштування → «Категорії поза статистикою»
+      isCategoryExcluded(tx?.category) ||
       // Card switched off in its settings (flag computed by the backend)
       !!tx?.card_excluded_from_stats
   }

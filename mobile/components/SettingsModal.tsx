@@ -11,6 +11,9 @@ import { supabase } from '../lib/supabase'
 import { getApiUrl } from '../lib/apiFetch'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { getApiKey, generateApiKey } from '../api/preferences'
+import { getTransactionCategories } from '../api/transactions'
+import { EXCLUDED_CATEGORIES_PATH, useExcludedCategories } from '../utils/statsCategories'
+import { isSyncCategory } from '../utils/cardExclusion'
 import Toast from 'react-native-toast-message'
 import GlassButton from './GlassButton'
 import { GlassPressable } from './LiquidGlass'
@@ -42,6 +45,10 @@ export default function SettingsModal({
   const { getNestedSetting, updateNestedSetting } = useSettingsStore()
   const pinnedCategories = getNestedSetting<string[]>('dashboard.pinnedCategories', [])
   const [newCategory, setNewCategory] = useState('')
+  // Categories left out of statistics (same list as the web)
+  const excludedCategories = useExcludedCategories()
+  const [excludedInput, setExcludedInput] = useState('')
+  const [allCategories, setAllCategories] = useState<string[]>([])
 
   const lastSavedName = useRef(userName || '')
 
@@ -54,6 +61,9 @@ export default function SettingsModal({
   }, [visible, userName])
 
   const loadData = async () => {
+    getTransactionCategories()
+      .then(list => setAllCategories([...new Set(list.filter(c => c && !isSyncCategory(c)))].sort((a, b) => a.localeCompare(b, 'uk'))))
+      .catch(() => {})
     setLoadingApis(true)
     try {
       setApiKey(await getApiKey())
@@ -131,6 +141,14 @@ export default function SettingsModal({
     updateNestedSetting('dashboard.pinnedCategories', [...current, cat])
     setNewCategory('')
     Toast.show({ type: 'success', text1: 'Категорію закріплено' })
+  }
+
+  const addExcludedCategory = (name: string) => {
+    const cat = name.trim()
+    if (!cat || excludedCategories.includes(cat)) return
+    updateNestedSetting(EXCLUDED_CATEGORIES_PATH, [...excludedCategories, cat])
+    setExcludedInput('')
+    Toast.show({ type: 'success', text1: `«${cat}» більше не рахується в статистиці` })
   }
 
   const handleRemoveCategory = (cat: string) => {
@@ -250,6 +268,49 @@ export default function SettingsModal({
                   </View>
 
                   <View style={styles.rowBorder} />
+
+                  {/* Categories left out of statistics */}
+                  <View style={styles.settingRowBlock}>
+                    <Text style={styles.settingLabelTitle}>Категорії поза статистикою</Text>
+                    <Text style={styles.settingDesc}>
+                      Не входять у доходи, витрати й графіки (наприклад «МАЄ ВЕРНУТИ»). На баланс карток впливають, як і раніше. Те саме на сайті.
+                    </Text>
+                    <View style={styles.categoriesWrap}>
+                      {excludedCategories.map(cat => (
+                        <GlassPressable
+                          key={cat}
+                          style={[styles.catChip, styles.catChipExcluded]}
+                          onPress={() => updateNestedSetting(EXCLUDED_CATEGORIES_PATH, excludedCategories.filter(c => c !== cat))}
+                        >
+                          <Text style={[styles.catChipText, styles.catChipTextExcluded]}>{cat}</Text>
+                          <Text style={styles.catChipRemove}>✕</Text>
+                        </GlassPressable>
+                      ))}
+                    </View>
+                    <View style={styles.addCatRow}>
+                      <TextInput
+                        style={styles.addCatInput}
+                        value={excludedInput}
+                        onChangeText={setExcludedInput}
+                        placeholder="Категорія..."
+                        placeholderTextColor={Colors.textMuted}
+                        onSubmitEditing={() => addExcludedCategory(excludedInput)}
+                        returnKeyType="done"
+                      />
+                      <GlassPressable style={styles.addCatBtn} onPress={() => addExcludedCategory(excludedInput)}>
+                        <Text style={styles.addCatBtnText}>+</Text>
+                      </GlassPressable>
+                    </View>
+                    {allCategories.filter(c => !excludedCategories.includes(c) && (!excludedInput.trim() || c.toLowerCase().includes(excludedInput.trim().toLowerCase()))).slice(0, 12).length > 0 && (
+                      <View style={styles.suggestWrap}>
+                        {allCategories.filter(c => !excludedCategories.includes(c) && (!excludedInput.trim() || c.toLowerCase().includes(excludedInput.trim().toLowerCase()))).slice(0, 12).map(c => (
+                          <TouchableOpacity key={c} style={styles.suggestChip} onPress={() => addExcludedCategory(c)}>
+                            <Text style={styles.suggestText}>+ {c}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+                  </View>
 
                 </View>
               </View>
@@ -381,6 +442,11 @@ const styles = StyleSheet.create({
   categoriesWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
   catChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,107,0,0.15)', borderRadius: Radius.pill, paddingHorizontal: 12, paddingVertical: 6, gap: 6, borderWidth: 1, borderColor: 'rgba(255,107,0,0.3)' },
   catChipText: { color: Colors.orange, fontSize: 13, fontWeight: '600' },
+  catChipExcluded: { backgroundColor: 'rgba(175,82,222,0.15)', borderColor: 'rgba(175,82,222,0.35)' },
+  catChipTextExcluded: { color: '#D9A8F2' },
+  suggestWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
+  suggestChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: Radius.pill, backgroundColor: 'rgba(255,255,255,0.06)' },
+  suggestText: { color: Colors.white60, fontSize: 12, fontWeight: '600' },
   catChipRemove: { color: Colors.textMuted, fontSize: 12 },
   addCatRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
   addCatInput: { flex: 1, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: Radius.md, paddingHorizontal: 14, paddingVertical: 10, color: Colors.white, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
