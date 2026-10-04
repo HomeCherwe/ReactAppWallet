@@ -1,16 +1,16 @@
 import React, { useEffect, useState, useRef } from 'react'
 import {
-  Modal, View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Platform, TextInput, ActivityIndicator, Switch, KeyboardAvoidingView
+  View, Text, StyleSheet, TouchableOpacity, ScrollView,
+  Platform, TextInput, ActivityIndicator, Alert, Share
 } from 'react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import { BlurView } from 'expo-blur'
 import { Colors, Radius, Typography } from '../constants/theme'
 import { SUPPORTED_CURRENCIES } from '../utils/settings'
 import { supabase } from '../lib/supabase'
-import { apiFetch } from '../lib/apiFetch'
+import { getApiUrl } from '../lib/apiFetch'
 import { useSettingsStore } from '../store/useSettingsStore'
-import { getUserAPIs, saveUserAPI, getApiKey, generateApiKey } from '../api/preferences'
+import { getApiKey, generateApiKey } from '../api/preferences'
 import Toast from 'react-native-toast-message'
 import GlassButton from './GlassButton'
 import { GlassPressable } from './LiquidGlass'
@@ -35,22 +35,15 @@ export default function SettingsModal({
   const [saving, setSaving] = useState(false)
   const [loadingApis, setLoadingApis] = useState(false)
 
-  // apis
-  const [binanceApiKey, setBinanceApiKey] = useState('')
-  const [binanceApiSecret, setBinanceApiSecret] = useState('')
-  const [monobankToken, setMonobankToken] = useState('')
-  const [monobankBlack, setMonobankBlack] = useState('')
-  const [monobankWhite, setMonobankWhite] = useState('')
-  
+  // Automation key (API Key): banks are connected on the cards page, not with keys here
   const [apiKey, setApiKey] = useState<string | null>(null)
   const [apiKeyVisible, setApiKeyVisible] = useState(false)
-  
+
   const { getNestedSetting, updateNestedSetting } = useSettingsStore()
   const pinnedCategories = getNestedSetting<string[]>('dashboard.pinnedCategories', [])
   const [newCategory, setNewCategory] = useState('')
 
   const lastSavedName = useRef(userName || '')
-  const lastSavedApis = useRef({ binanceApiKey: '', binanceApiSecret: '', monobankToken: '', monobankBlack: '', monobankWhite: '' })
 
   useEffect(() => {
     if (visible) {
@@ -63,23 +56,7 @@ export default function SettingsModal({
   const loadData = async () => {
     setLoadingApis(true)
     try {
-      const apis = await getUserAPIs()
-      setBinanceApiKey(apis.binance_api_key || '')
-      setBinanceApiSecret(apis.binance_api_secret || '')
-      setMonobankToken(apis.monobank_token || '')
-      setMonobankBlack(apis.monobank_black_card_id || '')
-      setMonobankWhite(apis.monobank_white_card_id || '')
-      
-      lastSavedApis.current = {
-        binanceApiKey: apis.binance_api_key || '',
-        binanceApiSecret: apis.binance_api_secret || '',
-        monobankToken: apis.monobank_token || '',
-        monobankBlack: apis.monobank_black_card_id || '',
-        monobankWhite: apis.monobank_white_card_id || ''
-      }
-
-      const key = await getApiKey()
-      setApiKey(key)
+      setApiKey(await getApiKey())
     } catch {} finally {
       setLoadingApis(false)
     }
@@ -92,17 +69,6 @@ export default function SettingsModal({
     }, 1000)
     return () => clearTimeout(t)
   }, [displayName, visible])
-
-  useEffect(() => {
-    if (!visible) return
-    const current = { binanceApiKey, binanceApiSecret, monobankToken, monobankBlack, monobankWhite }
-    if (JSON.stringify(current) === JSON.stringify(lastSavedApis.current)) return
-    
-    const t = setTimeout(() => {
-      handleSaveApis(true)
-    }, 1000)
-    return () => clearTimeout(t)
-  }, [binanceApiKey, binanceApiSecret, monobankToken, monobankBlack, monobankWhite, visible])
 
   const handleSaveName = async (silent = false) => {
     if (!displayName.trim()) return
@@ -122,37 +88,30 @@ export default function SettingsModal({
     }
   }
 
-  const handleSaveApis = async (silent = false) => {
-    setSaving(true)
-    try {
-      lastSavedApis.current = { binanceApiKey, binanceApiSecret, monobankToken, monobankBlack, monobankWhite }
-      await Promise.all([
-        saveUserAPI('binance_api_key', binanceApiKey),
-        saveUserAPI('binance_api_secret', binanceApiSecret),
-        saveUserAPI('monobank_token', monobankToken),
-        saveUserAPI('monobank_black_card_id', monobankBlack),
-        saveUserAPI('monobank_white_card_id', monobankWhite),
-      ])
-      if (!silent) Toast.show({ type: 'success', text1: 'API ключі збережено!' })
-    } catch {
-      if (!silent) Toast.show({ type: 'error', text1: 'Не вдалося зберегти ключі' })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleGenerateApiKey = async () => {
+  const createApiKey = async () => {
     try {
       setLoadingApis(true)
       const key = await generateApiKey()
       setApiKey(key)
-      Toast.show({ type: 'success', text1: 'API ключ згенеровано!' })
+      setApiKeyVisible(true)
+      Toast.show({ type: 'success', text1: 'API Key створено' })
     } catch {
-      Toast.show({ type: 'error', text1: 'Не вдалося згенерувати' })
+      Toast.show({ type: 'error', text1: 'Не вдалося створити ключ' })
     } finally {
       setLoadingApis(false)
     }
   }
+
+  const handleGenerateApiKey = () => {
+    if (!apiKey) return createApiKey()
+    Alert.alert('Створити новий ключ?', 'Старий перестане працювати — оновіть його в автоматизаціях.', [
+      { text: 'Скасувати', style: 'cancel' },
+      { text: 'Створити', style: 'destructive', onPress: createApiKey },
+    ])
+  }
+
+  // No clipboard module in this build: the share sheet has «Скопіювати»
+  const shareText = (text: string) => Share.share({ message: text }).catch(() => {})
 
   const handleSignOut = async () => {
     try {
@@ -179,30 +138,6 @@ export default function SettingsModal({
     updateNestedSetting('dashboard.pinnedCategories', current.filter(c => c !== cat))
   }
 
-  const handleSyncBinance = async () => {
-    try {
-      Toast.show({ type: 'info', text1: 'Синхронізація Binance...' })
-      const result = await apiFetch('/api/syncBinance', { method: 'POST' })
-      if ((result as any).success) {
-        Toast.show({ type: 'success', text1: 'Binance синхронізовано!' })
-      } else {
-        Toast.show({ type: 'info', text1: 'Нових транзакцій немає' })
-      }
-    } catch {
-      Toast.show({ type: 'error', text1: 'Не вдалося синхронізувати Binance' })
-    }
-  }
-
-  const handleSyncMono = async () => {
-    try {
-      Toast.show({ type: 'info', text1: 'Синхронізація Monobank...' })
-      await apiFetch('/api/syncMono', { method: 'POST' })
-      Toast.show({ type: 'success', text1: 'Monobank синхронізовано!' })
-    } catch {
-      Toast.show({ type: 'error', text1: 'Не вдалося синхронізувати Monobank' })
-    }
-  }
-
   return (
     <SheetModal visible={visible} onClose={onClose} sheetStyle={styles.sheet}>
 
@@ -212,7 +147,7 @@ export default function SettingsModal({
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-              
+
               {/* PROFILE SECTION */}
               <View style={styles.section}>
                 <Text style={styles.sectionLabel}>Профіль</Text>
@@ -280,66 +215,18 @@ export default function SettingsModal({
                 </View>
               </View>
 
-              {/* BINANCE API */}
-              <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Binance API</Text>
-                <View style={styles.cardGroup}>
-                  <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFill} />
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>API Key</Text>
-                    <TextInput style={styles.inputField} value={binanceApiKey} onChangeText={setBinanceApiKey} secureTextEntry placeholder="Binance API Key" placeholderTextColor={Colors.textMuted} />
-                  </View>
-                  <View style={styles.rowBorder} />
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>API Secret</Text>
-                    <TextInput style={styles.inputField} value={binanceApiSecret} onChangeText={setBinanceApiSecret} secureTextEntry placeholder="Binance API Secret" placeholderTextColor={Colors.textMuted} />
-                  </View>
-                  <View style={styles.rowBorder} />
-                  <View style={styles.flexRow}>
-                    <GlassPressable style={[styles.actionRowBtn, { flex: 1 }]} onPress={handleSyncBinance}>
-                      <Text style={[styles.actionRowBtnText, { color: Colors.green }]}>Синхронізувати з Binance</Text>
-                    </GlassPressable>
-                  </View>
-                </View>
-              </View>
-
-              {/* MONOBANK API */}
-              <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Monobank API</Text>
-                <View style={styles.cardGroup}>
-                  <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFill} />
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Токен</Text>
-                    <TextInput style={styles.inputField} value={monobankToken} onChangeText={setMonobankToken} secureTextEntry placeholder="X-Token" placeholderTextColor={Colors.textMuted} />
-                  </View>
-                  <View style={styles.rowBorder} />
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Black Card ID</Text>
-                    <TextInput style={styles.inputField} value={monobankBlack} onChangeText={setMonobankBlack} placeholder="Black Card ID" placeholderTextColor={Colors.textMuted} />
-                  </View>
-                  <View style={styles.rowBorder} />
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>White Card ID</Text>
-                    <TextInput style={styles.inputField} value={monobankWhite} onChangeText={setMonobankWhite} placeholder="White Card ID" placeholderTextColor={Colors.textMuted} />
-                  </View>
-                  <View style={styles.rowBorder} />
-                  <View style={styles.flexRow}>
-                    <GlassPressable style={[styles.actionRowBtn, { flex: 1 }]} onPress={handleSyncMono}>
-                      <Text style={[styles.actionRowBtnText, { color: Colors.green }]}>Синхронізувати з Monobank</Text>
-                    </GlassPressable>
-                  </View>
-                </View>
-              </View>
-
               {/* DASHBOARD SETTINGS */}
               <View style={styles.section}>
                 <Text style={styles.sectionLabel}>Налаштування панелі</Text>
                 <View style={styles.cardGroup}>
                   <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFill} />
-                  
+
                   {/* Pinned Categories */}
                   <View style={styles.settingRowBlock}>
                     <Text style={styles.settingLabelTitle}>Закріплені категорії</Text>
+                    <Text style={styles.settingDesc}>
+                      Імпорт з банку з категорією «… Sync» (Revolut Sync, Monobank Sync) закріплений завжди — доки ви не дасте йому категорію.
+                    </Text>
                     <View style={styles.categoriesWrap}>
                       {pinnedCategories.map((cat: string) => (
                         <GlassPressable key={cat} style={styles.catChip} onPress={() => handleRemoveCategory(cat)}>
@@ -361,22 +248,70 @@ export default function SettingsModal({
                       </GlassPressable>
                     </View>
                   </View>
-                  
+
                   <View style={styles.rowBorder} />
 
-                  {/* API KEY */}
+                </View>
+              </View>
+
+              {/* AUTOMATION: API KEY + how to use it (same as the web's settings) */}
+              <View style={styles.section}>
+                <Text style={styles.sectionLabel}>Автоматизація · API Key</Text>
+                <View style={styles.cardGroup}>
+                  <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFill} />
                   <View style={styles.settingRowBlock}>
-                    <Text style={[styles.settingLabelTitle, { marginBottom: 8 }]}>API Key віджетів</Text>
-                    {loadingApis ? <ActivityIndicator color={Colors.orange} /> : apiKey ? (
-                      <View style={styles.apiKeyBox}>
-                        <Text style={styles.apiKeyText} numberOfLines={1}>{apiKeyVisible ? apiKey : '••••••••••••••••••••••••••••'}</Text>
-                        <TouchableOpacity onPress={() => setApiKeyVisible(!apiKeyVisible)}>
-                          <Text style={styles.toggleText}>{apiKeyVisible ? '🙈' : '👁️'}</Text>
-                        </TouchableOpacity>
+                    <Text style={styles.settingDesc}>
+                      З ключем банки синхронізуються навіть тоді, коли MyWallet закритий, наприклад щоранку через Команди
+                      iPhone. Ключ не має терміну дії; нікому його не показуйте.
+                    </Text>
+
+                    <Text style={styles.guideTitle}>Як налаштувати в Командах</Text>
+                    {[
+                      'Команди → Автоматизація → «+» → «Час доби» (наприклад, 8:00) → «Запускати одразу».',
+                      'Нова пуста команда → дія «Отримати вміст URL».',
+                      'URL — адреса нижче з «/api/bank-connections/sync» у кінці; Метод — POST.',
+                      'Заголовки → «Додати новий заголовок»: ключ X-API-Key, значення — ваш ключ.',
+                      'Готово. Банки дозволяють близько 4 таких фонових оновлень на добу; з відкритого MyWallet — без обмежень.',
+                    ].map((step, i) => (
+                      <View key={i} style={styles.guideStep}>
+                        <Text style={styles.guideNum}>{i + 1}</Text>
+                        <Text style={styles.guideText}>{step}</Text>
                       </View>
+                    ))}
+
+                    <Text style={styles.inputLabelTop}>Адреса для синхронізації</Text>
+                    <View style={styles.apiKeyBox}>
+                      <Text style={styles.apiKeyText} numberOfLines={1} selectable>
+                        {`${getApiUrl()}/api/bank-connections/sync`}
+                      </Text>
+                      <TouchableOpacity onPress={() => shareText(`${getApiUrl()}/api/bank-connections/sync`)} hitSlop={8}>
+                        <Text style={styles.copyText}>Копіювати</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <Text style={styles.inputLabelTop}>Ваш API Key</Text>
+                    {loadingApis ? (
+                      <ActivityIndicator color={Colors.orange} style={{ marginVertical: 10 }} />
+                    ) : apiKey ? (
+                      <>
+                        <View style={styles.apiKeyBox}>
+                          <Text style={styles.apiKeyText} numberOfLines={1} selectable={apiKeyVisible}>
+                            {apiKeyVisible ? apiKey : '••••••••••••••••••••••••••••'}
+                          </Text>
+                          <TouchableOpacity onPress={() => setApiKeyVisible(!apiKeyVisible)} hitSlop={8}>
+                            <Text style={styles.toggleText}>{apiKeyVisible ? '🙈' : '👁️'}</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => shareText(apiKey)} hitSlop={8}>
+                            <Text style={styles.copyText}>Копіювати</Text>
+                          </TouchableOpacity>
+                        </View>
+                        <GlassPressable style={styles.actionRowBtn} onPress={handleGenerateApiKey}>
+                          <Text style={styles.actionRowBtnText}>Створити новий ключ</Text>
+                        </GlassPressable>
+                      </>
                     ) : (
                       <GlassPressable style={styles.actionRowBtn} onPress={handleGenerateApiKey}>
-                        <Text style={styles.actionRowBtnText}>Згенерувати API Key</Text>
+                        <Text style={styles.actionRowBtnText}>Створити API Key</Text>
                       </GlassPressable>
                     )}
                   </View>
@@ -404,7 +339,7 @@ const styles = StyleSheet.create({
   cardGroup: { backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.08)', overflow: 'hidden' },
   rowBorder: { borderBottomWidth: 1, borderBottomColor: 'rgba(255, 255, 255, 0.06)' },
   flexRow: { flexDirection: 'row' },
-  
+
   // Currency Row
   currencyRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12 },
   currencyRowActive: { backgroundColor: 'rgba(255, 107, 0, 0.08)' },
@@ -419,7 +354,7 @@ const styles = StyleSheet.create({
   checkCircle: { width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
   checkText: { color: Colors.white, fontSize: 10, fontWeight: '900' },
   uncheckCircle: { width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: 'rgba(255, 255, 255, 0.2)' },
-  
+
   // Profile Row
   profileRow: { flexDirection: 'row', padding: 16, alignItems: 'center', gap: 14 },
   avatar: { width: 50, height: 50, borderRadius: 25, alignItems: 'center', justifyContent: 'center' },
@@ -427,22 +362,22 @@ const styles = StyleSheet.create({
   profileMeta: { flex: 1 },
   profileEmail: { fontSize: 12, color: Colors.textSub, marginBottom: 4 },
   inputUnderline: { fontSize: 17, fontWeight: '700', color: Colors.white, padding: 0, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.2)', paddingBottom: 4 },
-  
+
   // Actions
   actionRowBtn: { paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
   actionRowBtnText: { fontSize: 15, fontWeight: '700', color: Colors.orange },
-  
+
   // Inputs
   inputGroup: { paddingHorizontal: 16, paddingVertical: 12 },
   inputLabel: { fontSize: 12, color: Colors.textSub, marginBottom: 6 },
   inputField: { fontSize: 15, color: Colors.white, padding: 0 },
-  
+
   // Dashboard
   settingRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
   settingRowBlock: { padding: 16 },
   settingLabelTitle: { fontSize: 15, color: Colors.white, fontWeight: '600' },
   settingDesc: { fontSize: 12, color: Colors.textSub, marginTop: 4, lineHeight: 16 },
-  
+
   categoriesWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
   catChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,107,0,0.15)', borderRadius: Radius.pill, paddingHorizontal: 12, paddingVertical: 6, gap: 6, borderWidth: 1, borderColor: 'rgba(255,107,0,0.3)' },
   catChipText: { color: Colors.orange, fontSize: 13, fontWeight: '600' },
@@ -451,8 +386,14 @@ const styles = StyleSheet.create({
   addCatInput: { flex: 1, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: Radius.md, paddingHorizontal: 14, paddingVertical: 10, color: Colors.white, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
   addCatBtn: { width: 42, height: 42, backgroundColor: Colors.orange, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
   addCatBtnText: { color: Colors.white, fontSize: 24, fontWeight: '700' },
-  
+
   apiKeyBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: Radius.md, padding: 14, gap: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  copyText: { fontSize: 13, fontWeight: '700', color: Colors.orange },
+  inputLabelTop: { fontSize: 12, color: Colors.textSub, marginTop: 16, marginBottom: 6 },
+  guideTitle: { fontSize: 14, fontWeight: '700', color: Colors.white, marginTop: 14, marginBottom: 8 },
+  guideStep: { flexDirection: 'row', gap: 10, marginBottom: 8 },
+  guideNum: { width: 20, height: 20, borderRadius: 10, overflow: 'hidden', backgroundColor: 'rgba(255,107,0,0.18)', color: Colors.orangeLight, fontSize: 11, fontWeight: '800', textAlign: 'center', lineHeight: 20 },
+  guideText: { flex: 1, fontSize: 13, lineHeight: 18, color: Colors.white80 },
   apiKeyText: { flex: 1, color: Colors.white, fontSize: 13, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
   toggleText: { fontSize: 20 },
 })

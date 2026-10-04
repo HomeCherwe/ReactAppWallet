@@ -462,6 +462,17 @@ export async function deleteTransaction(id: string): Promise<void> {
   invalidateSumByCardCache()
 }
 
+/**
+ * The same change for several transactions at once (selection on Home): category, card,
+ * statistics or archive. One request; the database's row rules keep it to the user's own rows.
+ */
+export async function updateTransactionsBulk(ids: string[], patch: Partial<Transaction>): Promise<void> {
+  if (ids.length === 0) return
+  const { error } = await supabase.from('transactions').update(patch).in('id', ids)
+  if (error) throw error
+  invalidateSumByCardCache()
+}
+
 export async function deleteTransactions(ids: string[]): Promise<void> {
   try {
     await apiFetch('/api/transactions/bulk-delete', {

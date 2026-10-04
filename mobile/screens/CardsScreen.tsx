@@ -290,6 +290,8 @@ export default function CardsScreen() {
       <CardTransactionsSheet
         card={cardTxCard}
         balance={cardTxCard ? balances[cardTxCard.id] : undefined}
+        cards={cards}
+        onChanged={loadData}
         onClose={() => setCardTxCard(null)}
         onOpenSettings={card => {
           setCardTxCard(null)

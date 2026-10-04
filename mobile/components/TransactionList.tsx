@@ -95,6 +95,10 @@ interface TransactionListProps {
   refunds?: Record<string, Transaction[]>
   /** Search field + period/card/category filters over the list */
   search?: FeedSearch
+  /** Selection mode (long press → «Вибрати»): the selected ids, null when not selecting */
+  selectedIds?: Set<string> | null
+  onStartSelect?: (tx: Transaction) => void
+  onToggleSelect?: (tx: Transaction) => void
 }
 
 export default React.memo(TransactionList)
@@ -122,7 +126,12 @@ function TransactionList({
   onRefundForChange,
   refunds = {},
   search,
+  selectedIds = null,
+  onStartSelect,
+  onToggleSelect,
 }: TransactionListProps) {
+  // Selection mode: rows show a check circle and a tap selects instead of opening
+  const sel = (t: Transaction) => (selectedIds ? selectedIds.has(t.id) : undefined)
   // Searching: every match is in the list (pinned ones too), the pinned block steps aside
   const searching = !!search?.active
   // ---- Pinned section: collapsible, remembered between launches ----
@@ -272,10 +281,11 @@ function TransactionList({
 
   const handlePress = useCallback(
     (tx: Transaction) => {
-      if (refundFor) pickRefund(tx)
+      if (selectedIds) onToggleSelect?.(tx)
+      else if (refundFor) pickRefund(tx)
       else onPressTx?.(tx)
     },
-    [refundFor, pickRefund, onPressTx]
+    [selectedIds, onToggleSelect, refundFor, pickRefund, onPressTx]
   )
 
   // ---- Long press: the row lifts and a glass menu offers everything you can do with it ----
@@ -300,6 +310,7 @@ function TransactionList({
 
   const menuActions = (tx: Transaction): MenuAction[] => {
     const out: MenuAction[] = []
+    if (onStartSelect) out.push({ label: 'Вибрати', icon: 'check', onPress: () => onStartSelect(tx) })
     const pin = pinStateOf(tx, pinnedCategories)
     if (pin === 'category') {
       out.push({ label: 'Обрати категорію', icon: 'tag', onPress: () => onPressTx?.(tx) })
@@ -430,11 +441,13 @@ function TransactionList({
                     wiggleDir={i % 2 ? 1 : -1}
                     onPress={handlePress}
                     onLongPress={openMenu}
+                    selected={sel(tx)}
                     {...swipeProps}
                   />
                   {kids.map((r, k) => (
                     <TxRow
                       key={`pin-${r.id}`}
+                      selected={sel(r)}
                       tx={r}
                       card={r.card_id ? cardsById[r.card_id] : undefined}
                       hidden={hidden}
@@ -508,11 +521,13 @@ function TransactionList({
                       wiggleDir={i % 2 ? 1 : -1}
                       onPress={handlePress}
                       onLongPress={openMenu}
+                      selected={sel(tx)}
                       {...swipeProps}
                     />
                     {kids.map((r, k) => (
                       <TxRow
                         key={r.id}
+                        selected={sel(r)}
                         tx={r}
                         card={r.card_id ? cardsById[r.card_id] : undefined}
                         hidden={hidden}

@@ -9,6 +9,7 @@ import { triggerLightHaptic } from '../utils/haptics'
 import SheetModal from './SheetModal'
 import { GlassPressable } from './LiquidGlass'
 import TxRow, { fmtMoney } from './TxRow'
+import TxSheet from './TxSheet'
 
 type PeriodId = 'week' | 'month' | '3m' | 'year' | 'all'
 
@@ -80,10 +81,17 @@ interface Props {
   hidden?: boolean
   onClose: () => void
   onOpenSettings: (card: Card) => void
+  /** All cards: a transaction opened here can be moved to another one */
+  cards?: Card[]
+  /** A transaction was edited here: the screen reloads balances and lists */
+  onChanged?: () => void
 }
 
-/** Tap on a card: its transactions by period with income/expense totals (like the web drawer). */
-export default function CardTransactionsSheet({ card, balance, hidden, onClose, onOpenSettings }: Props) {
+/**
+ * Tap on a card: its transactions by period with income/expense totals (like the web drawer).
+ * Tapping a transaction opens the same sheet as on Home, to view and edit it.
+ */
+export default function CardTransactionsSheet({ card, balance, hidden, onClose, onOpenSettings, cards = [], onChanged }: Props) {
   // Keep showing the last card while the sheet slides out
   const lastCard = useRef<Card | null>(null)
   if (card) lastCard.current = card
@@ -98,6 +106,9 @@ export default function CardTransactionsSheet({ card, balance, hidden, onClose, 
   const [hasMore, setHasMore] = useState(true)
   const [totals, setTotals] = useState<{ income: number; expense: number; count: number } | null>(null)
   const requestId = useRef(0)
+  // The transaction opened from this list; reloadKey refetches after it was saved
+  const [openTx, setOpenTx] = useState<Transaction | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     AsyncStorage.getItem(INCLUDE_ALL_KEY).then(v => setIncludeAll(v === '1'))
@@ -132,7 +143,7 @@ export default function CardTransactionsSheet({ card, balance, hidden, onClose, 
       })
       .catch(e => console.warn('[CardTx] load failed:', e))
       .finally(() => id === requestId.current && setLoading(false))
-  }, [card, query])
+  }, [card, query, reloadKey])
 
   useEffect(() => {
     if (!card || !query) return
@@ -141,7 +152,7 @@ export default function CardTransactionsSheet({ card, balance, hidden, onClose, 
     getCardPeriodTotals(query, includeAll)
       .then(t => id === requestId.current && setTotals(t))
       .catch(e => console.warn('[CardTx] totals failed:', e))
-  }, [card, query, includeAll])
+  }, [card, query, includeAll, reloadKey])
 
   const loadMore = useCallback(() => {
     if (!query || loading || loadingMore || !hasMore) return
@@ -326,7 +337,14 @@ export default function CardTransactionsSheet({ card, balance, hidden, onClose, 
           </View>
         )}
         renderItem={({ item, index, section }) => (
-          <TxRow tx={item} card={c} hidden={hidden} swipeEnabled={false} last={index === section.data.length - 1} />
+          <TxRow
+            tx={item}
+            card={c}
+            hidden={hidden}
+            swipeEnabled={false}
+            last={index === section.data.length - 1}
+            onPress={setOpenTx}
+          />
         )}
         ListEmptyComponent={
           loading ? (
@@ -353,6 +371,18 @@ export default function CardTransactionsSheet({ card, balance, hidden, onClose, 
             </View>
           ) : null
         }
+      />
+
+      {/* Inside this sheet, so iOS can show it on top of it */}
+      <TxSheet
+        tx={openTx}
+        cards={cards.length ? cards : [c]}
+        hidden={hidden}
+        onClose={() => setOpenTx(null)}
+        onSaved={() => {
+          setReloadKey(k => k + 1)
+          onChanged?.()
+        }}
       />
     </SheetModal>
   )

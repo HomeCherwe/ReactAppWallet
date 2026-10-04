@@ -54,6 +54,8 @@ interface TxRowProps {
   wiggleDir?: 1 | -1
   /** A refund shown under its expense */
   nested?: boolean
+  /** Selection mode on Home: true/false shows a check circle (tap toggles), undefined = no selection */
+  selected?: boolean
 }
 
 /**
@@ -76,7 +78,9 @@ function TxRow({
   wiggle,
   wiggleDir = 1,
   nested = false,
+  selected,
 }: TxRowProps) {
+  const selecting = selected !== undefined
   const x = useRef(new Animated.Value(0)).current
   const openRef = useRef(false)
   const rowRef = useRef<View>(null)
@@ -92,7 +96,7 @@ function TxRow({
   // Past the "open" point during the drag (for the haptic tick when crossing it)
   const pastRef = useRef(false)
 
-  const canSwipe = swipeEnabled && mode === 'normal' && actionCount > 0
+  const canSwipe = swipeEnabled && !selecting && mode === 'normal' && actionCount > 0
   const canSwipeRef = useRef(canSwipe)
   canSwipeRef.current = canSwipe
 
@@ -247,7 +251,7 @@ function TxRow({
         <Pressable
           onPress={handlePress}
           onLongPress={
-            mode === 'normal' && onLongPress
+            mode === 'normal' && !selecting && onLongPress
               ? () => {
                   triggerMediumHaptic() // right as the long press registers
                   rowRef.current?.measureInWindow((fx, fy, w, h) => onLongPress(tx, { x: fx, y: fy, w, h }))
@@ -261,9 +265,15 @@ function TxRow({
             mode === 'pickable' && styles.itemPickable,
             mode === 'target' && styles.itemTarget,
             mode === 'dimmed' && styles.itemDimmed,
+            selected && styles.itemSelected,
             pressed && styles.itemPressed,
           ]}
         >
+          {selecting && (
+            <View style={[styles.selectCircle, selected && styles.selectCircleOn]}>
+              {selected && <Icon name="check" size={13} color="#fff" strokeWidth={3.2} />}
+            </View>
+          )}
           {nested && <View style={styles.nestLine} />}
           <View style={[styles.iconWrap, isIncome && styles.iconWrapGreen, nested && styles.iconWrapNested, pending && styles.iconWrapPending]}>
             {nested ? (
@@ -412,6 +422,23 @@ const styles = StyleSheet.create({
     textDecorationLine: 'line-through',
     marginTop: 1,
     fontVariant: ['tabular-nums'],
+  },
+  itemSelected: {
+    backgroundColor: '#22160C',
+  },
+  selectCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: -2,
+  },
+  selectCircleOn: {
+    backgroundColor: Colors.orange,
+    borderColor: Colors.orange,
   },
   itemPressed: {
     backgroundColor: '#1C1C1F',
