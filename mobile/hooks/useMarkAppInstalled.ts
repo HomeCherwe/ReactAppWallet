@@ -20,6 +20,8 @@ export function useMarkAppInstalled(signedIn: boolean) {
           ...(signing && {
             signedAt: signing.signedAt?.toISOString() ?? null,
             signatureExpiresAt: signing.expiresAt.toISOString(),
+            // After a refresh in SideStore the date is worked out, not read (utils/signing)
+            signatureEstimated: !!signing.estimated,
           }),
         })
       )

@@ -30,7 +30,7 @@ function whenLabel(date: Date): string {
 /**
  * Home: what needs doing to keep the iPhone app working.
  * - The 7-day signature (free Apple ID) is about to run out → refresh it in SideStore;
- *   also two local notifications, on day 6 and day 7.
+ *   also time-sensitive notifications 2 days, 1 day, 12 hours and 1 hour ahead.
  * - A new build is out that has to be installed again (code-only changes arrive by themselves
  *   through EAS Update) → one-tap install through SideStore or the direct .ipa link; also a notification.
  */
@@ -81,7 +81,9 @@ export default function AppStatusBanner() {
           </View>
           <View style={styles.bannerText}>
             <Text style={styles.bannerTitle}>
-              {hoursLeft(signing) > 0 ? `Підпис закінчується ${whenLabel(signing.expiresAt)}` : 'Підпис закінчився'}
+              {hoursLeft(signing) > 0
+                ? `Підпис закінчується ${signing.estimated ? 'приблизно ' : ''}${whenLabel(signing.expiresAt)}`
+                : 'Підпис закінчився'}
             </Text>
             <Text style={styles.bannerSub} numberOfLines={1}>Оновіть у SideStore · натисніть, як це зробити</Text>
           </View>

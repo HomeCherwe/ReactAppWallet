@@ -209,7 +209,7 @@ export default function IosAppGuide({ open, onClose }) {
     const hours = (expires - Date.now()) / 36e5
     const when = expires.toLocaleString('uk-UA', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
     if (hours <= 0) return { soon: true, text: `Підпис закінчився ${when} — оновіть його в SideStore` }
-    return { soon: hours <= 36, text: `Підпис дійсний до ${when}` }
+    return { soon: hours <= 36, text: `Підпис дійсний ${iosApp.signatureEstimated ? 'приблизно ' : ''}до ${when}` }
   })()
   // undefined while checking, null until the first build is published to the release
   const build = useLatestIosBuild(open)
