@@ -56,6 +56,8 @@ interface TxRowProps {
   nested?: boolean
   /** Selection mode on Home: true/false shows a check circle (tap toggles), undefined = no selection */
   selected?: boolean
+  /** Row background (it covers the swipe buttons), e.g. the warm one inside the pinned block */
+  surface?: string
 }
 
 /**
@@ -79,6 +81,7 @@ function TxRow({
   wiggleDir = 1,
   nested = false,
   selected,
+  surface,
 }: TxRowProps) {
   const selecting = selected !== undefined
   const x = useRef(new Animated.Value(0)).current
@@ -261,6 +264,7 @@ function TxRow({
           delayLongPress={350}
           style={({ pressed }) => [
             styles.item,
+            surface ? { backgroundColor: surface } : null,
             nested && styles.itemNested,
             mode === 'pickable' && styles.itemPickable,
             mode === 'target' && styles.itemTarget,
