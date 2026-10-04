@@ -21,6 +21,19 @@ export async function listTransactions({ from = 0, to = 9, search = '', transact
   return await apiFetch(`/api/transactions?${params}`)
 }
 
+/** A card's transactions in a date range (for the scanner's "вже є") */
+export async function listCardTransactionsBetween(cardId, from, to) {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('id, amount, created_at, note, merchant_name')
+    .eq('card_id', cardId)
+    .gte('created_at', from.toISOString())
+    .lte('created_at', to.toISOString())
+    .limit(1000)
+  if (error) throw error
+  return data || []
+}
+
 const timeZone = (() => {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Kyiv'

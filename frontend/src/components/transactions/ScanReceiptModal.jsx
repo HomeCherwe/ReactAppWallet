@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { scanTransactions, createTransaction, getTransactionCategories } from '../../api/transactions'
+import { scanTransactions, createTransaction, getTransactionCategories, listCardTransactionsBetween } from '../../api/transactions'
+import { matchExisting, matchWindow } from '../../utils/scanDuplicates'
 import { listCards } from '../../api/cards'
 import { txBus } from '../../utils/txBus'
 import BaseModal from '../BaseModal'
@@ -19,6 +20,9 @@ function parseDateDDMMYYYY(str) {
   const [dd, mm, yyyy] = parts
   return new Date(Number(yyyy), Number(mm) - 1, Number(dd))
 }
+
+const signedOf = tx => (tx.type === 'income' ? 1 : -1) * Math.abs(Number(tx.amount || 0))
+const shortDate = d => d.toLocaleDateString('uk-UA', { day: 'numeric', month: 'short' })
 
 function toDatetimeLocal(date) {
   const d = new Date(date)
@@ -47,6 +51,10 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
   const fileInputRef = useRef(null)
   const dropRef = useRef(null)
   const [dragActive, setDragActive] = useState(false)
+  // "Вже є": found transactions already on their card (same amount, date ±1 day) → { date, note }
+  const [existing, setExisting] = useState(new Map())
+  const touchedRef = useRef(new Set()) // ticked/unticked by hand: the check no longer decides
+  const matchRequestRef = useRef(0)
 
   // Camera state
   const [cameraOpen, setCameraOpen] = useState(false)
@@ -68,6 +76,8 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
       setGlobalCategory('')
       setShowGlobalCatDropdown(false)
       setOpenCategoryTxId(null)
+      setExisting(new Map())
+      touchedRef.current = new Set()
       stopCamera()
       return
     }
@@ -213,8 +223,51 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
     }
   }
 
+  // "Вже є": look for each found transaction on its card (again when a card, amount, type or date
+  // changes); those are left unchecked unless the user ticks them
+  const matchKey = transactions.map(t => `${t._id}:${t.cardId}:${t.type}:${t.amount}:${t.dateLocal}`).join('|')
+  useEffect(() => {
+    if (step !== 'review' || transactions.length === 0) return
+    const id = ++matchRequestRef.current
+    const byCard = new Map()
+    for (const t of transactions) {
+      if (!t.cardId) continue
+      const list = byCard.get(t.cardId) || []
+      list.push({ key: t._id, amount: signedOf(t), date: new Date(t.dateLocal) })
+      byCard.set(t.cardId, list)
+    }
+    Promise.all(
+      [...byCard].map(async ([cardId, candidates]) => {
+        const range = matchWindow(candidates)
+        if (!range) return new Map()
+        return matchExisting(candidates, await listCardTransactionsBetween(cardId, range.from, range.to))
+      })
+    )
+      .then(results => {
+        if (id !== matchRequestRef.current) return
+        const found = new Map()
+        for (const matches of results) {
+          for (const [key, m] of matches) {
+            found.set(key, { date: shortDate(new Date(m.created_at)), note: String(m.note || m.merchant_name || '').split('\n')[0] })
+          }
+        }
+        setExisting(found)
+        setSelectedIds(prev => {
+          const next = new Set(prev)
+          for (const t of transactions) {
+            if (touchedRef.current.has(t._id)) continue
+            if (found.has(t._id)) next.delete(t._id)
+            else next.add(t._id)
+          }
+          return next
+        })
+      })
+      .catch(e => console.warn('[Scan] "вже є" check failed:', e?.message || e))
+  }, [step, matchKey])
+
   // Toggle selection
   const toggleSelect = (id) => {
+    touchedRef.current.add(id)
     setSelectedIds(prev => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
@@ -224,6 +277,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
   }
 
   const toggleSelectAll = () => {
+    transactions.forEach(t => touchedRef.current.add(t._id))
     if (selectedIds.size === transactions.length) {
       setSelectedIds(new Set())
     } else {
@@ -445,6 +499,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
               </label>
               <span className="text-xs text-white/55">
                 {selectedIds.size} з {transactions.length} обрано
+                {existing.size > 0 && <span className="text-amber-200/90"> · вже є {existing.size}</span>}
               </span>
               <button
                 type="button"
@@ -552,7 +607,14 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                         />
                         <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : tx._id)}>
                           <div className="flex items-center justify-between">
-                            <span className="text-sm font-medium text-white truncate">{tx.note?.split('\n')[0] || 'Транзакція'}</span>
+                            <span className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-sm font-medium text-white truncate">{tx.note?.split('\n')[0] || 'Транзакція'}</span>
+                              {existing.has(tx._id) && (
+                                <span className="shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-400/15 text-amber-200">
+                                  вже є
+                                </span>
+                              )}
+                            </span>
                             <span className={`text-sm font-semibold whitespace-nowrap ml-2 ${tx.type === 'income' ? 'text-emerald-400' : 'text-white'}`}>
                               {tx.type === 'income' ? '+' : '-'}{Number(tx.amount || 0).toFixed(2)} {getCurrencySymbol(tx.currency)}
                             </span>
@@ -590,6 +652,12 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                             className="border-t overflow-hidden"
                           >
                             <div className="grid gap-2 p-3 bg-white/[0.015]">
+                              {existing.has(tx._id) && (
+                                <p className="text-xs text-amber-200/90 leading-snug">
+                                  На картці вже є: {existing.get(tx._id).date}
+                                  {existing.get(tx._id).note ? ` · ${existing.get(tx._id).note}` : ''}. Поставте галочку, якщо це інша покупка.
+                                </p>
+                              )}
                               <div className={`cat-dropdown-${tx._id} relative`}>
                                 <label className="text-[11px] text-white/55 mb-0.5 block">Категорія</label>
                                 <input

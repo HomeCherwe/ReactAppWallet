@@ -190,6 +190,23 @@ export async function scanTransactions(jpegBase64: string): Promise<ScannedTrans
   }
 }
 
+/** A card's transactions in a date range (for the scanner's "вже є") */
+export async function listCardTransactionsBetween(
+  cardId: string,
+  from: Date,
+  to: Date
+): Promise<Pick<Transaction, 'id' | 'amount' | 'created_at' | 'note' | 'merchant_name'>[]> {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('id, amount, created_at, note, merchant_name')
+    .eq('card_id', cardId)
+    .gte('created_at', from.toISOString())
+    .lte('created_at', to.toISOString())
+    .limit(1000)
+  if (error) throw error
+  return data || []
+}
+
 export interface SearchParams {
   offset: number
   limit: number

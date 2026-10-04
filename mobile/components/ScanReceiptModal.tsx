@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -13,7 +13,14 @@ import {
 import * as ImagePicker from 'expo-image-picker'
 import Toast from 'react-native-toast-message'
 import { Colors } from '../constants/theme'
-import { createTransaction, getTransactionCategories, ScannedTransaction, scanTransactions } from '../api/transactions'
+import {
+  createTransaction,
+  getTransactionCategories,
+  listCardTransactionsBetween,
+  ScannedTransaction,
+  scanTransactions,
+} from '../api/transactions'
+import { matchExisting, matchWindow, ScanCandidate } from '../utils/scanDuplicates'
 import { Card } from '../api/cards'
 import { triggerErrorHaptic, triggerLightHaptic, triggerSuccessHaptic } from '../utils/haptics'
 import GlassButton from './GlassButton'
@@ -31,7 +38,15 @@ interface ScanReceiptModalProps {
 
 // uri for the preview; base64 is always JPEG (the picker re-encodes HEIC/PNG), which GPT can read
 type Picked = { uri: string; base64: string }
-type Row = ScannedTransaction & { key: string; selected: boolean; amountText: string }
+type Row = ScannedTransaction & {
+  key: string
+  selected: boolean
+  amountText: string
+  /** Already on the chosen card (same amount, date ±1 day): left unchecked */
+  existing?: { date: string; note: string } | null
+  /** The user ticked/unticked it: the "вже є" check no longer decides */
+  touched?: boolean
+}
 
 const MAX_IMAGES = 5
 // Each image is its own request; the backend (Vercel) takes up to ~4.5 MB per request
@@ -46,6 +61,13 @@ function dateFromScan(s: string): Date {
   const d = dd && mm && yyyy ? new Date(yyyy, mm - 1, dd, 12) : new Date()
   return isNaN(d.getTime()) ? new Date() : d
 }
+
+const signedAmount = (r: Row) => {
+  const abs = Math.abs(parseFloat(r.amountText.replace(',', '.')) || 0)
+  return r.type === 'income' ? abs : -abs
+}
+
+const shortDate = (d: Date) => d.toLocaleDateString('uk-UA', { day: 'numeric', month: 'short' })
 
 /**
  * "Сканувати чек або скрін" (same as the web): photos of receipts or screenshots of any bank app go
@@ -77,6 +99,34 @@ export default function ScanReceiptModal({ visible, cards, onClose, onSaved }: S
 
   const card = cards.find(c => c.id === cardId)
   const selectedCount = rows.filter(r => r.selected).length
+  const existingCount = rows.filter(r => r.existing).length
+
+  // "Вже є": look for each found transaction on the chosen card (again when the card, an amount or
+  // a type changes); those are left unchecked unless the user ticks them
+  const matchKey = rows.map(r => `${r.key}:${r.type}:${r.amountText}:${r.date}`).join('|')
+  const matchRequest = useRef(0)
+  useEffect(() => {
+    if (step !== 'review' || !cardId || rows.length === 0) return
+    const id = ++matchRequest.current
+    const candidates: ScanCandidate[] = rows.map(r => ({ key: r.key, amount: signedAmount(r), date: dateFromScan(r.date) }))
+    const range = matchWindow(candidates)
+    if (!range) return
+    listCardTransactionsBetween(cardId, range.from, range.to)
+      .then(existing => {
+        if (id !== matchRequest.current) return
+        const matches = matchExisting(candidates, existing)
+        setRows(prev =>
+          prev.map(r => {
+            const m = matches.get(r.key)
+            const existingInfo = m
+              ? { date: shortDate(new Date(m.created_at)), note: String(m.note || m.merchant_name || '').split('\n')[0] }
+              : null
+            return { ...r, existing: existingInfo, selected: r.touched ? r.selected : !m }
+          })
+        )
+      })
+      .catch(e => console.warn('[Scan] "вже є" check failed:', e))
+  }, [step, cardId, matchKey])
 
   const addImages = async (camera: boolean) => {
     try {
@@ -303,10 +353,11 @@ export default function ScanReceiptModal({ visible, cards, onClose, onSaved }: S
             <View style={styles.listHead}>
               <Text style={styles.label}>
                 Знайдено {rows.length} · обрано {selectedCount}
+                {existingCount ? ` · вже є ${existingCount}` : ''}
               </Text>
               <Pressable
                 hitSlop={8}
-                onPress={() => setRows(prev => prev.map(r => ({ ...r, selected: selectedCount !== rows.length })))}
+                onPress={() => setRows(prev => prev.map(r => ({ ...r, selected: selectedCount !== rows.length, touched: true })))}
               >
                 <Text style={styles.link}>{selectedCount === rows.length ? 'Зняти всі' : 'Обрати всі'}</Text>
               </Pressable>
@@ -322,15 +373,22 @@ export default function ScanReceiptModal({ visible, cards, onClose, onSaved }: S
                     <Pressable
                       accessibilityLabel={r.selected ? 'Не зберігати' : 'Зберегти'}
                       hitSlop={8}
-                      onPress={() => update(r.key, { selected: !r.selected })}
+                      onPress={() => update(r.key, { selected: !r.selected, touched: true })}
                       style={[styles.check, r.selected && styles.checkOn]}
                     >
                       {r.selected && <Icon name="check" size={13} color="#fff" strokeWidth={3.2} />}
                     </Pressable>
                     <View style={styles.rowText}>
-                      <Text style={styles.rowTitle} numberOfLines={1}>
-                        {r.merchant}
-                      </Text>
+                      <View style={styles.titleLine}>
+                        <Text style={[styles.rowTitle, styles.flexShrink]} numberOfLines={1}>
+                          {r.merchant}
+                        </Text>
+                        {r.existing && (
+                          <View style={styles.existsPill}>
+                            <Text style={styles.existsText}>вже є</Text>
+                          </View>
+                        )}
+                      </View>
                       <Text style={styles.rowMeta} numberOfLines={1}>
                         {[r.category, dateFromScan(r.date).toLocaleDateString('uk-UA', { day: 'numeric', month: 'short' })].join(' · ')}
                       </Text>
@@ -343,6 +401,12 @@ export default function ScanReceiptModal({ visible, cards, onClose, onSaved }: S
 
                   {open && (
                     <View style={styles.edit}>
+                      {r.existing && (
+                        <Text style={styles.existsNote}>
+                          На картці вже є: {r.existing.date}
+                          {r.existing.note ? ` · ${r.existing.note}` : ''}. Поставте галочку, якщо це інша покупка.
+                        </Text>
+                      )}
                       <View style={styles.segment}>
                         {(['expense', 'income'] as const).map(t => (
                           <Pressable key={t} onPress={() => update(r.key, { type: t })} style={[styles.segBtn, r.type === t && styles.segBtnOn]}>
@@ -604,6 +668,30 @@ const styles = StyleSheet.create({
   },
   rowText: {
     flex: 1,
+  },
+  titleLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  flexShrink: {
+    flexShrink: 1,
+  },
+  existsPill: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 100,
+    backgroundColor: 'rgba(255, 176, 32, 0.16)',
+  },
+  existsText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#FFD18A',
+  },
+  existsNote: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#FFD18A',
   },
   rowTitle: {
     fontSize: 15,
