@@ -498,6 +498,9 @@ export default function ProfilePage() {
             +
           </button>
         </div>
+        <p className="text-xs text-white/50 mb-2 px-1">
+          Імпорт з банку з категорією «… Sync» (Revolut Sync, Monobank Sync) закріплений завжди — доки ви не дасте йому категорію.
+        </p>
         <div className="flex flex-wrap gap-2">
           {pinnedCategories.length > 0 ? pinnedCategories.map(cat => (
             <span
@@ -525,9 +528,30 @@ export default function ProfilePage() {
         <SectionTitle icon={Key} color="#007AFF" title="API Key для автоматизації" />
         <div className="space-y-4">
           <p className="text-sm text-white/70">
-            API Key дозволяє автоматично синхронізувати транзакції з Monobank через iPhone Shortcuts або інші автоматизації.
-            Ключ не має терміну дії, на відміну від JWT токену.
+            З ключем банки синхронізуються навіть тоді, коли MyWallet закритий, наприклад щоранку через Команди iPhone.
+            Ключ не має терміну дії; нікому його не показуйте.
           </p>
+
+          {/* Same guide as in the iPhone app's settings */}
+          <div className="rounded-2xl bg-white/[0.04] border border-white/10 p-4">
+            <div className="text-sm font-bold text-white mb-2.5">Як налаштувати в Командах iPhone</div>
+            <ol className="grid gap-2">
+              {[
+                'Команди → Автоматизація → «+» → «Час доби» (наприклад, 8:00) → «Запускати одразу».',
+                'Нова пуста команда → дія «Отримати вміст URL».',
+                `URL — ${getApiUrl()}/api/bank-connections/sync; Метод — POST.`,
+                'Заголовки → «Додати новий заголовок»: ключ X-API-Key, значення — ваш ключ нижче.',
+                'Готово. Банки дозволяють близько 4 таких фонових оновлень на добу; з відкритого MyWallet — без обмежень.',
+              ].map((step, i) => (
+                <li key={i} className="flex gap-2.5 text-[13px] text-white/80 leading-snug">
+                  <span className="h-5 w-5 shrink-0 rounded-full bg-brand/20 text-brand-light text-[11px] font-extrabold grid place-items-center">
+                    {i + 1}
+                  </span>
+                  <span className="min-w-0 break-words">{step}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
 
           {/* API URL для зручності */}
           <div>
