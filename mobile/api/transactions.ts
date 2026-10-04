@@ -2,6 +2,7 @@ import { apiFetch, getApiUrl } from '../lib/apiFetch'
 import { supabase } from '../lib/supabase'
 import { getCachedSumByCard, invalidateSumByCardCache } from '../utils/dataCache'
 import { isSyncCategory } from '../utils/cardExclusion'
+import { isCategoryExcluded } from '../utils/statsCategories'
 
 export interface Transaction {
   id: string
@@ -190,6 +191,43 @@ export async function scanTransactions(jpegBase64: string): Promise<ScannedTrans
   }
 }
 
+/** Every non-archived transaction in [from, to), newest first (Analytics), page by page */
+export async function listPeriodTransactions(from: Date, to: Date): Promise<Transaction[]> {
+  const out: Transaction[] = []
+  const PAGE = 1000
+  for (let offset = 0; ; offset += PAGE) {
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .gte('created_at', from.toISOString())
+      .lt('created_at', to.toISOString())
+      .not('archives', 'is', true)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + PAGE - 1)
+    if (error) throw error
+    out.push(...((data || []) as Transaction[]))
+    if (!data || data.length < PAGE) break
+  }
+  return out
+}
+
+/** A card's transactions in a date range (for the scanner's "вже є") */
+export async function listCardTransactionsBetween(
+  cardId: string,
+  from: Date,
+  to: Date
+): Promise<Pick<Transaction, 'id' | 'amount' | 'created_at' | 'note' | 'merchant_name'>[]> {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('id, amount, created_at, note, merchant_name')
+    .eq('card_id', cardId)
+    .gte('created_at', from.toISOString())
+    .lte('created_at', to.toISOString())
+    .limit(1000)
+  if (error) throw error
+  return data || []
+}
+
 export interface SearchParams {
   offset: number
   limit: number
@@ -293,14 +331,15 @@ export async function getCardPeriodTotals(
   const totals = { income: 0, expense: 0, count: 0 }
   const PAGE = 1000
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await cardPeriodQuery(user.id, 'amount, amount_stat, exclude_from_stats', period)
+    const { data, error } = await cardPeriodQuery(user.id, 'amount, amount_stat, exclude_from_stats, category', period)
       .order('created_at', { ascending: false })
       .range(from, from + PAGE - 1)
     if (error) throw error
-    const rows = (data || []) as unknown as Pick<Transaction, 'amount' | 'amount_stat' | 'exclude_from_stats'>[]
+    const rows = (data || []) as unknown as Pick<Transaction, 'amount' | 'amount_stat' | 'exclude_from_stats' | 'category'>[]
     for (const t of rows) {
       totals.count++
-      if (!includeExcluded && t.exclude_from_stats) continue
+      // Not in stats: the transaction itself or its category (Налаштування → «Категорії поза статистикою»)
+      if (!includeExcluded && (t.exclude_from_stats || isCategoryExcluded(t.category))) continue
       // amount_stat: expense minus its refunds
       const v = Number(includeExcluded ? t.amount : t.amount_stat ?? t.amount)
       if (v > 0) totals.income += v
@@ -442,6 +481,17 @@ export async function deleteTransaction(id: string): Promise<void> {
       .eq('id', id)
     if (error) throw error
   }
+  invalidateSumByCardCache()
+}
+
+/**
+ * The same change for several transactions at once (selection on Home): category, card,
+ * statistics or archive. One request; the database's row rules keep it to the user's own rows.
+ */
+export async function updateTransactionsBulk(ids: string[], patch: Partial<Transaction>): Promise<void> {
+  if (ids.length === 0) return
+  const { error } = await supabase.from('transactions').update(patch).in('id', ids)
+  if (error) throw error
   invalidateSumByCardCache()
 }
 
@@ -681,6 +731,7 @@ export async function getRecentMonthsStats(
     const isExcludedFromStats = (tx: any) => {
       if (!tx) return false
       if (tx.exclude_from_stats === true || tx.exclude_from_stats === 'true' || tx.exclude_from_stats === 1) return true
+      if (isCategoryExcluded(tx.category)) return true
       if (tx.refund_for) return true
       const note = String(tx.note || '')
       if (note.includes('[refund_for:')) return true

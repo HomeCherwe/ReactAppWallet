@@ -6,6 +6,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -50,6 +51,8 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
   const [category, setCategory] = useState('')
   const [cardId, setCardId] = useState<string | null>(null)
   const [note, setNote] = useState('')
+  // "Враховувати в статистиці" (exclude_from_stats), same switch as the web's editor
+  const [counted, setCounted] = useState(true)
   const [categories, setCategories] = useState<string[]>([])
   const [catQuery, setCatQuery] = useState('')
   const [saving, setSaving] = useState(false)
@@ -64,6 +67,7 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
     setCategory(isSyncCategory(tx.category || '') ? '' : tx.category || '')
     setCardId(tx.card_id ?? null)
     setNote(stripPinTag(tx.note))
+    setCounted(!tx.exclude_from_stats)
     setCatQuery('')
   }, [tx?.id])
 
@@ -80,8 +84,9 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
       category: isSyncCategory(t.category || '') ? '' : t.category || '',
       cardId: t.card_id ?? null,
       note: stripPinTag(t.note),
+      counted: !t.exclude_from_stats,
     }
-  }, [t?.id, t?.amount, t?.category, t?.card_id, t?.note])
+  }, [t?.id, t?.amount, t?.category, t?.card_id, t?.note, t?.exclude_from_stats])
 
   const parsed = parseAmount(amount)
   const dirty =
@@ -90,6 +95,7 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
       (Number.isFinite(parsed) && Math.abs(parsed - original.amount) > 0.0001) ||
       category.trim() !== original.category ||
       cardId !== original.cardId ||
+      counted !== original.counted ||
       note.trim() !== original.note.trim())
 
   useEffect(() => {
@@ -140,6 +146,7 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
       card_id: cardId,
       // Keep the pin (the tag isn't shown in the editor)
       note: withPinTag(note.trim(), hasPinTag(t.note)) ?? (null as unknown as string),
+      exclude_from_stats: !counted,
     }
     try {
       await updateTransaction(t.id, payload)
@@ -170,7 +177,10 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
         </View>
         <View style={styles.hText}>
           <Text style={styles.hTitle} numberOfLines={1}>{txDisplayTitle(t)}</Text>
-          <Text style={styles.hSub} numberOfLines={1}>{when}</Text>
+          <Text style={styles.hSub} numberOfLines={1}>
+            {when}
+            {t.status === 'pending' ? ' · В обробці' : ''}
+          </Text>
         </View>
         <GlassPressable onPress={onClose} style={styles.closeBtn}>
           <Icon name="close" size={15} color={Colors.white80} strokeWidth={2.6} />
@@ -306,6 +316,27 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
           </View>
         )}
 
+        {/* Counted in statistics */}
+        <View style={[styles.section, styles.switchRow]}>
+          <View style={styles.switchText}>
+            <Text style={styles.switchTitle}>Враховувати в статистиці</Text>
+            <Text style={styles.switchHint}>
+              {counted
+                ? 'Входить у витрати, доходи й графіки'
+                : 'Не входить у статистику; на баланс картки впливає, як і раніше'}
+            </Text>
+          </View>
+          <Switch
+            value={counted}
+            onValueChange={v => {
+              triggerLightHaptic()
+              setCounted(v)
+            }}
+            trackColor={{ true: Colors.orange, false: 'rgba(255,255,255,0.18)' }}
+            ios_backgroundColor="rgba(255,255,255,0.18)"
+          />
+        </View>
+
         {/* Note */}
         <View style={styles.section}>
           <View style={styles.sectionHead}>
@@ -349,6 +380,24 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
 }
 
 const styles = StyleSheet.create({
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  switchText: {
+    flex: 1,
+  },
+  switchTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.white,
+  },
+  switchHint: {
+    fontSize: 12,
+    color: Colors.white40,
+    marginTop: 2,
+  },
   sheet: {
     borderTopLeftRadius: 32,
     borderTopRightRadius: 32,

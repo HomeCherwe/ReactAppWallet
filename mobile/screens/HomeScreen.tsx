@@ -48,6 +48,7 @@ import SettingsModal from '../components/SettingsModal'
 import { useSettingsStore } from '../store/useSettingsStore'
 import FloatingActionButton from '../components/FloatingActionButton'
 import RefundPickBar from '../components/RefundPickBar'
+import SelectionBar from '../components/SelectionBar'
 import { useMenuOverlay } from '../store/useMenuOverlay'
 import { syncBanks } from '../store/useBankSyncStore'
 import { checkForAppUpdate } from '../utils/appUpdate'
@@ -139,6 +140,22 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
   const [cardTxCard, setCardTxCard] = useState<Card | null>(null)
   // Refund picking (swipe an expense → "Повернення"): the list highlights incomes, the bar explains
   const [refundFor, setRefundFor] = useState<Transaction | null>(null)
+  // Selection mode (long press → «Вибрати»): ids of the selected transactions, null when off
+  const [selection, setSelection] = useState<Set<string> | null>(null)
+  const startSelect = useCallback((tx: Transaction) => {
+    setRefundFor(null)
+    setSelection(new Set([tx.id]))
+  }, [])
+  const toggleSelect = useCallback((tx: Transaction) => {
+    triggerLightHaptic()
+    setSelection(prev => {
+      if (!prev) return prev
+      const next = new Set(prev)
+      if (next.has(tx.id)) next.delete(tx.id)
+      else next.add(tx.id)
+      return next
+    })
+  }, [])
   const menuOpen = useMenuOverlay(s => !!s.menu)
   const [balances, setBalances] = useState<Record<string, number>>({})
   const [totals, setTotals] = useState<TotalsData>({ cash: {}, cards: {}, savings: {} })
@@ -799,6 +816,9 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
             pinned={pinned.items}
             pinnedCategories={pinnedCategories}
             search={txFeed.search}
+            selectedIds={selection}
+            onStartSelect={startSelect}
+            onToggleSelect={toggleSelect}
           />
         </View>
 
@@ -815,9 +835,22 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         onCancel={() => setRefundFor(null)}
       />
 
-      {/* Floating Plus button (hidden while picking a refund — the bar takes that spot) */}
+      <SelectionBar
+        selected={selection ? [...pinned.items, ...txFeed.items, ...Object.values(allRefunds).flat()].filter(
+          (t, i, all) => selection.has(t.id) && all.findIndex(x => x.id === t.id) === i
+        ) : null}
+        cards={cards}
+        onCancel={() => setSelection(null)}
+        onSelectAll={() => setSelection(new Set([...pinned.items, ...txFeed.items].map(t => t.id)))}
+        onDone={() => {
+          setSelection(null)
+          onRefresh()
+        }}
+      />
+
+      {/* Floating Plus button (hidden while picking a refund or selecting — the bar takes that spot) */}
       <FloatingActionButton
-        hidden={!!refundFor}
+        hidden={!!refundFor || !!selection}
         onPress={() => setAddTxVisible(true)}
         onAddCard={() => setAddCardVisible(true)}
         onTransfer={() => setTransferVisible(true)}
@@ -868,6 +901,8 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         card={cardTxCard}
         balance={cardTxCard ? balances[cardTxCard.id] : undefined}
         hidden={hideBalances}
+        cards={cards}
+        onChanged={onRefresh}
         onClose={() => setCardTxCard(null)}
         onOpenSettings={card => {
           setCardTxCard(null)

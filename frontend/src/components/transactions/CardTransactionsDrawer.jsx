@@ -12,6 +12,7 @@ import { usePreferences } from '../../context/PreferencesContext'
 import { updatePreferencesSection } from '../../api/preferences'
 import Row from './Row'
 import { formatMoney } from '../../utils/cardTheme'
+import { isCategoryExcluded } from '../../utils/statsCategories'
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -254,6 +255,7 @@ export default function CardTransactionsDrawer({ card, onClose, onOpenSettings, 
       // If includeAll is OFF — skip excluded transactions (default behaviour)
       if (!includeAll) {
         if (tx.exclude_from_stats === true || tx.exclude_from_stats === 'true' || tx.exclude_from_stats === 1) continue
+        if (isCategoryExcluded(tx.category)) continue
       }
       const amt = Number(tx.amount_stat ?? tx.amount ?? 0)
       const txCur = (tx.currency || cardMap[tx.card_id] || cardCurrency).toUpperCase()
@@ -595,7 +597,7 @@ export default function CardTransactionsDrawer({ card, onClose, onOpenSettings, 
               {days.map(({ key, txs: dayTxs, dateStr }) => {
                 let dayTotal = 0
                 for (const tx of dayTxs) {
-                  if (!includeAll && (tx.exclude_from_stats === true || tx.exclude_from_stats === 'true')) continue
+                  if (!includeAll && (tx.exclude_from_stats === true || tx.exclude_from_stats === 'true' || isCategoryExcluded(tx.category))) continue
                   const amt = Number(tx.amount_stat ?? tx.amount ?? 0)
                   const txCur = (tx.currency || cardMap[tx.card_id] || cur).toUpperCase()
                   const conv = convertCurrency(amt, txCur, cur)

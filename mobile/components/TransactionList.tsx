@@ -14,8 +14,11 @@ import PossibleDuplicates from './PossibleDuplicates'
 import TxRow, { RowMode, closeSwipedRow, fmtMoney } from './TxRow'
 import { MenuAction, MenuFrame, openMenu as openMenuOverlay } from '../store/useMenuOverlay'
 import { pinStateOf, txDisplayTitle } from '../utils/pinned'
+import { useExcludedCategories } from '../utils/statsCategories'
 
 const PINNED_COLLAPSED_KEY = 'pinned_collapsed'
+// Rows inside the pinned block sit on a warm surface, so the block stands apart from the list
+const PINNED_SURFACE = '#1D140C'
 
 function pluralTx(n: number): string {
   const mod10 = n % 10
@@ -95,6 +98,10 @@ interface TransactionListProps {
   refunds?: Record<string, Transaction[]>
   /** Search field + period/card/category filters over the list */
   search?: FeedSearch
+  /** Selection mode (long press → «Вибрати»): the selected ids, null when not selecting */
+  selectedIds?: Set<string> | null
+  onStartSelect?: (tx: Transaction) => void
+  onToggleSelect?: (tx: Transaction) => void
 }
 
 export default React.memo(TransactionList)
@@ -122,7 +129,12 @@ function TransactionList({
   onRefundForChange,
   refunds = {},
   search,
+  selectedIds = null,
+  onStartSelect,
+  onToggleSelect,
 }: TransactionListProps) {
+  // Selection mode: rows show a check circle and a tap selects instead of opening
+  const sel = (t: Transaction) => (selectedIds ? selectedIds.has(t.id) : undefined)
   // Searching: every match is in the list (pinned ones too), the pinned block steps aside
   const searching = !!search?.active
   // ---- Pinned section: collapsible, remembered between launches ----
@@ -272,10 +284,11 @@ function TransactionList({
 
   const handlePress = useCallback(
     (tx: Transaction) => {
-      if (refundFor) pickRefund(tx)
+      if (selectedIds) onToggleSelect?.(tx)
+      else if (refundFor) pickRefund(tx)
       else onPressTx?.(tx)
     },
-    [refundFor, pickRefund, onPressTx]
+    [selectedIds, onToggleSelect, refundFor, pickRefund, onPressTx]
   )
 
   // ---- Long press: the row lifts and a glass menu offers everything you can do with it ----
@@ -300,6 +313,7 @@ function TransactionList({
 
   const menuActions = (tx: Transaction): MenuAction[] => {
     const out: MenuAction[] = []
+    if (onStartSelect) out.push({ label: 'Вибрати', icon: 'check', onPress: () => onStartSelect(tx) })
     const pin = pinStateOf(tx, pinnedCategories)
     if (pin === 'category') {
       out.push({ label: 'Обрати категорію', icon: 'tag', onPress: () => onPressTx?.(tx) })
@@ -342,6 +356,7 @@ function TransactionList({
     )
   }, [transactions, pinnedCategories, refunds, searching])
 
+  const excludedCats = useExcludedCategories()
   const groups = useMemo(() => {
     const out: DayGroup[] = []
     for (const tx of regular) {
@@ -353,14 +368,14 @@ function TransactionList({
         out.push(g)
       }
       g.items.push(tx)
-      if (!tx.exclude_from_stats) {
+      if (!tx.exclude_from_stats && !(tx.category && excludedCats.includes(tx.category))) {
         const cur = tx.currency || (tx.card_id && cardsById[tx.card_id]?.currency) || ''
         // amount_stat: an expense minus its refunds
         g.totals[cur] = (g.totals[cur] || 0) + Number(tx.amount_stat ?? tx.amount)
       }
     }
     return out
-  }, [regular, cardsById])
+  }, [regular, cardsById, excludedCats])
 
   const mask = (s: string) => (hidden ? '••••' : s)
 
@@ -397,8 +412,13 @@ function TransactionList({
 
 
       {!loading && !searching && pinnedTop.length > 0 && (
+        // Outer view carries the orange glow (iOS draws no shadow on a view that clips)
+        <View style={styles.pinnedGlow}>
         <View style={styles.pinnedWrap}>
-          <Pressable onPress={togglePinned} style={({ pressed }) => [styles.pinnedHeader, pressed && styles.pinnedHeaderPressed]}>
+          <Pressable
+            onPress={togglePinned}
+            style={({ pressed }) => [styles.pinnedHeader, !pinnedCollapsed && styles.pinnedHeaderOpen, pressed && styles.pinnedHeaderPressed]}
+          >
             <Text style={styles.pinnedEmoji}>📌</Text>
             <View style={styles.pinnedTitleWrap}>
               <Text style={styles.pinnedTitle}>Закріплені</Text>
@@ -430,11 +450,15 @@ function TransactionList({
                     wiggleDir={i % 2 ? 1 : -1}
                     onPress={handlePress}
                     onLongPress={openMenu}
+                    selected={sel(tx)}
+                    surface={PINNED_SURFACE}
                     {...swipeProps}
                   />
                   {kids.map((r, k) => (
                     <TxRow
                       key={`pin-${r.id}`}
+                      selected={sel(r)}
+                      surface={PINNED_SURFACE}
                       tx={r}
                       card={r.card_id ? cardsById[r.card_id] : undefined}
                       hidden={hidden}
@@ -450,6 +474,7 @@ function TransactionList({
                 </React.Fragment>
               )
             })}
+        </View>
         </View>
       )}
 
@@ -508,11 +533,13 @@ function TransactionList({
                       wiggleDir={i % 2 ? 1 : -1}
                       onPress={handlePress}
                       onLongPress={openMenu}
+                      selected={sel(tx)}
                       {...swipeProps}
                     />
                     {kids.map((r, k) => (
                       <TxRow
                         key={r.id}
+                        selected={sel(r)}
                         tx={r}
                         card={r.card_id ? cardsById[r.card_id] : undefined}
                         hidden={hidden}
@@ -672,15 +699,23 @@ const styles = StyleSheet.create({
   menuPreview: {
     backgroundColor: '#141416',
   },
-  pinnedWrap: {
+  pinnedGlow: {
     marginHorizontal: 12,
-    marginTop: 6,
-    marginBottom: 8,
-    borderRadius: 16,
+    marginTop: 8,
+    marginBottom: 12,
+    borderRadius: 18,
+    backgroundColor: PINNED_SURFACE,
+    shadowColor: Colors.orange,
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  pinnedWrap: {
+    borderRadius: 18,
     overflow: 'hidden',
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.10)',
+    backgroundColor: PINNED_SURFACE,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 122, 26, 0.55)',
   },
   pinnedHeader: {
     flexDirection: 'row',
@@ -688,9 +723,15 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
+    backgroundColor: 'rgba(255, 107, 0, 0.12)',
+  },
+  // A line under the header only when the rows are shown
+  pinnedHeaderOpen: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255, 122, 26, 0.35)',
   },
   pinnedHeaderPressed: {
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    backgroundColor: 'rgba(255, 107, 0, 0.2)',
   },
   pinnedEmoji: {
     fontSize: 15,
@@ -700,8 +741,8 @@ const styles = StyleSheet.create({
   },
   pinnedTitle: {
     fontSize: 14,
-    fontWeight: '700',
-    color: Colors.white,
+    fontWeight: '800',
+    color: Colors.orangeLight,
   },
   pinnedSub: {
     fontSize: 12,

@@ -17,6 +17,7 @@ import { useSettingsStore } from '../store/useSettingsStore'
 import { listCards } from '../api/cards'
 import useMonoRates from '../hooks/useMonoRates'
 import { usePrimaryCurrency, convertAmount, currencySymbol } from '../utils/primaryCurrency'
+import { isCategoryExcluded, useExcludedCategories } from '../utils/statsCategories'
 
 const INCOME_COLOR = '#22C55E'
 const EXPENSE_COLOR = '#FF453A'
@@ -91,6 +92,8 @@ function getIncludedTxIds(txsArg = [], modeArg = 'earning', currencyArg) {
     if (t.exclude_from_stats === true || t.exclude_from_stats === 'true' || t.exclude_from_stats === 1) return true
     // Card switched off in its settings (flag computed by the backend)
     if (t.card_excluded_from_stats) return true
+    // Category listed in Налаштування → «Категорії поза статистикою»
+    if (isCategoryExcluded(t.category)) return true
     if (t.refund_for) return true
     const note = String(t.note || '')
     return note.includes('[refund_for:')
@@ -251,6 +254,7 @@ function computeFlowData(txsArg, fromArg, toArg, primary, rates) {
 
 
 export default function EarningsChart(){
+  const excludedCats = useExcludedCategories()
   // Використовуємо новий store
   const settings = useSettingsStore((state) => state.settings)
   const updateNestedSetting = useSettingsStore((state) => state.updateNestedSetting)
@@ -810,5 +814,5 @@ function useChartSync(txs, from, to, primary, rates, animKey, setDisplayData, pr
     }
     // immediate replace
     setDisplayData(newData)
-  }, [txs, from, to, primary, rates, animKey, setDisplayData, prevAnimKeyRef, setChartKey])
+  }, [txs, from, to, primary, rates, animKey, setDisplayData, prevAnimKeyRef, setChartKey, excludedCats])
 }

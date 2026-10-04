@@ -8,6 +8,8 @@ import { getApiUrl, apiFetch } from '../utils.jsx'
 import { useSettingsStore } from '../store/useSettingsStore'
 import ConfirmModal from '../components/ConfirmModal'
 import { SUPPORTED_CURRENCIES, usePrimaryCurrency, setPrimaryCurrency } from '../utils/primaryCurrency'
+import { EXCLUDED_CATEGORIES_PATH, useExcludedCategories } from '../utils/statsCategories'
+import { getTransactionCategories } from '../api/transactions'
 
 // Symbol tile colors in the currency list
 const CURRENCY_COLORS = {
@@ -57,6 +59,13 @@ export default function ProfilePage() {
   const pinnedCategories = getNestedSetting('dashboard.pinnedCategories', [])
 
   const [newCategoryInput, setNewCategoryInput] = useState('')
+  // Categories left out of statistics (same list as the iPhone app)
+  const excludedCategories = useExcludedCategories()
+  const [excludedInput, setExcludedInput] = useState('')
+  const [allCategories, setAllCategories] = useState([])
+  useEffect(() => {
+    getTransactionCategories().then(list => setAllCategories(list || [])).catch(() => {})
+  }, [])
 
   // Logout modal
   const [showLogoutModal, setShowLogoutModal] = useState(false)
@@ -359,6 +368,18 @@ export default function ProfilePage() {
     setNewCategoryInput('')
   }
 
+  const addExcludedCategory = (name = excludedInput) => {
+    const trimmed = String(name || '').trim()
+    if (!trimmed) return
+    if (excludedCategories.includes(trimmed)) {
+      toast('Ця категорія вже поза статистикою', { icon: 'ℹ️' })
+    } else {
+      updateNestedSetting(EXCLUDED_CATEGORIES_PATH, [...excludedCategories, trimmed])
+      toast.success(`«${trimmed}» більше не рахується в статистиці`)
+    }
+    setExcludedInput('')
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -498,6 +519,9 @@ export default function ProfilePage() {
             +
           </button>
         </div>
+        <p className="text-xs text-white/50 mb-2 px-1">
+          Імпорт з банку з категорією «… Sync» (Revolut Sync, Monobank Sync) закріплений завжди — доки ви не дасте йому категорію.
+        </p>
         <div className="flex flex-wrap gap-2">
           {pinnedCategories.length > 0 ? pinnedCategories.map(cat => (
             <span
@@ -520,14 +544,92 @@ export default function ProfilePage() {
         </div>
       </section>
 
+      {/* Categories left out of statistics */}
+      <section className={section}>
+        <SectionTitle
+          icon={EyeOff}
+          color="#AF52DE"
+          title="Категорії поза статистикою"
+          subtitle="Транзакції цих категорій не входять у доходи, витрати й графіки (наприклад «МАЄ ВЕРНУТИ»). На баланс карток впливають, як і раніше. Те саме на iPhone."
+        />
+        <div className="flex gap-2 mb-3">
+          <input
+            type="text"
+            list="stats-excluded-categories"
+            value={excludedInput}
+            onChange={(e) => setExcludedInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                addExcludedCategory()
+              }
+            }}
+            placeholder="Почніть вводити категорію..."
+            className="flex-1 px-3.5 py-2.5 border border-white/[0.14] rounded-xl text-sm focus:ring-2 focus:ring-brand focus:border-brand outline-none transition"
+          />
+          <datalist id="stats-excluded-categories">
+            {allCategories.filter(c => !excludedCategories.includes(c)).map(c => <option key={c} value={c} />)}
+          </datalist>
+          <button
+            type="button"
+            onClick={() => addExcludedCategory()}
+            className="btn-primary h-10 w-10 shrink-0 rounded-full text-lg font-bold grid place-items-center"
+            title="Додати"
+          >
+            +
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {excludedCategories.length > 0 ? excludedCategories.map(cat => (
+            <span
+              key={cat}
+              className="inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 bg-[#AF52DE]/[0.14] border border-[#AF52DE]/35 text-purple-200 rounded-full text-xs font-semibold"
+            >
+              {cat}
+              <button
+                type="button"
+                onClick={() => updateNestedSetting(EXCLUDED_CATEGORIES_PATH, excludedCategories.filter(c => c !== cat))}
+                className="h-4 w-4 grid place-items-center rounded-full bg-white/10 hover:bg-white/20 text-white/80 leading-none"
+                title="Знову рахувати"
+              >
+                ×
+              </button>
+            </span>
+          )) : (
+            <span className="text-xs text-white/40">Усі категорії рахуються в статистиці.</span>
+          )}
+        </div>
+      </section>
+
       {/* Automation key */}
       <section className={section}>
         <SectionTitle icon={Key} color="#007AFF" title="API Key для автоматизації" />
         <div className="space-y-4">
           <p className="text-sm text-white/70">
-            API Key дозволяє автоматично синхронізувати транзакції з Monobank через iPhone Shortcuts або інші автоматизації.
-            Ключ не має терміну дії, на відміну від JWT токену.
+            З ключем банки синхронізуються навіть тоді, коли MyWallet закритий, наприклад щоранку через Команди iPhone.
+            Ключ не має терміну дії; нікому його не показуйте.
           </p>
+
+          {/* Same guide as in the iPhone app's settings */}
+          <div className="rounded-2xl bg-white/[0.04] border border-white/10 p-4">
+            <div className="text-sm font-bold text-white mb-2.5">Як налаштувати в Командах iPhone</div>
+            <ol className="grid gap-2">
+              {[
+                'Команди → Автоматизація → «+» → «Час доби» (наприклад, 8:00) → «Запускати одразу».',
+                'Нова пуста команда → дія «Отримати вміст URL».',
+                `URL — ${getApiUrl()}/api/bank-connections/sync; Метод — POST.`,
+                'Заголовки → «Додати новий заголовок»: ключ X-API-Key, значення — ваш ключ нижче.',
+                'Готово. Банки дозволяють близько 4 таких фонових оновлень на добу; з відкритого MyWallet — без обмежень.',
+              ].map((step, i) => (
+                <li key={i} className="flex gap-2.5 text-[13px] text-white/80 leading-snug">
+                  <span className="h-5 w-5 shrink-0 rounded-full bg-brand/20 text-brand-light text-[11px] font-extrabold grid place-items-center">
+                    {i + 1}
+                  </span>
+                  <span className="min-w-0 break-words">{step}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
 
           {/* API URL для зручності */}
           <div>

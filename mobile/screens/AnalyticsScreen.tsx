@@ -1,148 +1,164 @@
-﻿import React, { useCallback, useEffect, useMemo, useState , useRef} from "react"
-import { Animated,
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl,
-  ActivityIndicator, Platform, Dimensions
-} from "react-native"
-import PullToRefreshIndicator, { usePullToRefresh } from '../components/PullToRefreshIndicator'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ActivityIndicator, Animated, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native'
 import { initialWindowMetrics } from 'react-native-safe-area-context'
+import Toast from 'react-native-toast-message'
+import PullToRefreshIndicator, { usePullToRefresh } from '../components/PullToRefreshIndicator'
+import CategoryTransactionsSheet, { CategoryView } from '../components/CategoryTransactionsSheet'
+import { checkForAppUpdate } from '../utils/appUpdate'
+import { Colors } from '../constants/theme'
+import { listPeriodTransactions, Transaction } from '../api/transactions'
+import { listCards, Card } from '../api/cards'
+import { convertCurrency, fetchExchangeRates, formatMoney, RatesMap } from '../utils/currency'
+import { getStoredPrimaryCurrency } from '../utils/settings'
+import { getCategoryIcon } from '../utils/categoryIcon'
+import { useExcludedCardIds } from '../utils/cardExclusion'
+import { useExcludedCategories } from '../utils/statsCategories'
+import { triggerLightHaptic } from '../utils/haptics'
+import { txBus } from '../utils/txBus'
 
 // The pull indicator slides out from just under the status bar
 const SAFE_TOP = initialWindowMetrics?.insets.top ?? 47
-import { checkForAppUpdate } from '../utils/appUpdate'
-import { Colors, Typography, Radius } from "../constants/theme"
-import { listTransactions, Transaction } from "../api/transactions"
-import { listCards, Card } from "../api/cards"
-import { fetchTotalsByBucket, TotalsData } from "../api/totals"
-import { fmtAmount } from "../utils/format"
-import Toast from "react-native-toast-message"
-import { GlassPressable } from "../components/LiquidGlass"
-import { useExcludedCardIds } from "../utils/cardExclusion"
+// Months in the trend chart (the chosen one is the last)
+const TREND_MONTHS = 6
+const TREND_HEIGHT = 110
 
-const { width: SCREEN_W } = Dimensions.get("window")
+const MONTHS = ['Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень', 'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень']
+const MONTHS_SHORT = ['січ', 'лют', 'бер', 'кві', 'тра', 'чер', 'лип', 'сер', 'вер', 'жов', 'лис', 'гру']
 
-const MONTHS_UA = [
-  "Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень",
-  "Липень", "Серпень", "Вересень", "Жовтень", "Листопад", "Грудень"
-]
+const monthKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}`
+const firstOfMonth = (d: Date, shift = 0) => new Date(d.getFullYear(), d.getMonth() + shift, 1)
 
-const CATEGORY_COLORS = [
-  "#FF6B00", "#FF8C38", "#E55A00", "#FFB347", "#FF4500",
-  "#FF69B4", "#FFD700", "#32CD32", "#00CED1", "#9370DB",
-  "#FF6347", "#40E0D0", "#EE82EE", "#F0E68C", "#87CEEB",
-]
-
-type CategoryStat = {
+interface CategoryStat {
   category: string
   amount: number
   count: number
-  color: string
-  percent: number
+  share: number
+  transactions: Transaction[]
 }
 
-type MonthOption = { label: string; year: number; month: number }
-
-function generateMonthOptions(): MonthOption[] {
-  const options: MonthOption[] = []
-  const now = new Date()
-  for (let i = 0; i < 12; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    options.push({
-      label: `${MONTHS_UA[d.getMonth()]} ${d.getFullYear()}`,
-      year: d.getFullYear(),
-      month: d.getMonth() + 1
-    })
+function byCategory(list: { tx: Transaction; value: number }[], total: number): CategoryStat[] {
+  const map = new Map<string, CategoryStat>()
+  for (const { tx, value } of list) {
+    const cat = tx.category || 'Інше'
+    const s = map.get(cat) ?? { category: cat, amount: 0, count: 0, share: 0, transactions: [] }
+    s.amount += value
+    s.count += 1
+    s.transactions.push(tx)
+    map.set(cat, s)
   }
-  return options
+  return [...map.values()]
+    .map(s => ({ ...s, share: total > 0 ? s.amount / total : 0 }))
+    .sort((a, b) => b.amount - a.amount)
 }
 
+/**
+ * Analytics: the chosen month's income and expenses together — totals, a 6-month trend and both
+ * category lists on one screen. Tap a category to see (and edit) its transactions. Counted the same
+ * way as Home: no archived rows, transfers, "not in stats" (transactions, categories, cards) or
+ * savings; refunds are taken off their expense; everything in the main currency.
+ */
 export default function AnalyticsScreen() {
-  const months = useMemo(generateMonthOptions, [])
-  const [selectedMonth, setSelectedMonth] = useState(months[0])
+  const [month, setMonth] = useState(() => firstOfMonth(new Date()))
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [cards, setCards] = useState<Card[]>([])
-  const [totals, setTotals] = useState<TotalsData>({ cash: {}, cards: {}, savings: {} })
+  const [rates, setRates] = useState<RatesMap | null>(null)
+  const [currency, setCurrency] = useState('UAH')
   const [loading, setLoading] = useState(true)
-  const [txType, setTxType] = useState<"expense" | "income">("expense")
-
   const [refreshing, setRefreshing] = useState(false)
+  const [openCategory, setOpenCategory] = useState<CategoryView | null>(null)
   const pullY = useRef(new Animated.Value(0)).current
+  const requestId = useRef(0)
 
-  const loadData = useCallback(async (pulled = false) => {
-    if (!pulled) setLoading(true)
+  const excludedCardIds = useExcludedCardIds(cards)
+  const excludedCats = useExcludedCategories()
+
+  const loadData = useCallback(async (quiet = false) => {
+    const id = ++requestId.current
+    if (!quiet) setLoading(true)
     try {
-      const start = new Date(selectedMonth.year, selectedMonth.month - 1, 1)
-      const end = new Date(selectedMonth.year, selectedMonth.month, 0)
-      const startDate = start.toISOString().split("T")[0]
-      const endDate = end.toISOString().split("T")[0]
-
-      const [txs, cardsData, totalsData] = await Promise.all([
-        listTransactions({
-          startDate,
-          endDate,
-          
-        }).catch(() => []),
-        listCards().catch(() => []),
-        fetchTotalsByBucket().catch(() => ({ cash: {}, cards: {}, savings: {} })),
+      const [txs, cardsData, ratesData, cur] = await Promise.all([
+        listPeriodTransactions(firstOfMonth(month, -(TREND_MONTHS - 1)), firstOfMonth(month, 1)),
+        listCards().catch(() => [] as Card[]),
+        fetchExchangeRates().catch(() => null),
+        getStoredPrimaryCurrency().catch(() => 'UAH'),
       ])
-
+      if (id !== requestId.current) return
       setTransactions(txs)
       setCards(cardsData)
-      setTotals(totalsData)
+      setRates(ratesData)
+      setCurrency(cur || 'UAH')
     } catch (e: any) {
-      Toast.show({
-        type: "error",
-        text1: "Помилка завантаження",
-        text2: e?.message || "Не вдалося отримати аналітику",
-      })
+      if (id === requestId.current) {
+        Toast.show({ type: 'error', text1: 'Не вдалося завантажити аналітику', text2: e?.message })
+      }
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (id === requestId.current) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
-  }, [selectedMonth])
+  }, [month])
 
   useEffect(() => {
     loadData()
   }, [loadData])
 
-  const excludedCardIds = useExcludedCardIds(cards)
+  // Changes made elsewhere (a bank sync, an edit on Home)
+  useEffect(() => txBus.subscribe(ev => ev?.type === 'SYNCED' && loadData(true)), [loadData])
 
-  const filteredTxs = useMemo(() => {
-    const excluded = new Set(excludedCardIds)
-    return transactions.filter(t => {
-      // Transfers, archived, "not in stats" and excluded cards don't count
-      if (t.is_transfer || t.archives || t.exclude_from_stats) return false
-      if (t.card_id && excluded.has(t.card_id)) return false
-      const amt = Number(t.amount || 0)
-      return txType === "expense" ? amt < 0 : amt > 0
-    })
-  }, [transactions, txType, excludedCardIds])
-
-  const totalForPeriod = useMemo(() => {
-    return filteredTxs.reduce((acc, t) => acc + Math.abs(Number(t.amount || 0)), 0)
-  }, [filteredTxs])
-
-  const categoryStats = useMemo<CategoryStat[]>(() => {
-    const map: Record<string, { amount: number; count: number }> = {}
-    for (const tx of filteredTxs) {
-      const cat = tx.category || "Інше"
-      const amt = Math.abs(Number(tx.amount || 0))
-      if (!map[cat]) map[cat] = { amount: 0, count: 0 }
-      map[cat].amount += amt
-      map[cat].count += 1
+  // What counts, in the main currency (expenses as positive numbers)
+  const counted = useMemo(() => {
+    const excludedCards = new Set(excludedCardIds)
+    const cardInfo = new Map(
+      cards.map(c => {
+        const bank = String(c.bank || '').toLowerCase()
+        return [c.id, { currency: (c.currency || 'UAH').toUpperCase(), savings: bank.includes('накопич') || bank.includes('savings') }]
+      })
+    )
+    const out: { tx: Transaction; value: number; income: boolean; key: string }[] = []
+    for (const tx of transactions) {
+      if (tx.archives || tx.is_transfer || tx.exclude_from_stats || tx.refund_for) continue
+      if (tx.category && excludedCats.includes(tx.category)) continue
+      if (tx.card_id && excludedCards.has(tx.card_id)) continue
+      const info = tx.card_id ? cardInfo.get(tx.card_id) : undefined
+      if (info?.savings) continue
+      const amount = Number(tx.amount_stat ?? tx.amount ?? 0)
+      if (!amount) continue
+      const value = Math.abs(convertCurrency(amount, info?.currency || 'UAH', currency, rates))
+      out.push({ tx, value, income: amount > 0, key: monthKey(new Date(tx.created_at)) })
     }
+    return out
+  }, [transactions, cards, rates, currency, excludedCardIds, excludedCats])
 
-    const arr = Object.entries(map).map(([category, { amount, count }], idx) => ({
-      category,
-      amount,
-      count,
-      color: CATEGORY_COLORS[idx % CATEGORY_COLORS.length],
-      percent: totalForPeriod > 0 ? (amount / totalForPeriod) * 100 : 0,
-    }))
+  const current = monthKey(month)
+  const inMonth = useMemo(() => counted.filter(c => c.key === current), [counted, current])
+  const income = inMonth.filter(c => c.income)
+  const expenses = inMonth.filter(c => !c.income)
+  const incomeTotal = income.reduce((s, c) => s + c.value, 0)
+  const expenseTotal = expenses.reduce((s, c) => s + c.value, 0)
+  const net = incomeTotal - expenseTotal
+  const expenseCats = useMemo(() => byCategory(expenses, expenseTotal), [inMonth])
+  const incomeCats = useMemo(() => byCategory(income, incomeTotal), [inMonth])
 
-    return arr.sort((a, b) => b.amount - a.amount)
-  }, [filteredTxs, totalForPeriod])
+  const trend = useMemo(() => {
+    const months = Array.from({ length: TREND_MONTHS }, (_, i) => firstOfMonth(month, i - (TREND_MONTHS - 1)))
+    const sums = months.map(m => {
+      const k = monthKey(m)
+      let inc = 0
+      let exp = 0
+      for (const c of counted) if (c.key === k) c.income ? (inc += c.value) : (exp += c.value)
+      return { month: m, income: inc, expense: exp }
+    })
+    const max = Math.max(1, ...sums.flatMap(s => [s.income, s.expense]))
+    return { sums, max }
+  }, [counted, month])
 
-  const chartWidth = SCREEN_W - 40
+  const isCurrentMonth = monthKey(month) === monthKey(new Date())
+  const periodLabel = `${MONTHS[month.getMonth()]} ${month.getFullYear()}`
+  const shift = (by: number) => {
+    triggerLightHaptic()
+    setMonth(m => firstOfMonth(m, by))
+  }
 
   const pull = usePullToRefresh(() => {
     setRefreshing(true)
@@ -150,185 +166,453 @@ export default function AnalyticsScreen() {
     checkForAppUpdate()
   }, refreshing)
 
-  if (loading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator color={Colors.orange} size="large" />
-      </View>
-    )
+  const openCat = (stat: CategoryStat, kind: 'expense' | 'income') => {
+    triggerLightHaptic()
+    setOpenCategory({
+      category: stat.category,
+      kind,
+      total: stat.amount,
+      currency,
+      periodLabel,
+      transactions: [...stat.transactions].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    })
   }
 
-  return (
-    <View style={styles.rootWrap}>
-    <Animated.ScrollView
-      style={styles.root}
-      contentContainerStyle={styles.content}
-      onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: pullY } } }], { useNativeDriver: true })}
-      scrollEventThrottle={16}
-      refreshControl={
-        <RefreshControl
-          refreshing={pull.controlRefreshing}
-          tintColor="transparent"
-          onRefresh={pull.onRefresh}
-        />
-      }
-      onScrollEndDrag={pull.onScrollEndDrag}
-    >
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Аналітика</Text>
-        <Text style={styles.headerSub}>{selectedMonth.label}</Text>
-      </View>
-
-      {/* Month Selector */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.monthScroll}>
-        {months.map((m) => (
-          <GlassPressable
-            key={`${m.year}-${m.month}`}
-            style={[
-              styles.monthPill,
-              selectedMonth.month === m.month && selectedMonth.year === m.year && styles.monthPillActive
-            ]}
-            onPress={() => setSelectedMonth(m)}
-          >
-            <Text style={[
-              styles.monthPillText,
-              selectedMonth.month === m.month && styles.monthPillTextActive
-            ]}>
-              {m.label}
-            </Text>
-          </GlassPressable>
-        ))}
-      </ScrollView>
-
-      {/* Type Switcher */}
-      <View style={styles.typeSwitcher}>
-        <GlassPressable
-          style={[styles.typeBtn, txType === "expense" && styles.typeBtnExpense]}
-          onPress={() => setTxType("expense")}
-        >
-          <Text style={[styles.typeBtnText, txType === "expense" && { color: Colors.red }]}>📉 Витрати</Text>
-        </GlassPressable>
-        <GlassPressable
-          style={[styles.typeBtn, txType === "income" && styles.typeBtnIncome]}
-          onPress={() => setTxType("income")}
-        >
-          <Text style={[styles.typeBtnText, txType === "income" && { color: Colors.green }]}>📈 Доходи</Text>
-        </GlassPressable>
-      </View>
-
-      {/* Total */}
-      <View style={styles.totalCard}>
-        <Text style={styles.totalLabel}>{txType === "expense" ? "Всього витрат" : "Всього доходів"}</Text>
-        <Text style={[styles.totalValue, { color: txType === "expense" ? Colors.red : Colors.green }]}>
-          {fmtAmount(totalForPeriod)}
+  const renderCategories = (list: CategoryStat[], kind: 'expense' | 'income', total: number) => (
+    <View style={styles.card}>
+      <View style={styles.cardHead}>
+        <Text style={styles.cardTitle}>{kind === 'expense' ? 'Витрати' : 'Доходи'}</Text>
+        <Text style={[styles.cardTotal, { color: kind === 'expense' ? '#FF6B6B' : Colors.green }]}>
+          {kind === 'expense' ? '−' : '+'}
+          {formatMoney(total, currency, { hideCents: true })}
         </Text>
-        <Text style={styles.totalSub}>{categoryStats.length} категорій • {filteredTxs.length} транзакцій</Text>
       </View>
-
-      {/* Bar Chart */}
-      {categoryStats.length > 0 && (
-        <View style={styles.chartSection}>
-          <Text style={styles.chartTitle}>Витрати по категоріях</Text>
-          {categoryStats.map((stat) => (
-            <View key={stat.category} style={styles.barRow}>
-              <View style={styles.barMeta}>
-                <View style={[styles.barDot, { backgroundColor: stat.color }]} />
-                <Text style={styles.barLabel} numberOfLines={1}>{stat.category}</Text>
-                <Text style={styles.barPercent}>{stat.percent.toFixed(1)}%</Text>
-              </View>
-              <View style={styles.barTrack}>
-                <View
-                  style={[
-                    styles.barFill,
-                    {
-                      width: Math.max(4, (stat.percent / 100) * (chartWidth - 40)),
-                      backgroundColor: stat.color
-                    }
-                  ]}
-                />
-              </View>
-              <Text style={styles.barAmount}>{fmtAmount(stat.amount)}</Text>
+      {list.length === 0 ? (
+        <Text style={styles.emptyLine}>{kind === 'expense' ? 'Витрат за цей місяць немає' : 'Доходів за цей місяць немає'}</Text>
+      ) : (
+        list.map((s, i) => (
+          <Pressable
+            key={s.category}
+            onPress={() => openCat(s, kind)}
+            style={({ pressed }) => [styles.catRow, i < list.length - 1 && styles.catRowBorder, pressed && styles.pressed]}
+          >
+            <View style={[styles.catIcon, kind === 'income' && styles.catIconIncome]}>
+              <Text style={styles.catEmoji}>{getCategoryIcon(s.category, kind === 'income' ? 1 : -1)}</Text>
             </View>
-          ))}
-        </View>
-      )}
-
-      {/* Empty */}
-      {categoryStats.length === 0 && (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyIcon}>📊</Text>
-          <Text style={styles.emptyTitle}>Немає даних</Text>
-          <Text style={styles.emptyText}>Транзакцій за цей місяць не знайдено</Text>
-        </View>
-      )}
-
-      {/* Totals Summary */}
-      <View style={styles.totalsSection}>
-        <Text style={styles.chartTitle}>Загальні залишки</Text>
-        {Object.entries(totals).map(([bucket, currencies]) => (
-          <View key={bucket} style={styles.bucketCard}>
-            <Text style={styles.bucketName}>
-              {bucket === "cash" ? "💵 Готівка" : bucket === "cards" ? "💳 Картки" : "💰 Заощадження"}
-            </Text>
-            {Object.entries(currencies as Record<string, number>).map(([currency, amount]) => (
-              <View key={currency} style={styles.bucketRow}>
-                <Text style={styles.bucketCurrency}>{currency}</Text>
-                <Text style={[styles.bucketAmount, { color: amount < 0 ? Colors.red : Colors.green }]}>
-                  {fmtAmount(Math.abs(amount))}
+            <View style={styles.catBody}>
+              <View style={styles.catTop}>
+                <Text style={styles.catName} numberOfLines={1}>{s.category}</Text>
+                <Text style={styles.catAmount}>{formatMoney(s.amount, currency, { hideCents: true })}</Text>
+              </View>
+              <View style={styles.catBottom}>
+                <View style={styles.track}>
+                  <View
+                    style={[
+                      styles.fill,
+                      { width: `${Math.max(2, s.share * 100)}%`, backgroundColor: kind === 'expense' ? Colors.orange : Colors.green },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.catMeta}>
+                  {Math.round(s.share * 100)}% · {s.count}
                 </Text>
               </View>
-            ))}
-          </View>
-        ))}
-      </View>
+            </View>
+            <Text style={styles.chevron}>›</Text>
+          </Pressable>
+        ))
+      )}
+    </View>
+  )
 
-      <View style={{ height: 120 }} />
-    </Animated.ScrollView>
-    <PullToRefreshIndicator scrollY={pullY} refreshing={refreshing} top={SAFE_TOP} />
+  return (
+    <View style={styles.root}>
+      <Animated.ScrollView
+        contentContainerStyle={styles.content}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: pullY } } }], { useNativeDriver: true })}
+        scrollEventThrottle={16}
+        refreshControl={<RefreshControl refreshing={pull.controlRefreshing} tintColor="transparent" onRefresh={pull.onRefresh} />}
+        onScrollEndDrag={pull.onScrollEndDrag}
+      >
+        <Text style={styles.screenTitle}>Аналітика</Text>
+
+        {/* ‹ Жовтень 2026 › */}
+        <View style={styles.monthNav}>
+          <Pressable onPress={() => shift(-1)} hitSlop={12} style={styles.navBtn}>
+            <Text style={styles.navArrow}>‹</Text>
+          </Pressable>
+          <Text style={styles.monthLabel}>{periodLabel}</Text>
+          <Pressable onPress={() => !isCurrentMonth && shift(1)} hitSlop={12} style={[styles.navBtn, isCurrentMonth && styles.navOff]}>
+            <Text style={styles.navArrow}>›</Text>
+          </Pressable>
+        </View>
+
+        {loading ? (
+          <ActivityIndicator color={Colors.orange} size="large" style={{ marginTop: 80 }} />
+        ) : (
+          <>
+            {/* Income and expenses together */}
+            <View style={styles.summary}>
+              <View style={[styles.sumBox, styles.sumIncome]}>
+                <Text style={styles.sumLabel}>Доходи</Text>
+                <Text style={[styles.sumValue, { color: Colors.green }]} numberOfLines={1} adjustsFontSizeToFit>
+                  +{formatMoney(incomeTotal, currency, { hideCents: true })}
+                </Text>
+              </View>
+              <View style={[styles.sumBox, styles.sumExpense]}>
+                <Text style={styles.sumLabel}>Витрати</Text>
+                <Text style={[styles.sumValue, { color: '#FF6B6B' }]} numberOfLines={1} adjustsFontSizeToFit>
+                  −{formatMoney(expenseTotal, currency, { hideCents: true })}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.netRow}>
+              <Text style={styles.netLabel}>Залишилось за місяць</Text>
+              <Text style={[styles.netValue, { color: net >= 0 ? Colors.white : Colors.orange }]}>
+                {net >= 0 ? '+' : '−'}
+                {formatMoney(Math.abs(net), currency, { hideCents: true })}
+              </Text>
+            </View>
+            {incomeTotal > 0 && (
+              <View style={styles.ratioTrack}>
+                <View style={[styles.ratioFill, { width: `${Math.min(100, (expenseTotal / incomeTotal) * 100)}%` }]} />
+              </View>
+            )}
+            {incomeTotal > 0 && (
+              <Text style={styles.ratioText}>Витрачено {Math.round((expenseTotal / incomeTotal) * 100)}% доходу</Text>
+            )}
+
+            {/* 6 months: income vs expenses, tap a month to open it */}
+            <View style={styles.card}>
+              <View style={styles.cardHead}>
+                <Text style={styles.cardTitle}>Останні {TREND_MONTHS} місяців</Text>
+                <View style={styles.legend}>
+                  <View style={[styles.legendDot, { backgroundColor: Colors.green }]} />
+                  <Text style={styles.legendText}>Доходи</Text>
+                  <View style={[styles.legendDot, { backgroundColor: Colors.orange }]} />
+                  <Text style={styles.legendText}>Витрати</Text>
+                </View>
+              </View>
+              <View style={styles.trend}>
+                {trend.sums.map(s => {
+                  const active = monthKey(s.month) === current
+                  return (
+                    <Pressable
+                      key={monthKey(s.month)}
+                      style={[styles.trendCol, active && styles.trendColActive]}
+                      onPress={() => {
+                        if (active) return
+                        triggerLightHaptic()
+                        setMonth(s.month)
+                      }}
+                    >
+                      <View style={styles.trendBars}>
+                        <View style={[styles.bar, { height: Math.max(3, (s.income / trend.max) * TREND_HEIGHT), backgroundColor: Colors.green }]} />
+                        <View style={[styles.bar, { height: Math.max(3, (s.expense / trend.max) * TREND_HEIGHT), backgroundColor: Colors.orange }]} />
+                      </View>
+                      <Text style={[styles.trendLabel, active && styles.trendLabelActive]}>{MONTHS_SHORT[s.month.getMonth()]}</Text>
+                    </Pressable>
+                  )
+                })}
+              </View>
+            </View>
+
+            {renderCategories(expenseCats, 'expense', expenseTotal)}
+            {renderCategories(incomeCats, 'income', incomeTotal)}
+
+            {excludedCats.length > 0 && (
+              <Text style={styles.footnote}>Не враховуються: {excludedCats.join(', ')} (Налаштування → Категорії поза статистикою)</Text>
+            )}
+          </>
+        )}
+        <View style={{ height: 130 }} />
+      </Animated.ScrollView>
+      <PullToRefreshIndicator scrollY={pullY} refreshing={refreshing} top={SAFE_TOP} />
+
+      <CategoryTransactionsSheet
+        view={openCategory}
+        cards={cards}
+        onClose={() => setOpenCategory(null)}
+        onChanged={() => {
+          setOpenCategory(null)
+          loadData(true)
+        }}
+      />
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  rootWrap: { flex: 1 },
-  root: { flex: 1, backgroundColor: Colors.bg },
-  centered: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: Colors.bg },
-  content: { paddingBottom: 130 },
-  header: { paddingHorizontal: 20, paddingTop: Platform.OS === "ios" ? 60 : 40, paddingBottom: 16 },
-  headerTitle: { ...Typography.h2, color: Colors.white },
-  headerSub: { ...Typography.caption, color: Colors.textSub },
-  monthScroll: { paddingHorizontal: 20, marginBottom: 16 },
-  monthPill: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: Radius.pill, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", marginRight: 10 },
-  monthPillActive: { backgroundColor: "rgba(255,107,0,0.2)", borderColor: "rgba(255,107,0,0.5)" },
-  monthPillText: { color: Colors.textSub, fontSize: 13, fontWeight: "600" },
-  monthPillTextActive: { color: Colors.orange, fontWeight: "700" },
-  typeSwitcher: { flexDirection: "row", marginHorizontal: 20, marginBottom: 16, backgroundColor: "rgba(255,255,255,0.06)", borderRadius: Radius.lg, padding: 4, gap: 4, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
-  typeBtn: { flex: 1, paddingVertical: 10, alignItems: "center", borderRadius: Radius.md },
-  typeBtnExpense: { backgroundColor: "rgba(239,68,68,0.15)", borderWidth: 1, borderColor: "rgba(239,68,68,0.3)" },
-  typeBtnIncome: { backgroundColor: "rgba(34,197,94,0.15)", borderWidth: 1, borderColor: "rgba(34,197,94,0.3)" },
-  typeBtnText: { color: Colors.textSub, fontWeight: "600", fontSize: 14 },
-  totalCard: { marginHorizontal: 20, marginBottom: 20, backgroundColor: Colors.bgCard, borderRadius: Radius.xl, padding: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", alignItems: "center" },
-  totalLabel: { ...Typography.caption, color: Colors.textSub, marginBottom: 8 },
-  totalValue: { fontSize: 36, fontWeight: "800", letterSpacing: -1 },
-  totalSub: { ...Typography.caption, color: Colors.textMuted, marginTop: 8 },
-  chartSection: { marginHorizontal: 20, marginBottom: 20, backgroundColor: Colors.bgCard, borderRadius: Radius.xl, padding: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
-  chartTitle: { ...Typography.h3, color: Colors.white, marginBottom: 16 },
-  barRow: { marginBottom: 16 },
-  barMeta: { flexDirection: "row", alignItems: "center", marginBottom: 6, gap: 8 },
-  barDot: { width: 10, height: 10, borderRadius: 5 },
-  barLabel: { flex: 1, color: Colors.white, fontSize: 13, fontWeight: "600" },
-  barPercent: { color: Colors.textSub, fontSize: 12 },
-  barTrack: { height: 8, backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 4, marginBottom: 4 },
-  barFill: { height: 8, borderRadius: 4 },
-  barAmount: { ...Typography.caption, color: Colors.textSub },
-  emptyState: { alignItems: "center", paddingVertical: 60 },
-  emptyIcon: { fontSize: 48, marginBottom: 16 },
-  emptyTitle: { ...Typography.h3, color: Colors.white, marginBottom: 8 },
-  emptyText: { ...Typography.body, color: Colors.textSub },
-  totalsSection: { marginHorizontal: 20 },
-  bucketCard: { backgroundColor: Colors.bgCard, borderRadius: Radius.xl, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
-  bucketName: { ...Typography.body, color: Colors.white, fontWeight: "700", marginBottom: 12 },
-  bucketRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
-  bucketCurrency: { ...Typography.body, color: Colors.textSub },
-  bucketAmount: { ...Typography.body, fontWeight: "700" },
+  root: {
+    flex: 1,
+    backgroundColor: Colors.bg,
+  },
+  content: {
+    paddingTop: SAFE_TOP + 12,
+    paddingHorizontal: 16,
+  },
+  screenTitle: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: Colors.white,
+    letterSpacing: -0.5,
+    paddingHorizontal: 4,
+    marginBottom: 12,
+  },
+  monthNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 14,
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    marginBottom: 14,
+  },
+  navBtn: {
+    width: 40,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+  },
+  navOff: {
+    opacity: 0.25,
+  },
+  navArrow: {
+    fontSize: 26,
+    lineHeight: 28,
+    color: Colors.white,
+    fontWeight: '600',
+  },
+  monthLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.white,
+  },
+  summary: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  sumBox: {
+    flex: 1,
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+  },
+  sumIncome: {
+    backgroundColor: 'rgba(34, 197, 94, 0.08)',
+    borderColor: 'rgba(34, 197, 94, 0.25)',
+  },
+  sumExpense: {
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    borderColor: 'rgba(239, 68, 68, 0.25)',
+  },
+  sumLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.white60,
+    marginBottom: 4,
+  },
+  sumValue: {
+    fontSize: 22,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  netRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    paddingHorizontal: 4,
+    marginTop: 14,
+  },
+  netLabel: {
+    fontSize: 14,
+    color: Colors.white60,
+  },
+  netValue: {
+    fontSize: 18,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  ratioTrack: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(34, 197, 94, 0.25)',
+    marginTop: 10,
+    marginHorizontal: 4,
+    overflow: 'hidden',
+  },
+  ratioFill: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.orange,
+  },
+  ratioText: {
+    fontSize: 12,
+    color: Colors.white40,
+    marginTop: 6,
+    paddingHorizontal: 4,
+  },
+  card: {
+    marginTop: 16,
+    borderRadius: 20,
+    padding: 14,
+    backgroundColor: '#141416',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
+  },
+  cardHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  cardTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: Colors.white,
+  },
+  cardTotal: {
+    fontSize: 15,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  legend: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginLeft: 6,
+  },
+  legendText: {
+    fontSize: 11,
+    color: Colors.white60,
+  },
+  trend: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: 6,
+  },
+  trendCol: {
+    flex: 1,
+    alignItems: 'center',
+    paddingTop: 8,
+    paddingBottom: 6,
+    borderRadius: 12,
+  },
+  trendColActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+  },
+  trendBars: {
+    height: TREND_HEIGHT,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 3,
+  },
+  bar: {
+    width: 9,
+    borderRadius: 4,
+  },
+  trendLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.white40,
+    marginTop: 6,
+  },
+  trendLabelActive: {
+    color: Colors.white,
+  },
+  emptyLine: {
+    fontSize: 14,
+    color: Colors.white40,
+    paddingVertical: 8,
+  },
+  catRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+  },
+  catRowBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  pressed: {
+    opacity: 0.6,
+  },
+  catIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 11,
+    backgroundColor: 'rgba(255, 107, 0, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  catIconIncome: {
+    backgroundColor: 'rgba(34, 197, 94, 0.12)',
+  },
+  catEmoji: {
+    fontSize: 18,
+  },
+  catBody: {
+    flex: 1,
+    gap: 6,
+  },
+  catTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  catName: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.white,
+  },
+  catAmount: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: Colors.white,
+    fontVariant: ['tabular-nums'],
+  },
+  catBottom: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  track: {
+    flex: 1,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+  },
+  fill: {
+    height: 5,
+    borderRadius: 3,
+  },
+  catMeta: {
+    fontSize: 11,
+    color: Colors.white40,
+    minWidth: 52,
+    textAlign: 'right',
+    fontVariant: ['tabular-nums'],
+  },
+  chevron: {
+    fontSize: 20,
+    color: Colors.white40,
+  },
+  footnote: {
+    fontSize: 12,
+    color: Colors.white40,
+    marginTop: 14,
+    paddingHorizontal: 4,
+    lineHeight: 17,
+  },
 })

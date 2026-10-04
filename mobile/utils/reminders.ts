@@ -13,8 +13,15 @@ Notifications.setNotificationHandler({
 
 export type ReminderKind = 'signing' | 'new-version'
 
-const DAY6 = 'signing-day6'
-const DAY7 = 'signing-day7'
+// Before the signature runs out: 2 days, 1 day, 12 hours and 1 hour ahead
+const SIGNING_REMINDERS = [
+  { id: 'signing-48h', hoursBefore: 48 },
+  { id: 'signing-24h', hoursBefore: 24 },
+  { id: 'signing-12h', hoursBefore: 12 },
+  { id: 'signing-1h', hoursBefore: 1 },
+]
+// Older schedules, removed when rescheduling
+const OLD_SIGNING_IDS = ['signing-day6', 'signing-day7']
 const NOTIFIED_VERSION_KEY = 'notified_app_version'
 
 async function ensurePermission(): Promise<boolean> {
@@ -24,47 +31,55 @@ async function ensurePermission(): Promise<boolean> {
   return (await Notifications.requestPermissionsAsync()).granted
 }
 
-// Nobody wants this at 3 a.m.: night times move to 20:00 the evening before
-function atDaytime(date: Date): Date {
+// Nobody wants this at 3 a.m.: times between 23:00 and 7:00 move to 22:00 the evening before
+function outsideNight(date: Date): Date {
   const d = new Date(date)
   const h = d.getHours()
-  if (h < 9) {
-    d.setDate(d.getDate() - 1)
-    d.setHours(20, 0, 0, 0)
-  } else if (h >= 22) {
-    d.setHours(20, 0, 0, 0)
+  if (h >= 23 || h < 7) {
+    if (h < 7) d.setDate(d.getDate() - 1)
+    d.setHours(22, 0, 0, 0)
   }
   return d
 }
 
+function signingTitle(expiresAt: Date, at: Date): string {
+  const hours = (expiresAt.getTime() - at.getTime()) / 36e5
+  const time = expiresAt.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
+  if (hours <= 2) return `⏰ Через ${hours <= 1.2 ? 'годину' : `${Math.round(hours)} год`} MyWallet перестане відкриватися`
+  if (expiresAt.toDateString() === at.toDateString()) return `Сьогодні о ${time} закінчується підпис MyWallet`
+  if (hours <= 36) return `Завтра о ${time} закінчується підпис MyWallet`
+  return `Через ${Math.round(hours / 24)} дні закінчується підпис MyWallet`
+}
+
 /**
- * The two signing reminders — about a day before the 7-day signature runs out (day 6) and a few
- * hours before (day 7). Rescheduled on every launch from the current signature, so after a refresh
- * in SideStore they move on by themselves.
+ * Signing reminders, marked time-sensitive (iOS shows them as urgent where it allows it).
+ * Rescheduled on every launch from the current signature, so after a refresh in SideStore they
+ * move on by themselves; two that would land within 90 minutes of each other become one.
  */
 export async function scheduleSigningReminders(expiresAt: Date): Promise<void> {
   try {
-    await Promise.all([DAY6, DAY7].map(id => Notifications.cancelScheduledNotificationAsync(id).catch(() => {})))
-    const reminders = [
-      {
-        id: DAY6,
-        at: atDaytime(new Date(expiresAt.getTime() - 24 * 36e5)),
-        title: 'Завтра закінчується підпис MyWallet',
-        body: 'Увімкніть LocalDevVPN, відкрийте SideStore → My Apps і натисніть «7 DAYS» біля MyWallet.',
-      },
-      {
-        id: DAY7,
-        at: atDaytime(new Date(expiresAt.getTime() - 3 * 36e5)),
-        title: 'Сьогодні закінчується підпис MyWallet',
-        body: 'Оновіть його в SideStore зараз, інакше додаток перестане відкриватися. Дані не зникнуть.',
-      },
-    ].filter(r => r.at.getTime() > Date.now() + 60 * 1000)
-    if (reminders.length === 0 || !(await ensurePermission())) return
+    const ids = [...SIGNING_REMINDERS.map(r => r.id), ...OLD_SIGNING_IDS]
+    await Promise.all(ids.map(id => Notifications.cancelScheduledNotificationAsync(id).catch(() => {})))
 
-    for (const r of reminders) {
+    const planned = SIGNING_REMINDERS.map(r => ({
+      id: r.id,
+      at: outsideNight(new Date(expiresAt.getTime() - r.hoursBefore * 36e5)),
+    }))
+      .filter(r => r.at.getTime() > Date.now() + 60 * 1000 && r.at < expiresAt)
+      .sort((a, b) => a.at.getTime() - b.at.getTime())
+      .filter((r, i, all) => !all[i + 1] || all[i + 1].at.getTime() - r.at.getTime() >= 90 * 60 * 1000)
+    if (planned.length === 0 || !(await ensurePermission())) return
+
+    for (const r of planned) {
       await Notifications.scheduleNotificationAsync({
         identifier: r.id,
-        content: { title: r.title, body: r.body, data: { kind: 'signing' satisfies ReminderKind } },
+        content: {
+          title: signingTitle(expiresAt, r.at),
+          body: 'Увімкніть LocalDevVPN, відкрийте SideStore → My Apps і натисніть «7 DAYS» (або Refresh All). Дані не зникнуть.',
+          sound: 'default',
+          interruptionLevel: 'timeSensitive',
+          data: { kind: 'signing' satisfies ReminderKind },
+        },
         trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: r.at },
       })
     }

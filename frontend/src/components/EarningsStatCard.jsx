@@ -5,6 +5,7 @@ import useMonoRates from '../hooks/useMonoRates'
 import { listCards } from '../api/cards'
 import { apiFetch } from '../utils.jsx'
 import { usePrimaryCurrency, convertAmount, currencySymbol } from '../utils/primaryCurrency'
+import { isCategoryExcluded, useExcludedCategories } from '../utils/statsCategories'
 
 const MONTHS = [
   'Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень',
@@ -16,6 +17,8 @@ const isExcludedFromStats = (tx) => {
   if (tx.exclude_from_stats === true || tx.exclude_from_stats === 'true' || tx.exclude_from_stats === 1) return true
   // Card switched off in its settings (flag computed by the backend)
   if (tx.card_excluded_from_stats) return true
+  // Category listed in Налаштування → «Категорії поза статистикою»
+  if (isCategoryExcluded(tx.category)) return true
   // Linked refunds are counted through their expense (amount_stat), not directly
   if (tx.refund_for) return true
   return String(tx.note || '').includes('[refund_for:')
@@ -32,6 +35,7 @@ const amountForStats = (tx) => {
  * the main currency from the settings — like the iPhone Home screen.
  */
 export default function EarningsStatCard({ title, mode }) {
+  const excludedCats = useExcludedCategories()
   const primary = usePrimaryCurrency()
   const rates = useMonoRates()
   const [loading, setLoading] = useState(true)
@@ -119,7 +123,7 @@ export default function EarningsStatCard({ title, mode }) {
       abortControllerRef.current = null
       if (typeof unsub === 'function') unsub()
     }
-  }, [mode, primary, rates ? Object.keys(rates).join(',') : ''])
+  }, [mode, primary, rates ? Object.keys(rates).join(',') : '', excludedCats])
 
   const now = new Date()
   const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)

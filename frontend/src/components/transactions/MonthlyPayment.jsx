@@ -12,6 +12,7 @@ import SplitTxModal from './SplitTxModal'
 import { apiFetch, getApiUrl } from '../../utils.jsx'
 import { listTransactions, searchTransactions, updateTransaction, deleteTransaction, archiveTransaction, deleteTransactions, getTransactionCategories } from '../../api/transactions'
 import { PERIODS, periodRange } from '../../utils/periods'
+import { isCategoryExcluded } from '../../utils/statsCategories'
 import { listBankConnections } from '../../api/bankConnections'
 import { useBankSyncStore } from '../../store/useBankSyncStore'
 import BankSyncIndicator from '../BankSyncIndicator'
@@ -28,6 +29,10 @@ const TYPE_FILTERS = [
   { id: 'expense', label: 'Витрати' },
   { id: 'income', label: 'Доходи' },
 ]
+
+// Bank imports that still have their "… Sync" category wait in "Закріплені" until they get a real one
+// (the iPhone app does the same, utils/cardExclusion isSyncCategory)
+const isSyncCategory = category => /\bsync$/i.test(String(category || '').trim())
 
 export default function MonthlyPayment() {
   // Використовуємо новий store
@@ -163,6 +168,8 @@ export default function MonthlyPayment() {
 
   const isExcludedFromStats = (tx) => {
     return tx?.exclude_from_stats === true || tx?.exclude_from_stats === 'true' || tx?.exclude_from_stats === 1 ||
+      // Category listed in Налаштування → «Категорії поза статистикою»
+      isCategoryExcluded(tx?.category) ||
       // Card switched off in its settings (flag computed by the backend)
       !!tx?.card_excluded_from_stats
   }
@@ -209,7 +216,7 @@ export default function MonthlyPayment() {
     const regular = []
     
     const isTxPinned = (tx) => {
-      const isAutoPinned = pinnedCategories.includes(tx.category)
+      const isAutoPinned = pinnedCategories.includes(tx.category) || isSyncCategory(tx.category)
       const isManuallyPinned = String(tx.note || '').includes('[pinned]')
       return isAutoPinned || isManuallyPinned
     }
@@ -347,7 +354,11 @@ export default function MonthlyPayment() {
       setPinnedRows([])
     } else if (!append) {
       const pinnedRequests = []
-      const validPinnedCats = (Array.isArray(pinnedCategories) ? pinnedCategories : []).filter(c => c && c.trim() !== '')
+      // Bank imports still in their "… Sync" category are pinned too (same as the iPhone app)
+      const validPinnedCats = [...new Set([
+        ...(Array.isArray(pinnedCategories) ? pinnedCategories : []),
+        ...categories.filter(isSyncCategory),
+      ])].filter(c => c && c.trim() !== '')
       if (validPinnedCats.length > 0) {
         pinnedRequests.push(listTransactions({ from: 0, to: 9999, categoryIn: validPinnedCats, excludeUsdt: !showUsdt }))
       }
@@ -533,7 +544,7 @@ export default function MonthlyPayment() {
       }
 
       if (type === 'UPDATE' && tx) {
-        const isStillPinned = pinnedCategories.includes(tx.category) || String(tx.note || '').includes('[pinned]')
+        const isStillPinned = pinnedCategories.includes(tx.category) || isSyncCategory(tx.category) || String(tx.note || '').includes('[pinned]')
         // Update or remove from pinnedRows based on whether tx still meets pinning condition
         setPinnedRows(prev => {
           const exists = (prev || []).some(r => r?.id === tx.id)

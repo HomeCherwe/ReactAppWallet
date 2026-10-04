@@ -10,6 +10,7 @@ import DeleteTxModal from '../transactions/DeleteTxModal'
 import { apiFetch } from '../../utils.jsx'
 import { fmtAmount } from '../../utils/format'
 import { listCards } from '../../api/cards'
+import { isCategoryExcluded, useExcludedCategories } from '../../utils/statsCategories'
 import { deleteTransaction, archiveTransaction } from '../../api/transactions'
 import useMonoRates from '../../hooks/useMonoRates'
 import { txBus } from '../../utils/txBus'
@@ -53,6 +54,7 @@ const CustomTooltip = ({ active, payload, type }) => {
 }
 
 export default function CategoryPieChart() {
+  const excludedCats = useExcludedCategories()
   const [periodType, setPeriodType] = useState('month') // 'week', 'month', 'year', 'custom'
   // Ініціалізуємо currentDate на 1 число поточного місяця
   const [currentDate, setCurrentDate] = useState(() => {
@@ -292,6 +294,8 @@ export default function CategoryPieChart() {
           if (tx.exclude_from_stats === true || tx.exclude_from_stats === 'true' || tx.exclude_from_stats === 1) return false
           // Card switched off in its settings (flag computed by the backend)
           if (tx.card_excluded_from_stats) return false
+          // Category listed in Налаштування → «Категорії поза статистикою»
+          if (isCategoryExcluded(tx.category)) return false
           // Safety/backward-compat: linked refunds are not counted directly
           if (tx.refund_for) return false
           if (String(tx.note || '').includes('[refund_for:')) return false
@@ -431,7 +435,7 @@ export default function CategoryPieChart() {
         abortControllerRef.current = null
       }
     }
-  }, [period.start.toISOString(), period.end.toISOString(), Object.keys(cardMap).join(','), rates ? Object.keys(rates).join(',') : ''])
+  }, [period.start.toISOString(), period.end.toISOString(), Object.keys(cardMap).join(','), rates ? Object.keys(rates).join(',') : '', excludedCats])
 
   const handlePeriodChange = (direction) => {
     const newDate = new Date(currentDate)
