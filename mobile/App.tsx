@@ -22,16 +22,16 @@ import MenuOverlayHost from "./components/MenuOverlayHost"
 // Screens
 import AuthScreen from "./screens/AuthScreen"
 import HomeScreen from "./screens/HomeScreen"
-import ArchivesScreen from "./screens/ArchivesScreen"
+import SubscriptionsScreen from "./screens/SubscriptionsScreen"
 import AnalyticsScreen from "./screens/AnalyticsScreen"
 import CardsScreen from "./screens/CardsScreen"
 
-// Tabs config (Subscriptions and Debts excluded per user instructions)
+// Tabs config (Debts excluded per user instructions; the archive lives in Settings)
 const TABS = [
-  { id: "home",      label: "Головна",   icon: "🏠" },
-  { id: "cards",     label: "Рахунки",   icon: "💳" },
-  { id: "archives",  label: "Архіви",     icon: "📁" },
-  { id: "analytics", label: "Аналітика", icon: "📊" },
+  { id: "home",          label: "Головна",   icon: "🏠" },
+  { id: "cards",         label: "Рахунки",   icon: "💳" },
+  { id: "subscriptions", label: "Підписки",  icon: "🔁" },
+  { id: "analytics",     label: "Аналітика", icon: "📊" },
 ] as const;
 type TabId = typeof TABS[number]["id"]
 
@@ -110,7 +110,7 @@ export default function App() {
     switch (activeTab) {
       case "home":      return <HomeScreen onNavigateToCards={() => handleTabPress("cards")} />
       case "cards":     return <CardsScreen />
-      case "archives":  return <ArchivesScreen />
+      case "subscriptions": return <SubscriptionsScreen />
       case "analytics": return <AnalyticsScreen />
 
     }

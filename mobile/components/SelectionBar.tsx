@@ -87,7 +87,7 @@ export default function SelectionBar({ selected, cards, onCancel, onSelectAll, o
       icon: 'archive',
       label: 'В архів',
       onPress: () =>
-        Alert.alert(`Заархівувати ${count} ${plural(count)}?`, 'Вони зникнуть зі списку й балансу; повернути можна з архіву.', [
+        Alert.alert(`Заархівувати ${count} ${plural(count)}?`, 'Вони зникнуть зі списку й балансу; повернути можна з архіву (Налаштування → Архів).', [
           { text: 'Скасувати', style: 'cancel' },
           { text: 'В архів', onPress: () => run(() => updateTransactionsBulk(ids, { archives: true }), `В архіві: ${count}`) },
         ]),
@@ -97,10 +97,15 @@ export default function SelectionBar({ selected, cards, onCancel, onSelectAll, o
       label: 'Видалити',
       destructive: true,
       onPress: () =>
-        Alert.alert(`Видалити ${count} ${plural(count)}?`, 'Це не можна скасувати.', [
-          { text: 'Скасувати', style: 'cancel' },
-          { text: 'Видалити', style: 'destructive', onPress: () => run(() => deleteTransactions(ids), `Видалено: ${count}`) },
-        ]),
+        Alert.alert(
+          `Видалити ${count} ${plural(count)}?`,
+          'Видалення не можна скасувати. З архіву їх можна повернути (Налаштування → Архів).',
+          [
+            { text: 'Скасувати', style: 'cancel' },
+            { text: 'В архів', onPress: () => run(() => updateTransactionsBulk(ids, { archives: true }), `В архіві: ${count}`) },
+            { text: 'Видалити', style: 'destructive', onPress: () => run(() => deleteTransactions(ids), `Видалено: ${count}`) },
+          ]
+        ),
     },
   ]
 

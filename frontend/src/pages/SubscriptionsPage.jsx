@@ -5,6 +5,7 @@ import toast from 'react-hot-toast'
 import { listCards } from '../api/cards'
 import { deleteSubscription, detectSubscriptions, listSubscriptions, monthlyCost, updateSubscription } from '../api/insights'
 import DeleteSubscriptionModal from '../components/subscriptions/DeleteSubscriptionModal'
+import RenameSubscriptionModal from '../components/subscriptions/RenameSubscriptionModal'
 import SubscriptionTransactionsDrawer from '../components/subscriptions/SubscriptionTransactionsDrawer'
 import useMonoRates from '../hooks/useMonoRates'
 import { convertAmount, usePrimaryCurrency } from '../utils/primaryCurrency'
@@ -37,6 +38,7 @@ export default function SubscriptionsPage() {
   const [detecting, setDetecting] = useState(false)
   const [open, setOpen] = useState(null)
   const [toDelete, setToDelete] = useState(null)
+  const [toRename, setToRename] = useState(null)
   const [expanded, setExpanded] = useState({ inactive: false, old: false, hidden: false })
   const rates = useMonoRates()
   const currency = usePrimaryCurrency()
@@ -81,11 +83,11 @@ export default function SubscriptionsPage() {
 
   const monthly = groups.active.reduce((sum, s) => sum + (convertAmount(monthlyCost(s), curOf(s), currency, rates) ?? 0), 0)
 
-  const rename = async s => {
-    const name = window.prompt('Назва підписки', s.name)?.trim()
-    if (!name || name === s.name) return
+  const rename = async name => {
     try {
-      await updateSubscription(s.id, { name })
+      await updateSubscription(toRename.id, { name })
+      toast.success(`Тепер «${name}»`)
+      setToRename(null)
       load()
     } catch (e) {
       toast.error(`Не вдалося: ${e.message}`)
@@ -144,7 +146,7 @@ export default function SubscriptionsPage() {
         </div>
         <div className="font-semibold text-[15px] tabular-nums whitespace-nowrap">{chargeText(s)}</div>
         <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition" onClick={e => e.stopPropagation()}>
-          <IconBtn title="Перейменувати" onClick={() => rename(s)}><Pencil size={14} /></IconBtn>
+          <IconBtn title="Перейменувати" onClick={() => setToRename(s)}><Pencil size={14} /></IconBtn>
           {s.hidden ? (
             <IconBtn title="Повернути в підписки" onClick={() => setHidden(s, false)}><Undo2 size={14} /></IconBtn>
           ) : s.source === 'detected' ? (
@@ -235,6 +237,7 @@ export default function SubscriptionsPage() {
 
       <SubscriptionTransactionsDrawer open={!!open} onClose={() => setOpen(null)} subscription={open} cards={cards} />
       <DeleteSubscriptionModal open={!!toDelete} subscription={toDelete} onDelete={remove} onCancel={() => setToDelete(null)} />
+      <RenameSubscriptionModal subscription={toRename} onSave={rename} onCancel={() => setToRename(null)} />
     </motion.div>
   )
 }

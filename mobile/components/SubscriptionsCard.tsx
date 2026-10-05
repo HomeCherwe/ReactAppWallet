@@ -45,13 +45,18 @@ interface Props {
   rates: RatesMap | null
   currency: string
   hidden?: boolean
+  title?: string
+  /** Bumped by pull-to-refresh: look for subscriptions again right away */
+  refreshKey?: number
+  /** Loaded (e.g. to stop the pull-to-refresh spinner) */
+  onLoaded?: () => void
 }
 
 /**
  * Subscriptions the bank's charges show (Netflix, rent, the phone…): just for information — the
  * charges come from the bank, the app only finds them. Tap one to see every charge.
  */
-export default function SubscriptionsCard({ cards, rates, currency, hidden }: Props) {
+export default function SubscriptionsCard({ cards, rates, currency, hidden, title = 'Підписки', refreshKey = 0, onLoaded }: Props) {
   const [subs, setSubs] = useState<DetectedSubscription[] | null>(null)
   const [open, setOpen] = useState<DetectedSubscription | null>(null)
   const [showInactive, setShowInactive] = useState(false)
@@ -61,22 +66,29 @@ export default function SubscriptionsCard({ cards, rates, currency, hidden }: Pr
   const updateNestedSetting = useSettingsStore(s => s.updateNestedSetting)
   const loadId = useRef(0)
 
-  const load = useCallback(async (detect: boolean) => {
+  const onLoadedRef = useRef(onLoaded)
+  onLoadedRef.current = onLoaded
+  const load = useCallback(async (detect: boolean, force = false) => {
     const id = ++loadId.current
     try {
-      if (detect) await detectSubscriptions().catch(() => null)
+      if (detect) await detectSubscriptions(force).catch(() => null)
       const list = await listSubscriptions()
       if (id !== loadId.current) return
       setSubs(list)
       scheduleSubscriptionReminders(list, useSettingsStore.getState().getNestedSetting<boolean>(SUBSCRIPTION_REMIND_PATH, true))
     } catch (e) {
       if (id === loadId.current) setSubs(prev => prev ?? [])
+    } finally {
+      if (id === loadId.current) onLoadedRef.current?.()
     }
   }, [])
 
   useEffect(() => {
     load(true)
   }, [load])
+  useEffect(() => {
+    if (refreshKey) load(true, true)
+  }, [refreshKey])
   useEffect(() => txBus.subscribe(ev => ev?.type === 'SYNCED' && load(false)), [load])
 
   const cardCurrency = (id?: string | null) => cards.find(c => c.id === id)?.currency || null
@@ -135,7 +147,7 @@ export default function SubscriptionsCard({ cards, rates, currency, hidden }: Pr
   return (
     <View style={styles.card}>
       <View style={styles.head}>
-        <Text style={styles.title}>Підписки</Text>
+        <Text style={styles.title}>{title}</Text>
         {groups.active.length > 0 && (
           <Text style={styles.total}>{hidden ? '••••' : `≈ ${formatMoney(monthly, currency, { hideCents: true })}/міс`}</Text>
         )}

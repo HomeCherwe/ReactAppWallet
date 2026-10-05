@@ -72,6 +72,7 @@ import {
   getRecentMonthsStats,
   MonthStat,
   deleteTransaction,
+  archiveTransaction,
   linkRefund,
   unlinkRefund,
   Transaction,
@@ -492,21 +493,32 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
     refreshAfterTxChange()
   }
 
+  // Delete can't be undone; the archive can (Налаштування → Архів)
   const handleDeleteTx = (tx: Transaction) => {
     Alert.alert(
       'Видалити транзакцію?',
-      'Цю дію неможливо скасувати',
+      'Видалення не можна скасувати. В архіві вона зникне зі списку й балансу, але її можна повернути (Налаштування → Архів).',
       [
         { text: 'Скасувати', style: 'cancel' },
+        {
+          text: 'В архів',
+          onPress: async () => {
+            try {
+              await archiveTransaction(tx.id)
+              Toast.show({ type: 'success', text1: 'Транзакцію заархівовано', text2: 'Повернути: Налаштування → Архів' })
+              refreshAfterTxChange()
+            } catch (e: any) {
+              Alert.alert('Помилка', e.message || 'Не вдалося заархівувати')
+            }
+          },
+        },
         {
           text: 'Видалити',
           style: 'destructive',
           onPress: async () => {
             try {
               await deleteTransaction(tx.id)
-              loadData()
-              refreshTxFeed()
-              refreshPinned()
+              refreshAfterTxChange()
             } catch (e: any) {
               Alert.alert('Помилка', e.message || 'Не вдалося видалити')
             }

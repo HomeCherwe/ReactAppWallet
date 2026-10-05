@@ -124,10 +124,10 @@ export async function fetchBalanceHistory(params: {
       while (true) {
         let txQuery = supabase
           .from('transactions')
-          .select('id, amount, created_at, card_id, archives, exclude_from_stats')
+          .select('id, amount, created_at, card_id, archives')
           .eq('user_id', user.id)
+          // Every transaction that moves the balance ("not in stats" ones too), like the backend
           .or('archives.is.null,archives.eq.false')
-          .or('exclude_from_stats.is.null,exclude_from_stats.eq.false')
           .gte('created_at', startDateStr)
           .order('created_at', { ascending: true })
           .range(offset, offset + pageSize - 1)
@@ -206,7 +206,6 @@ export async function fetchBalanceHistory(params: {
         .select('created_at')
         .eq('user_id', user.id)
         .or('archives.is.null,archives.eq.false')
-        .or('exclude_from_stats.is.null,exclude_from_stats.eq.false')
         .order('created_at', { ascending: true })
         .limit(1)
         .maybeSingle()

@@ -667,9 +667,9 @@ app.get('/api/balance/history', getUserFromToken, async (req, res) => {
       .eq('user_id', userId)
     if (cardsError) throw cardsError
 
-    // A card is left out if it's excluded itself or its whole bank is
-    const isCardExcluded = (card) =>
-      !!card && (card.exclude_from_stats || (card.bank_id && excludedBankIds.has(card.bank_id)))
+    // The history has to end at the balance the apps show: that balance counts every card except
+    // those of a bank switched off (a card's own "not in stats" only affects statistics)
+    const isCardExcluded = (card) => !!card && !!card.bank_id && excludedBankIds.has(card.bank_id)
 
     const getBucket = (card) => {
       if (!card) return 'cash'
@@ -721,10 +721,10 @@ app.get('/api/balance/history', getUserFromToken, async (req, res) => {
     while (true) {
       let txQuery = supabase
         .from('transactions')
-        .select('id, amount, created_at, card_id, archives, exclude_from_stats')
+        .select('id, amount, created_at, card_id, archives')
         .eq('user_id', userId)
+        // Every transaction that moves the balance ("not in stats" ones too), like the balance itself
         .or('archives.is.null,archives.eq.false')
-        .or('exclude_from_stats.is.null,exclude_from_stats.eq.false')
         .gte('created_at', startDateStr)
         .order('created_at', { ascending: true })
         .range(offset, offset + pageSize - 1)
@@ -813,7 +813,6 @@ app.get('/api/balance/history', getUserFromToken, async (req, res) => {
       .select('created_at')
       .eq('user_id', userId)
       .or('archives.is.null,archives.eq.false')
-      .or('exclude_from_stats.is.null,exclude_from_stats.eq.false')
       .order('created_at', { ascending: true })
       .limit(1)
       .maybeSingle()

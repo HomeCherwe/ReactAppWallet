@@ -6,7 +6,6 @@ import Toast from 'react-native-toast-message'
 import PullToRefreshIndicator, { usePullToRefresh } from '../components/PullToRefreshIndicator'
 import CategoryTransactionsSheet, { CategoryView } from '../components/CategoryTransactionsSheet'
 import MonthlyReportCard from '../components/MonthlyReportCard'
-import SubscriptionsCard from '../components/SubscriptionsCard'
 import WrappedModal, { defaultWrappedYear } from '../components/WrappedModal'
 import { MonthlyReportStats } from '../api/insights'
 import { txDisplayTitle } from '../utils/pinned'
@@ -341,8 +340,6 @@ export default function AnalyticsScreen() {
 
             {renderCategories(expenseCats, 'expense', expenseTotal)}
             {renderCategories(incomeCats, 'income', incomeTotal)}
-
-            <SubscriptionsCard cards={cards} rates={rates} currency={currency} />
 
             {/* The year as stories */}
             <Pressable
