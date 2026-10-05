@@ -464,20 +464,46 @@ export async function afterBankSync(supabase, userId, { imported = true } = {}) 
 // The month's report
 // ---------------------------------------------------------------------------
 
+// The report's parts, in the order the apps show them
+const REPORT_SECTIONS = ['changes', 'overspend', 'good', 'tip']
+
+/**
+ * GPT's report, structured so the apps can lay it out: a one-line summary and short points under
+ * «Що змінилось», «Де перевитрата», «Що вийшло добре», «Порада». Kept in monthly_reports.report as
+ * JSON text ({ v: 2, summary, sections }); older reports there are plain text.
+ */
 export async function writeMonthlyReport(month, currency, stats) {
   const system = `Ти — фінансовий помічник у застосунку MyWallet. Тобі дають підсумки місяця користувача (суми в ${currency}).
-Напиши 3–5 коротких речень українською, звертаючись на «ти», дружньо й по суті:
-- що змінилось порівняно з попереднім місяцем (доходи, витрати, помітні категорії);
-- де перевитрата або що виросло найбільше;
-- одна конкретна порада на наступний місяць.
-Без привітань, без заголовків і списків, без вигаданих фактів — лише з наданих цифр. Суми округлюй і пиши з валютою.
-Якщо є поле partial — місяць ще триває: порівнюй обережно, бо це лише частина місяця.
-Не вгадуй рід: без дієслів минулого часу про людину («ти витратив») — пиши «витрати зросли», «на кафе пішло».
-Поверни JSON: {"report": "<текст>"}`
+Напиши короткий структурований звіт українською, звертаючись на «ти», дружньо й по суті.
+Поверни ТІЛЬКИ JSON:
+{
+  "summary": "<одне коротке речення — головне про місяць>",
+  "sections": [
+    {"type": "changes", "points": ["..."]},
+    {"type": "overspend", "points": ["..."]},
+    {"type": "good", "points": ["..."]},
+    {"type": "tip", "points": ["..."]}
+  ]
+}
+- changes — що змінилось порівняно з попереднім місяцем: доходи, витрати, помітні категорії (2–3 пункти);
+- overspend — де перевитрата або що виросло найбільше (1–2 пункти; якщо нічого не виросло — пропусти розділ);
+- good — що вийшло добре, наприклад категорія зменшилась (0–2 пункти; нічого доброго — пропусти розділ);
+- tip — рівно одна конкретна порада на наступний місяць.
+Кожен пункт — одне коротке речення (до 110 символів) з цифрами. Без привітань і вигаданих фактів — лише з наданих цифр.
+Суми округлюй і пиши з валютою. Якщо є поле partial — місяць ще триває: порівнюй обережно, бо це лише частина місяця.
+Не вгадуй рід: без дієслів минулого часу про людину («ти витратив») — пиши «витрати зросли», «на кафе пішло».`
   const parsed = await openaiJson(system, JSON.stringify({ month, currency, ...stats }))
-  const report = String(parsed?.report || '').trim()
-  if (!report) throw new Error('empty report')
-  return report
+  const summary = String(parsed?.summary || '').trim().slice(0, 200)
+  const sections = REPORT_SECTIONS.map(type => {
+    const found = (Array.isArray(parsed?.sections) ? parsed.sections : []).find(s => s?.type === type)
+    const points = (Array.isArray(found?.points) ? found.points : [])
+      .map(p => String(p || '').trim().slice(0, 220))
+      .filter(Boolean)
+      .slice(0, type === 'tip' ? 1 : 3)
+    return { type, points }
+  }).filter(s => s.points.length > 0)
+  if (!summary && sections.length === 0) throw new Error('empty report')
+  return JSON.stringify({ v: 2, summary, sections })
 }
 
 // ---------------------------------------------------------------------------

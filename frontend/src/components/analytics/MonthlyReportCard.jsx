@@ -2,13 +2,88 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Sparkles } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { listCards } from '../../api/cards'
-import { getMonthlyReport, readMonthlyReport } from '../../api/insights'
+import { getMonthlyReport, parseReport, readMonthlyReport } from '../../api/insights'
 import useMonoRates from '../../hooks/useMonoRates'
 import { usePrimaryCurrency } from '../../utils/primaryCurrency'
 import { useExcludedCategories } from '../../utils/statsCategories'
 import { countedTransactions, listPeriodTransactions } from '../../utils/statsCount'
 
 const MONTHS = ['Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень', 'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень']
+// "порівняно з серпнем"
+const MONTHS_INSTR = ['січнем', 'лютим', 'березнем', 'квітнем', 'травнем', 'червнем', 'липнем', 'серпнем', 'вереснем', 'жовтнем', 'листопадом', 'груднем']
+
+const SECTION = {
+  changes: { emoji: '📊', title: 'Що змінилось', dot: 'bg-white/50' },
+  overspend: { emoji: '🔥', title: 'Де перевитрата', dot: 'bg-rose-400' },
+  good: { emoji: '👍', title: 'Що вийшло добре', dot: 'bg-green-400' },
+  tip: { emoji: '💡', title: 'Порада', dot: 'bg-brand-light' },
+}
+
+/** Change against the previous month, e.g. { text: '↑ 23%', up: true }; null when there's nothing to compare */
+function delta(now, before) {
+  if (!before) return null
+  const pct = Math.round(((now - before) / before) * 100)
+  if (pct === 0) return { text: '= 0%', up: false }
+  return { text: `${pct > 0 ? '↑' : '↓'} ${Math.abs(pct)}%`, up: pct > 0 }
+}
+
+/** Income / spending against the previous month (not for a month still going on: half a month always looks cheaper) */
+export function ReportChanges({ stats, monthIndex }) {
+  if (!stats || stats.partial || !stats.transactions) return null
+  const items = [
+    { label: 'Витрати', d: delta(stats.expense, stats.previous.expense), good: false },
+    { label: 'Доходи', d: delta(stats.income, stats.previous.income), good: true },
+  ].filter(c => c.d)
+  if (items.length === 0) return null
+  return (
+    <div className="flex flex-wrap items-center gap-2 mb-4">
+      {items.map(c => {
+        // More income is good; more spending isn't
+        const fine = c.d.up === c.good
+        return (
+          <span
+            key={c.label}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[12.5px] ${fine ? 'bg-green-500/10 border-green-500/30' : 'bg-rose-500/10 border-rose-500/30'}`}
+          >
+            <span className="font-semibold text-white/80">{c.label}</span>
+            <span className={`font-extrabold tabular-nums ${fine ? 'text-green-400' : 'text-rose-400'}`}>{c.d.text}</span>
+          </span>
+        )
+      })}
+      <span className="text-xs text-white/40">порівняно з {MONTHS_INSTR[(monthIndex + 11) % 12]}</span>
+    </div>
+  )
+}
+
+/** The report laid out: the summary, then each part with its points; the tip stands out */
+export function ReportBody({ text }) {
+  const { summary, sections } = useMemo(() => parseReport(text), [text])
+  return (
+    <div>
+      {summary && <p className="text-[17px] leading-snug font-bold text-white">{summary}</p>}
+      {sections.map(s => {
+        const meta = SECTION[s.type] ?? SECTION.changes
+        const tip = s.type === 'tip'
+        return (
+          <div key={s.type} className={tip ? 'mt-4 p-3.5 rounded-2xl bg-brand/[0.12] border border-brand/40' : 'mt-4'}>
+            <div className="text-xs font-extrabold uppercase tracking-wide text-white/60 mb-1.5">
+              {meta.emoji} {meta.title}
+            </div>
+            <ul className="space-y-1.5">
+              {s.points.map((p, i) => (
+                <li key={i} className="flex items-start gap-2.5 text-[15px] leading-relaxed text-white">
+                  {!tip && <span className={`mt-[9px] h-1.5 w-1.5 shrink-0 rounded-full ${meta.dot}`} />}
+                  <span className={tip ? 'font-semibold' : ''}>{p}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 const firstOfMonth = (d, shift = 0) => new Date(d.getFullYear(), d.getMonth() + shift, 1)
 const titleOf = tx =>
   String(tx.note || '').replace(/\[pinned\]/g, '').split('|')[0].split('\n')[0].trim() || tx.merchant_name || tx.category || 'Покупка'
@@ -126,6 +201,8 @@ export default function MonthlyReportCard() {
         </div>
       </div>
 
+      <ReportChanges stats={stats} monthIndex={month.getMonth()} />
+
       {writing ? (
         <div className="flex items-center gap-3 py-2 text-white/65 text-sm">
           <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-brand" />
@@ -133,8 +210,8 @@ export default function MonthlyReportCard() {
         </div>
       ) : report ? (
         <>
-          <p className="text-[15px] leading-relaxed text-white">{report.report}</p>
-          <div className="flex items-center gap-3 mt-3 text-xs text-white/45">
+          <ReportBody text={report.report} />
+          <div className="flex items-center gap-3 mt-4 text-xs text-white/45">
             <span>GPT · {new Date(report.created_at).toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })}</span>
             <button onClick={() => write(true)} className="font-semibold text-brand-light hover:underline">
               Оновити
@@ -148,7 +225,7 @@ export default function MonthlyReportCard() {
           <p className="text-sm text-white/65">
             {stats.transactions === 0
               ? 'За цей місяць транзакцій немає.'
-              : 'Кілька речень від GPT: що змінилось порівняно з минулим місяцем, де перевитрата і порада на наступний.'}
+              : 'Короткий розбір від GPT: що змінилось порівняно з минулим місяцем, де перевитрата, що вийшло добре, і порада на наступний.'}
           </p>
           {stats.transactions > 0 && (
             <button onClick={() => write(false)} className="btn-primary mt-3 px-4 py-2 rounded-full text-sm font-semibold">

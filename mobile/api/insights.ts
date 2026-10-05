@@ -163,3 +163,29 @@ export async function readMonthlyReport(month: string): Promise<MonthlyReport | 
   const { data } = await supabase.from('monthly_reports').select('report, created_at, currency').eq('month', month).maybeSingle()
   return (data as MonthlyReport) ?? null
 }
+
+export type ReportSectionType = 'changes' | 'overspend' | 'good' | 'tip'
+export interface ParsedReport {
+  summary: string
+  sections: { type: ReportSectionType; points: string[] }[]
+}
+
+/**
+ * The report as parts to lay out. New reports are JSON ({ v: 2, summary, sections }); older ones are
+ * plain text — then the first sentence is the summary and the last one (the tip) its own part.
+ */
+export function parseReport(text: string): ParsedReport {
+  try {
+    const j = JSON.parse(text)
+    if (j?.v === 2) return { summary: String(j.summary || ''), sections: Array.isArray(j.sections) ? j.sections : [] }
+  } catch {}
+  const sentences = String(text || '')
+    .split(/(?<=[.!?…])\s+(?=[A-ZА-ЯІЇЄҐ«"])/u)
+    .map(s => s.trim())
+    .filter(Boolean)
+  const [summary = '', ...rest] = sentences
+  const sections: ParsedReport['sections'] = []
+  if (rest.length > 1) sections.push({ type: 'changes', points: rest.slice(0, -1) })
+  if (rest.length > 0) sections.push({ type: rest.length > 1 ? 'tip' : 'changes', points: rest.slice(-1) })
+  return { summary, sections }
+}
