@@ -19,6 +19,7 @@ import BankSyncIndicator from '../BankSyncIndicator'
 import FilterChip from '../FilterChip'
 import PossibleDuplicates from './PossibleDuplicates'
 import { txBus } from '../../utils/txBus'
+import { acceptSuggestions, autoCategorize } from '../../api/insights'
 import { listCards } from '../../api/cards'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { fmtAmount } from '../../utils/format'
@@ -209,6 +210,28 @@ export default function MonthlyPayment() {
     : []
 
   // Split rawVisibleRows into pinned and regular based on category setting or manual pinning tag in note
+  // ---- Suggested categories for waiting bank imports (✓ on a row, or «Підтвердити всі») ----
+  const [acceptingSuggestions, setAcceptingSuggestions] = useState(false)
+  const acceptSuggestionsFor = async txs => {
+    if (acceptingSuggestions || txs.length === 0) return
+    setAcceptingSuggestions(true)
+    try {
+      const n = await acceptSuggestions(txs)
+      // The rules learned them: the same merchants' other waiting imports follow
+      const more = await autoCategorize({ gpt: false }).catch(() => null)
+      toast.success(
+        (n === 1 ? `Категорія «${txs[0].suggested_category}»` : `Підтверджено: ${n}`) +
+          (more?.applied ? ` · ще ${more.applied} схожих` : '')
+      )
+      fetchPage({ append: false, txType: transactionType, category: selectedCategory })
+    } catch (e) {
+      toast.error(`Не вдалося підтвердити: ${e?.message || e}`)
+    } finally {
+      setAcceptingSuggestions(false)
+    }
+  }
+  const acceptOneSuggestion = tx => acceptSuggestionsFor([tx])
+
   const { pinnedTxs, regularTxs } = useMemo(() => {
     // Searching: every match is in the list, the pinned block steps aside (like the iPhone app)
     if (searchMode) return { pinnedTxs: [], regularTxs: rawVisibleRows }
@@ -247,6 +270,10 @@ export default function MonthlyPayment() {
     
     return { pinnedTxs: pinned, regularTxs: regular }
   }, [rawVisibleRows, pinnedRows, pinnedCategories, rows, searchMode])
+  const suggestedPinned = useMemo(
+    () => pinnedTxs.filter(t => t.suggested_category && isSyncCategory(t.category)),
+    [pinnedTxs]
+  )
 
   const lastPinnedLengthRef = useRef(0)
   useEffect(() => {
@@ -1391,6 +1418,22 @@ export default function MonthlyPayment() {
                   </div>
                 </button>
                 
+                {pinnedExpanded && suggestedPinned.length > 0 && (
+                  <div className="mx-3 mb-1 flex flex-wrap items-center gap-3 rounded-2xl bg-[#FFB25C]/[0.08] border border-[#FFB25C]/25 px-3 py-2.5">
+                    <span className="flex-1 min-w-[180px] text-[13px] text-white/70">
+                      ✨ {suggestedPinned.length === 1 ? 'Є підказка' : `Підказок: ${suggestedPinned.length}`} — натисніть ✓ біля суми, щоб прийняти категорію
+                    </span>
+                    {suggestedPinned.length > 1 && (
+                      <button
+                        disabled={acceptingSuggestions}
+                        onClick={() => acceptSuggestionsFor(suggestedPinned)}
+                        className="px-3.5 py-1.5 rounded-full text-[13px] font-bold bg-[#FFB25C] text-[#1D140C] hover:brightness-110 disabled:opacity-60 transition"
+                      >
+                        {acceptingSuggestions ? 'Зберігаю…' : 'Підтвердити всі'}
+                      </button>
+                    )}
+                  </div>
+                )}
                 {pinnedExpanded && (
                   <div className="px-3 pb-3 space-y-4">
                     {pinnedSortedDays.map(({ dayKey, dateHeader, transactions, total }) => {
@@ -1451,6 +1494,7 @@ export default function MonthlyPayment() {
                                     amountOverride={amountOverride}
                                     selected={selectedIds.has(tx.id)}
                                     onSelect={(txId, checked, event) => handleSelect(txId, checked, originalIndex, event)}
+                                    onAcceptSuggestion={acceptOneSuggestion}
                                   />
 
                                   {/* Nested refund transactions */}

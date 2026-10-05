@@ -4,6 +4,7 @@ import Toast from 'react-native-toast-message'
 import { Colors } from '../constants/theme'
 import { Card } from '../api/cards'
 import { deleteTransactions, getTransactionCategories, Transaction, updateTransactionsBulk } from '../api/transactions'
+import { autoCategorize } from '../api/insights'
 import { isSyncCategory } from '../utils/cardExclusion'
 import { triggerErrorHaptic, triggerLightHaptic, triggerSuccessHaptic } from '../utils/haptics'
 import { GlassSurface } from './LiquidGlass'
@@ -86,7 +87,7 @@ export default function SelectionBar({ selected, cards, onCancel, onSelectAll, o
       icon: 'archive',
       label: 'В архів',
       onPress: () =>
-        Alert.alert(`Заархівувати ${count} ${plural(count)}?`, 'Вони зникнуть зі списку й балансу; повернути можна з архіву.', [
+        Alert.alert(`Заархівувати ${count} ${plural(count)}?`, 'Вони зникнуть зі списку й балансу; повернути можна з архіву (Налаштування → Архів).', [
           { text: 'Скасувати', style: 'cancel' },
           { text: 'В архів', onPress: () => run(() => updateTransactionsBulk(ids, { archives: true }), `В архіві: ${count}`) },
         ]),
@@ -96,10 +97,15 @@ export default function SelectionBar({ selected, cards, onCancel, onSelectAll, o
       label: 'Видалити',
       destructive: true,
       onPress: () =>
-        Alert.alert(`Видалити ${count} ${plural(count)}?`, 'Це не можна скасувати.', [
-          { text: 'Скасувати', style: 'cancel' },
-          { text: 'Видалити', style: 'destructive', onPress: () => run(() => deleteTransactions(ids), `Видалено: ${count}`) },
-        ]),
+        Alert.alert(
+          `Видалити ${count} ${plural(count)}?`,
+          'Видалення не можна скасувати. З архіву їх можна повернути (Налаштування → Архів).',
+          [
+            { text: 'Скасувати', style: 'cancel' },
+            { text: 'В архів', onPress: () => run(() => updateTransactionsBulk(ids, { archives: true }), `В архіві: ${count}`) },
+            { text: 'Видалити', style: 'destructive', onPress: () => run(() => deleteTransactions(ids), `Видалено: ${count}`) },
+          ]
+        ),
     },
   ]
 
@@ -109,7 +115,12 @@ export default function SelectionBar({ selected, cards, onCancel, onSelectAll, o
     [categories, q]
   )
   const canCreate = !!q && !(categories ?? []).some(c => c.toLowerCase() === q.toLowerCase())
-  const pickCategory = (c: string) => run(() => updateTransactionsBulk(ids, { category: c }), `Категорія «${c}» · ${count}`)
+  // The rules learn it: the same merchants' waiting bank imports get it too
+  const pickCategory = (c: string) =>
+    run(async () => {
+      await updateTransactionsBulk(ids, { category: c })
+      await autoCategorize({ gpt: false }).catch(() => null)
+    }, `Категорія «${c}» · ${count}`)
 
   const translateY = slide.interpolate({ inputRange: [0, 1], outputRange: [200, 0] })
 

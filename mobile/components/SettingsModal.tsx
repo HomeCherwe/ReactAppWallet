@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Platform, TextInput, ActivityIndicator, Alert, Share
+  Platform, TextInput, ActivityIndicator, Alert, Share, Modal
 } from 'react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import { BlurView } from 'expo-blur'
@@ -18,6 +18,8 @@ import Toast from 'react-native-toast-message'
 import GlassButton from './GlassButton'
 import { GlassPressable } from './LiquidGlass'
 import SheetModal from './SheetModal'
+import AutoCategoriesSettings from './AutoCategoriesSettings'
+import ArchivesScreen from '../screens/ArchivesScreen'
 
 interface SettingsModalProps {
   visible: boolean
@@ -48,6 +50,7 @@ export default function SettingsModal({
   // Categories left out of statistics (same list as the web)
   const excludedCategories = useExcludedCategories()
   const [excludedInput, setExcludedInput] = useState('')
+  const [archiveOpen, setArchiveOpen] = useState(false)
   const [allCategories, setAllCategories] = useState<string[]>([])
 
   const lastSavedName = useRef(userName || '')
@@ -315,6 +318,31 @@ export default function SettingsModal({
                 </View>
               </View>
 
+              {/* ARCHIVE (it used to be a tab): hidden transactions, can be brought back */}
+              <View style={styles.section}>
+                <Text style={styles.sectionLabel}>Архів</Text>
+                <View style={styles.cardGroup}>
+                  <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFill} />
+                  <TouchableOpacity style={styles.navRow} onPress={() => setArchiveOpen(true)} activeOpacity={0.7}>
+                    <Text style={styles.navRowIcon}>📁</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.settingLabelTitle}>Архів транзакцій</Text>
+                      <Text style={styles.settingDesc}>Не видно у списках і балансі; звідти можна повернути</Text>
+                    </View>
+                    <Text style={styles.navRowChevron}>›</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* AUTO-CATEGORIES: bank imports get a category from the user's habits */}
+              <View style={styles.section}>
+                <Text style={styles.sectionLabel}>Автокатегорії</Text>
+                <View style={styles.cardGroup}>
+                  <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFill} />
+                  <AutoCategoriesSettings />
+                </View>
+              </View>
+
               {/* AUTOMATION: API KEY + how to use it (same as the web's settings) */}
               <View style={styles.section}>
                 <Text style={styles.sectionLabel}>Автоматизація · API Key</Text>
@@ -381,6 +409,10 @@ export default function SettingsModal({
 
               <View style={{ height: 60 }} />
             </ScrollView>
+
+      <Modal visible={archiveOpen} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setArchiveOpen(false)}>
+        <ArchivesScreen onClose={() => setArchiveOpen(false)} />
+      </Modal>
     </SheetModal>
   )
 }
@@ -436,6 +468,9 @@ const styles = StyleSheet.create({
   // Dashboard
   settingRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
   settingRowBlock: { padding: 16 },
+  navRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
+  navRowIcon: { fontSize: 22 },
+  navRowChevron: { fontSize: 22, color: Colors.textMuted },
   settingLabelTitle: { fontSize: 15, color: Colors.white, fontWeight: '600' },
   settingDesc: { fontSize: 12, color: Colors.textSub, marginTop: 4, lineHeight: 16 },
 

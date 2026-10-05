@@ -23,6 +23,9 @@ const SECTIONS = 4
 // At most this many dates under the chart, so they never run into each other
 const MAX_X_LABELS = 5
 
+// Home counts USDT as dollars
+const normCurrency = (c: string) => (String(c || 'UAH').toUpperCase() === 'USDT' ? 'USD' : String(c || 'UAH').toUpperCase())
+
 const pad2 = (n: number) => String(n).padStart(2, '0')
 const keyOf = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 
@@ -102,16 +105,27 @@ export default function BalanceHistoryModal({
     }
   }, [visible, bucket, period, activeCurrency, dateRange])
 
-  const currentBalance = useMemo(() => totals[activeCurrency] ?? 0, [totals, activeCurrency])
+  // The balance Home shows for this section: every currency in it, in the chosen one.
+  // (totals is { cash, cards, savings } → currency → amount)
+  const currentBalance = useMemo(() => {
+    const sections = bucket === 'all' ? [totals.cash, totals.cards, totals.savings] : [totals[bucket]]
+    let sum = 0
+    for (const section of sections) {
+      for (const [cur, amount] of Object.entries(section || {})) {
+        sum += convertCurrency(Number(amount) || 0, normCurrency(cur), activeCurrency, rates)
+      }
+    }
+    return sum
+  }, [totals, bucket, activeCurrency, rates])
 
   // Balance at the end of each day / week / month / year of the window
   const points = useMemo(() => {
     if (!changes.length) return []
     const byDate: Record<string, number> = {}
+    // All of the section's currencies, like the balance it ends at
     for (const item of changes) {
-      if (bucket !== 'all' && item.currency !== activeCurrency) continue
-      const income = convertCurrency(item.income || 0, item.currency, activeCurrency, rates)
-      const expense = convertCurrency(item.expense || 0, item.currency, activeCurrency, rates)
+      const income = convertCurrency(item.income || 0, normCurrency(item.currency), activeCurrency, rates)
+      const expense = convertCurrency(item.expense || 0, normCurrency(item.currency), activeCurrency, rates)
       byDate[item.date] = (byDate[item.date] || 0) + income + expense
     }
 
@@ -136,8 +150,7 @@ export default function BalanceHistoryModal({
 
     let future = 0
     for (const fc of futureChanges || []) {
-      if (bucket !== 'all' && fc.currency !== activeCurrency) continue
-      future += convertCurrency(fc.change || 0, fc.currency, activeCurrency, rates)
+      future += convertCurrency(fc.change || 0, normCurrency(fc.currency), activeCurrency, rates)
     }
     const deltas = keys.map(k => byDate[k] || 0)
     let running = currentBalance - future - deltas.reduce((s, x) => s + x, 0)

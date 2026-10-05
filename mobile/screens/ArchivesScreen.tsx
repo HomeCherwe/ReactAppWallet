@@ -23,7 +23,8 @@ function dedupeById(arr: Transaction[]): Transaction[] {
   })
 }
 
-export default function ArchivesScreen() {
+/** The archive: hidden from lists and balances, can be brought back. Opens from Налаштування → Архів. */
+export default function ArchivesScreen({ onClose }: { onClose?: () => void } = {}) {
   const [rows, setRows] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
   const [cardMap, setCardMap] = useState<Record<string, string>>({})
@@ -93,9 +94,16 @@ export default function ArchivesScreen() {
 
   return (
     <View style={styles.root}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Архів</Text>
-        <Text style={styles.headerSub}>{rows.length} транзакцій</Text>
+      <View style={[styles.header, onClose && styles.headerSheet]}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.headerTitle}>Архів</Text>
+          <Text style={styles.headerSub}>{rows.length} транзакцій</Text>
+        </View>
+        {onClose && (
+          <TouchableOpacity onPress={onClose} hitSlop={12} style={styles.closeBtn}>
+            <Text style={styles.closeText}>Закрити</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.searchWrap}>
@@ -174,7 +182,11 @@ export default function ArchivesScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bg },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  header: { paddingHorizontal: 20, paddingTop: Platform.OS === 'ios' ? 60 : 40, paddingBottom: 16 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: Platform.OS === 'ios' ? 60 : 40, paddingBottom: 16 },
+  // Opened as a page sheet from Settings: no status bar above it
+  headerSheet: { paddingTop: 22 },
+  closeBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: Radius.pill, backgroundColor: 'rgba(255,107,0,0.15)' },
+  closeText: { color: Colors.orange, fontSize: 14, fontWeight: '700' },
   headerTitle: { ...Typography.h2, color: Colors.white },
   headerSub: { ...Typography.caption, color: Colors.textSub },
   searchWrap: { paddingHorizontal: 20, marginBottom: 12 },

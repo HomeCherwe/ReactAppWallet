@@ -195,10 +195,6 @@ export default function BalanceHistoryModal({
     }
   }, [open, initialCurrency])
 
-  // Get current balance of selected currency in this bucket
-  const currentBalance = useMemo(() => {
-    return totals[activeCurrency] ?? 0
-  }, [totals, activeCurrency])
 
   // Get all currencies containing non-zero balance in this bucket to show switcher
   const currencies = useMemo(() => {
@@ -285,7 +281,7 @@ export default function BalanceHistoryModal({
     if (fromCur !== 'UAH') {
       const codeMap = { USD: '840', EUR: '978', GBP: '826', PLN: '985', CHF: '756', CZK: '203', HUF: '348' }
       const fromCode = codeMap[fromCur]
-      const rate = rates[`${fromCode}->980`]
+      const rate = rates?.[`${fromCode}->980`]
       if (!rate) return amount
       amountInUAH = amount * rate
     }
@@ -294,10 +290,16 @@ export default function BalanceHistoryModal({
 
     const codeMap = { USD: '840', EUR: '978', GBP: '826', PLN: '985', CHF: '756', CZK: '203', HUF: '348' }
     const toCode = codeMap[toCur]
-    const rateToUAH = rates[`${toCode}->980`]
+    const rateToUAH = rates?.[`${toCode}->980`]
     if (!rateToUAH) return amountInUAH
     return amountInUAH / rateToUAH
   }
+
+  // The section's balance in the chosen currency: every currency in it converted (the changes
+  // below are all of them too, so the line ends exactly at this number)
+  const currentBalance = useMemo(() => {
+    return Object.entries(totals || {}).reduce((sum, [cur, amount]) => sum + convertCurrency(Number(amount) || 0, cur, activeCurrency), 0)
+  }, [totals, activeCurrency, rates])
 
   // Reconstruct running balance starting backwards from known currentBalance adjusting for future changes
   const chartData = useMemo(() => {
@@ -306,9 +308,6 @@ export default function BalanceHistoryModal({
     // Group raw changes by date, converting them to activeCurrency on frontend
     const dateMap = {}
     for (const item of changes) {
-      if (bucket !== 'all' && item.currency !== activeCurrency) {
-        continue
-      }
       const convertedIncome = convertCurrency(item.income || 0, item.currency, activeCurrency)
       const convertedExpense = convertCurrency(item.expense || 0, item.currency, activeCurrency)
       
@@ -365,7 +364,6 @@ export default function BalanceHistoryModal({
     let futureChangesSum = 0
     if (futureChanges && futureChanges.length > 0) {
       for (const fc of futureChanges) {
-        if (bucket !== 'all' && fc.currency !== activeCurrency) continue
         const converted = convertCurrency(fc.change || 0, fc.currency, activeCurrency)
         futureChangesSum += converted
       }

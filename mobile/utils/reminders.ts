@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Notifications from 'expo-notifications'
+import type { DetectedSubscription } from '../api/insights'
+import { formatMoney } from './currency'
 
 // Local notifications only: a free Apple ID can't receive push, but the app can schedule its own
 Notifications.setNotificationHandler({
@@ -11,7 +13,7 @@ Notifications.setNotificationHandler({
   }),
 })
 
-export type ReminderKind = 'signing' | 'new-version'
+export type ReminderKind = 'signing' | 'new-version' | 'subscription'
 
 // Before the signature runs out: 2 days, 1 day, 12 hours and 1 hour ahead
 const SIGNING_REMINDERS = [
@@ -122,4 +124,58 @@ export function onReminderTap(listener: (kind: ReminderKind) => void): () => voi
     .catch(() => {})
   const sub = Notifications.addNotificationResponseReceivedListener(handle)
   return () => sub.remove()
+}
+
+// Subscriptions: a reminder the day before the bank charges, at 10:00
+const SUB_PREFIX = 'sub-'
+const SUB_REMIND_HOUR = 10
+// iOS keeps at most 64 scheduled notifications per app; the signing ones need room too
+const SUB_MAX = 20
+
+/** Settings: preferences.subscriptions.remind (on unless turned off) */
+export const SUBSCRIPTION_REMIND_PATH = 'subscriptions.remind'
+
+/**
+ * Reschedules the "завтра спише …" reminders for the active subscriptions found in bank charges
+ * (or only removes them when `enabled` is false).
+ */
+export async function scheduleSubscriptionReminders(subs: DetectedSubscription[], enabled = true): Promise<void> {
+  try {
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync()
+    await Promise.all(
+      scheduled
+        .filter(n => n.identifier.startsWith(SUB_PREFIX))
+        .map(n => Notifications.cancelScheduledNotificationAsync(n.identifier).catch(() => {}))
+    )
+    if (!enabled) return
+
+    const planned = subs
+      .filter(s => s.source === 'detected' && s.is_active && !s.hidden && s.next_execution_at)
+      .map(s => {
+        const at = new Date(s.next_execution_at as string)
+        at.setDate(at.getDate() - 1)
+        at.setHours(SUB_REMIND_HOUR, 0, 0, 0)
+        return { s, at }
+      })
+      .filter(r => r.at.getTime() > Date.now() + 60 * 1000)
+      .sort((a, b) => a.at.getTime() - b.at.getTime())
+      .slice(0, SUB_MAX)
+    if (planned.length === 0 || !(await ensurePermission())) return
+
+    for (const { s, at } of planned) {
+      const per = Math.max(1, s.charges_per_period || 1)
+      await Notifications.scheduleNotificationAsync({
+        identifier: `${SUB_PREFIX}${s.id}`,
+        content: {
+          title: `Завтра спише ${s.name}`,
+          body: `${formatMoney(Number(s.amount) * per, s.currency || 'UAH')}${per > 1 ? ` (${per} × ${formatMoney(Number(s.amount), s.currency || 'UAH')})` : ''} — підписка, яку MyWallet знайшов у банку`,
+          sound: 'default',
+          data: { kind: 'subscription' satisfies ReminderKind },
+        },
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: at },
+      })
+    }
+  } catch (e) {
+    console.warn('[Reminders] subscription reminders failed:', e)
+  }
 }

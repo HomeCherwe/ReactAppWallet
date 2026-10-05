@@ -15,6 +15,7 @@ import {
   monoTransactionRow,
   setWebhook,
 } from './monobank.js'
+import { afterBankSync, autoCategorize } from './insights.js'
 
 // Bank connections through TrueLayer for any supported provider (Revolut, Wise, BNP, Monzo, …),
 // plus Monobank (Ukraine) through its personal-token API — same table, same sync, same UI.
@@ -946,6 +947,13 @@ async function handleMonoWebhook(supabase, connId, body) {
     const before = Number(it.balance || 0) / 100 - Number(link.meta?.credit_limit || 0) - rows[0].amount
     await supabase.from('cards').update({ initial_balance: Math.round(before * 100) / 100 }).eq('id', cardId)
   }
+  // Category from the user's rules right away (Monobank waits for a quick answer: no GPT here,
+  // the next sync asks about new merchants)
+  if (rows.length) {
+    await autoCategorize(supabase, conn.user_id, null, { useGpt: false }).catch(e =>
+      console.warn('[AutoCategories] webhook:', e.message)
+    )
+  }
 }
 
 // Legacy: Monobank token stored in plain text in user_preferences.monobank_api
@@ -1078,11 +1086,10 @@ export async function syncAllBankConnections(supabase, userId, psuHeaders = {}, 
       results.push({ id: conn.id, provider_name: conn.provider_name, added: 0, changed: 0, error: message })
     }
   }
-  return {
-    added: results.reduce((s, r) => s + r.added, 0),
-    changed: results.reduce((s, r) => s + r.changed, 0),
-    results,
-  }
+  const added = results.reduce((s, r) => s + r.added, 0)
+  const changed = results.reduce((s, r) => s + r.changed, 0)
+  if ((conns || []).length > 0) await afterBankSync(supabase, userId, { imported: added + changed > 0 })
+  return { added, changed, results }
 }
 
 function publicConnection(c, accounts = []) {
@@ -1291,6 +1298,7 @@ export function registerBankConnections(app, { supabase, getUserFromToken, getUs
         if (!conn) return res.status(404).json({ success: false, error: 'Connection not found' })
         try {
           const { added, changed } = await syncAnyConnection(supabase, conn, psu)
+          await afterBankSync(supabase, req.user_id, { imported: added + changed > 0 })
           return res.json({ success: true, added, changed, results: [{ id: conn.id, provider_name: conn.provider_name, added, changed }] })
         } catch (e) {
           const message = e instanceof ConsentExpiredError ? 'consent_expired' : e.response?.data?.error || e.message

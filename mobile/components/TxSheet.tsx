@@ -14,6 +14,7 @@ import {
 import Toast from 'react-native-toast-message'
 import { Colors } from '../constants/theme'
 import { Transaction, getTransactionCategories, updateTransaction } from '../api/transactions'
+import { autoCategorize } from '../api/insights'
 import { Card } from '../api/cards'
 import { getCategoryIcon } from '../utils/categoryIcon'
 import { hasPinTag, stripPinTag, txDisplayTitle, withPinTag } from '../utils/pinned'
@@ -64,7 +65,8 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
     const amt = Number(tx.amount || 0)
     setKind(amt < 0 ? 'expense' : 'income')
     setAmount(String(Math.abs(amt)).replace('.', ','))
-    setCategory(isSyncCategory(tx.category || '') ? '' : tx.category || '')
+    // Waiting for a category: the rules' suggestion is preselected, «Зберегти» confirms it
+    setCategory(isSyncCategory(tx.category || '') ? tx.suggested_category || '' : tx.category || '')
     setCardId(tx.card_id ?? null)
     setNote(stripPinTag(tx.note))
     setCounted(!tx.exclude_from_stats)
@@ -148,13 +150,20 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
       note: withPinTag(note.trim(), hasPinTag(t.note)) ?? (null as unknown as string),
       exclude_from_stats: !counted,
     }
+    const categoryChanged = payload.category !== t.category
     try {
       await updateTransaction(t.id, payload)
+      // The app learned this merchant's category: its other waiting imports get it now
+      const similar = categoryChanged ? await autoCategorize({ gpt: false }).catch(() => null) : null
       triggerSuccessHaptic()
       Toast.show({
         type: 'success',
         text1: 'Збережено',
-        text2: waitingCategory === false && isSyncCategory(t.category || '') ? 'Транзакція перейшла в загальний список' : undefined,
+        text2: similar?.applied
+          ? `Ще ${similar.applied} схожих отримали категорію`
+          : waitingCategory === false && isSyncCategory(t.category || '')
+            ? 'Транзакція перейшла в загальний список'
+            : undefined,
       })
       onSaved({ ...t, ...payload } as Transaction)
       onClose()
@@ -239,6 +248,10 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
           </View>
           {waitingCategory ? (
             <Text style={styles.hint}>Імпорт з банку чекає на категорію — після збереження перейде в загальний список</Text>
+          ) : isSyncCategory(t.category || '') && t.suggested_category && category === t.suggested_category ? (
+            <Text style={styles.hint}>✨ Підказка з ваших звичок — «Зберегти», і схожі отримають її теж</Text>
+          ) : t.category_source === 'auto' && category === t.category ? (
+            <Text style={styles.hint}>✨ Поставлено автоматично за вашими звичками — змініть, якщо не так</Text>
           ) : null}
           <TextInput
             style={styles.input}

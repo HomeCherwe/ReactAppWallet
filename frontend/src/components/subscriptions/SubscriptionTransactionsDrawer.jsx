@@ -5,6 +5,15 @@ import { X, History } from 'lucide-react'
 import { getTransactionsBySubscription } from '../../api/transactions'
 import Row from '../transactions/Row'
 import toast from 'react-hot-toast'
+import { formatMoney } from '../../utils/cardTheme'
+
+const chargesWord = n => {
+    const m10 = n % 10
+    const m100 = n % 100
+    if (m10 === 1 && m100 !== 11) return 'списання'
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'списання'
+    return 'списань'
+}
 
 export default function SubscriptionTransactionsDrawer({ open, onClose, subscription, cards = [] }) {
     const [transactions, setTransactions] = useState([])
@@ -79,6 +88,16 @@ export default function SubscriptionTransactionsDrawer({ open, onClose, subscrip
         }, {})
     }, [transactions])
 
+    // Charges can be on cards in different currencies: a sum per currency
+    const totalText = useMemo(() => {
+        const sums = {}
+        for (const tx of transactions) {
+            const cur = tx.currency || cardMap[tx.card_id] || 'UAH'
+            sums[cur] = (sums[cur] || 0) + Math.abs(Number(tx.amount) || 0)
+        }
+        return Object.entries(sums).map(([cur, v]) => formatMoney(v, cur)).join(' + ')
+    }, [transactions, cardMap])
+
     const sortedDays = Object.keys(groupedByDay).sort((a, b) => {
         const dateA = new Date(groupedByDay[a].date)
         const dateB = new Date(groupedByDay[b].date)
@@ -117,8 +136,10 @@ export default function SubscriptionTransactionsDrawer({ open, onClose, subscrip
                                 <History size={20} />
                             </div>
                             <div>
-                                <h2 className="font-semibold text-white">Історія транзакцій</h2>
-                                <p className="text-xs text-white/55">{subscription?.name}</p>
+                                <h2 className="font-semibold text-white">{subscription?.name}</h2>
+                                <p className="text-xs text-white/55">
+                                    {loading ? 'Завантаження…' : `${transactions.length} ${chargesWord(transactions.length)}${totalText ? ` · разом ${totalText}` : ''}`}
+                                </p>
                             </div>
                         </div>
                         <button

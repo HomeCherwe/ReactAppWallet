@@ -63,7 +63,8 @@ import SplitTxModal from '../components/SplitTxModal'
 import ScanReceiptModal from '../components/ScanReceiptModal'
 
 import BalanceHistoryModal from '../components/BalanceHistoryModal'
-import { triggerLightHaptic } from '../utils/haptics'
+import { triggerErrorHaptic, triggerLightHaptic, triggerSuccessHaptic } from '../utils/haptics'
+import { acceptSuggestions, autoCategorize } from '../api/insights'
 import { supabase } from '../lib/supabase'
 import { listCards, Card } from '../api/cards'
 import {
@@ -71,6 +72,7 @@ import {
   getRecentMonthsStats,
   MonthStat,
   deleteTransaction,
+  archiveTransaction,
   linkRefund,
   unlinkRefund,
   Transaction,
@@ -462,6 +464,25 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
     refreshPinned()
   }
 
+  // ✓ on a suggested category (or «Підтвердити всі»): the rules learn it, and the same merchants'
+  // other waiting imports follow right away
+  const handleAcceptSuggestions = async (txs: Transaction[]) => {
+    try {
+      const n = await acceptSuggestions(txs)
+      triggerSuccessHaptic()
+      const more = await autoCategorize({ gpt: false }).catch(() => null)
+      Toast.show({
+        type: 'success',
+        text1: n === 1 ? `Категорія «${txs[0].suggested_category}»` : `Підтверджено: ${n}`,
+        text2: more?.applied ? `Ще ${more.applied} схожих отримали категорію` : 'Транзакції перейшли в загальний список',
+      })
+    } catch (e: any) {
+      triggerErrorHaptic()
+      Toast.show({ type: 'error', text1: 'Не вдалося підтвердити', text2: e?.message })
+    }
+    refreshAfterTxChange()
+  }
+
   const handleLinkRefund = async (expense: Transaction, refund: Transaction) => {
     await linkRefund(expense.id, refund.id)
     refreshAfterTxChange()
@@ -472,21 +493,32 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
     refreshAfterTxChange()
   }
 
+  // Delete can't be undone; the archive can (Налаштування → Архів)
   const handleDeleteTx = (tx: Transaction) => {
     Alert.alert(
       'Видалити транзакцію?',
-      'Цю дію неможливо скасувати',
+      'Видалення не можна скасувати. В архіві вона зникне зі списку й балансу, але її можна повернути (Налаштування → Архів).',
       [
         { text: 'Скасувати', style: 'cancel' },
+        {
+          text: 'В архів',
+          onPress: async () => {
+            try {
+              await archiveTransaction(tx.id)
+              Toast.show({ type: 'success', text1: 'Транзакцію заархівовано', text2: 'Повернути: Налаштування → Архів' })
+              refreshAfterTxChange()
+            } catch (e: any) {
+              Alert.alert('Помилка', e.message || 'Не вдалося заархівувати')
+            }
+          },
+        },
         {
           text: 'Видалити',
           style: 'destructive',
           onPress: async () => {
             try {
               await deleteTransaction(tx.id)
-              loadData()
-              refreshTxFeed()
-              refreshPinned()
+              refreshAfterTxChange()
             } catch (e: any) {
               Alert.alert('Помилка', e.message || 'Не вдалося видалити')
             }
@@ -809,6 +841,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
             }}
             onDeleteTx={handleDeleteTx}
             onLinkRefund={handleLinkRefund}
+            onAcceptSuggestions={handleAcceptSuggestions}
             onUnlinkRefund={handleUnlinkRefund}
             refundFor={refundFor}
             onRefundForChange={setRefundFor}

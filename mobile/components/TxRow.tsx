@@ -5,6 +5,7 @@ import { Transaction } from '../api/transactions'
 import { Card } from '../api/cards'
 import { getCategoryIcon } from '../utils/categoryIcon'
 import { txDisplayTitle } from '../utils/pinned'
+import { isSyncCategory } from '../utils/cardExclusion'
 import { triggerLightHaptic, triggerMediumHaptic, triggerSelectionHaptic } from '../utils/haptics'
 import Icon from './Icon'
 import { menuDragHandlers, useMenuOverlay } from '../store/useMenuOverlay'
@@ -24,6 +25,8 @@ export function fmtMoney(amount: number, currency?: string): string {
 const SLOT_W = 56
 const BTN = 42
 const REFUND_COLOR = '#FFA53A'
+// Category suggestions (on the pinned block's warm surface)
+const SUGGEST_COLOR = '#FFB25C'
 
 // Only one row is open at a time: opening another closes the previous one
 let closeOpenRow: (() => void) | null = null
@@ -58,6 +61,8 @@ interface TxRowProps {
   selected?: boolean
   /** Row background (it covers the swipe buttons), e.g. the warm one inside the pinned block */
   surface?: string
+  /** A waiting bank import with a suggested category: the ✓ pill accepts it */
+  onAcceptSuggestion?: (tx: Transaction) => void
 }
 
 /**
@@ -82,6 +87,7 @@ function TxRow({
   nested = false,
   selected,
   surface,
+  onAcceptSuggestion,
 }: TxRowProps) {
   const selecting = selected !== undefined
   const x = useRef(new Animated.Value(0)).current
@@ -182,13 +188,13 @@ function TxRow({
   const d = new Date(tx.created_at)
   const time = d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
   const when = showDate ? `${d.toLocaleDateString('uk-UA', { day: 'numeric', month: 'short' })}, ${time}` : time
-  const meta = [
-    isRefund ? '↩︎ Повернення' : tx.category && tx.category !== title ? tx.category : null,
-    card?.name,
-    when,
-  ]
-    .filter(Boolean)
-    .join(' · ')
+  const metaCategory = isRefund ? '↩︎ Повернення' : tx.category && tx.category !== title ? tx.category : null
+  const metaRest = [card?.name, when].filter(Boolean).join(' · ')
+  // The category came from the user's rules, not from the user
+  const autoCategory = !isRefund && tx.category_source === 'auto' && !!metaCategory
+  // Waiting for a category, and the rules have a guess: ✓ takes it
+  const suggestion =
+    !!onAcceptSuggestion && !selecting && mode === 'normal' && !!tx.suggested_category && isSyncCategory(tx.category || '')
 
   const handlePress = () => {
     if (openRef.current) {
@@ -294,7 +300,10 @@ function TxRow({
                 {title}
               </Text>
               <Text style={[styles.txMeta, isRefund && styles.txMetaRefund]} numberOfLines={1}>
-                {meta}
+                {metaCategory}
+                {autoCategory && <Text style={styles.autoMark}> авто</Text>}
+                {metaCategory && metaRest ? ' · ' : ''}
+                {metaRest}
               </Text>
             </View>
             <View style={styles.amountCol}>
@@ -325,6 +334,22 @@ function TxRow({
                   <View style={styles.pendingDot} />
                   <Text style={styles.pendingPillText}>В обробці</Text>
                 </View>
+              )}
+              {suggestion && (
+                <Pressable
+                  hitSlop={8}
+                  accessibilityLabel={`Підтвердити категорію ${tx.suggested_category}`}
+                  onPress={() => {
+                    triggerLightHaptic()
+                    onAcceptSuggestion?.(tx)
+                  }}
+                  style={({ pressed }) => [styles.suggestPill, pressed && styles.suggestPillPressed]}
+                >
+                  <Icon name="check" size={11} color={SUGGEST_COLOR} strokeWidth={3.2} />
+                  <Text style={styles.suggestPillText} numberOfLines={1}>
+                    {tx.suggested_category}
+                  </Text>
+                </Pressable>
               )}
               {mode === 'pickable' && (
                 <View style={styles.pickPill}>
@@ -581,6 +606,33 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: Colors.white60,
+  },
+  autoMark: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: SUGGEST_COLOR,
+  },
+  suggestPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 5,
+    maxWidth: 150,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 100,
+    backgroundColor: 'rgba(255, 178, 92, 0.14)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 178, 92, 0.45)',
+  },
+  suggestPillPressed: {
+    opacity: 0.55,
+  },
+  suggestPillText: {
+    flexShrink: 1,
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: SUGGEST_COLOR,
   },
   pickHint: {
     fontSize: 11,

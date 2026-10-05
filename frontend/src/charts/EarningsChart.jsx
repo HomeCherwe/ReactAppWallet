@@ -376,7 +376,7 @@ setPrefsLoaded(true)
 
   // keep display in sync; when animKey changes, the hook will update
   // displayData and bump chartKey to retrigger Recharts animation once.
-  useChartSync(txs, range.from, range.to, primary, rates, animKey, setDisplayData, prevAnimKeyRef, setChartKey)
+  useChartSync(txs, range.from, range.to, primary, rates, animKey, setDisplayData, prevAnimKeyRef, setChartKey, excludedCats)
 
   useEffect(() => {
     const tick = () => setToday(localIso(new Date()))
@@ -801,7 +801,8 @@ return true
 
 // Synchronize compute->display when txs or controls change. We want to cross-fade
 // when animKey was bumped (a new period). Otherwise replace immediately.
-function useChartSync(txs, from, to, primary, rates, animKey, setDisplayData, prevAnimKeyRef, setChartKey) {
+// excludedCats: recompute when «Категорії поза статистикою» changes (computeFlowData reads the setting)
+function useChartSync(txs, from, to, primary, rates, animKey, setDisplayData, prevAnimKeyRef, setChartKey, excludedCats) {
   useEffect(() => {
     const newData = computeFlowData(txs, from, to, primary, rates)
     const prevKey = prevAnimKeyRef.current

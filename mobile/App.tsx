@@ -15,22 +15,23 @@ import { GlassSurface } from "./components/LiquidGlass"
 import { useSettingsStore } from "./store/useSettingsStore"
 import { useBankAutoSync } from "./hooks/useBankAutoSync"
 import { useMarkAppInstalled } from "./hooks/useMarkAppInstalled"
+import { useSubscriptionReminders } from './hooks/useSubscriptionReminders'
 import { toastConfig } from "./components/ToastConfig"
 import MenuOverlayHost from "./components/MenuOverlayHost"
 
 // Screens
 import AuthScreen from "./screens/AuthScreen"
 import HomeScreen from "./screens/HomeScreen"
-import ArchivesScreen from "./screens/ArchivesScreen"
+import SubscriptionsScreen from "./screens/SubscriptionsScreen"
 import AnalyticsScreen from "./screens/AnalyticsScreen"
 import CardsScreen from "./screens/CardsScreen"
 
-// Tabs config (Subscriptions and Debts excluded per user instructions)
+// Tabs config (Debts excluded per user instructions; the archive lives in Settings)
 const TABS = [
-  { id: "home",      label: "Головна",   icon: "🏠" },
-  { id: "cards",     label: "Рахунки",   icon: "💳" },
-  { id: "archives",  label: "Архіви",     icon: "📁" },
-  { id: "analytics", label: "Аналітика", icon: "📊" },
+  { id: "home",          label: "Головна",   icon: "🏠" },
+  { id: "cards",         label: "Рахунки",   icon: "💳" },
+  { id: "subscriptions", label: "Підписки",  icon: "🔁" },
+  { id: "analytics",     label: "Аналітика", icon: "📊" },
 ] as const;
 type TabId = typeof TABS[number]["id"]
 
@@ -79,6 +80,8 @@ export default function App() {
   useBankAutoSync(!!session)
   // Lets the website know this user has the app (it stops showing the iPhone app promo)
   useMarkAppInstalled(!!session)
+  // "Завтра спише …": a reminder the day before each subscription found in bank charges
+  useSubscriptionReminders(!!session)
 
   const handleTabPress = (tab: TabId) => {
     if (activeTab !== tab) triggerLightHaptic()
@@ -107,7 +110,7 @@ export default function App() {
     switch (activeTab) {
       case "home":      return <HomeScreen onNavigateToCards={() => handleTabPress("cards")} />
       case "cards":     return <CardsScreen />
-      case "archives":  return <ArchivesScreen />
+      case "subscriptions": return <SubscriptionsScreen />
       case "analytics": return <AnalyticsScreen />
 
     }
