@@ -18,6 +18,7 @@ import Toast from 'react-native-toast-message'
 import GlassButton from './GlassButton'
 import { GlassPressable } from './LiquidGlass'
 import SheetModal from './SheetModal'
+import AutoCategoriesSettings from './AutoCategoriesSettings'
 
 interface SettingsModalProps {
   visible: boolean
@@ -312,6 +313,15 @@ export default function SettingsModal({
                     )}
                   </View>
 
+                </View>
+              </View>
+
+              {/* AUTO-CATEGORIES: bank imports get a category from the user's habits */}
+              <View style={styles.section}>
+                <Text style={styles.sectionLabel}>Автокатегорії</Text>
+                <View style={styles.cardGroup}>
+                  <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFill} />
+                  <AutoCategoriesSettings />
                 </View>
               </View>
 

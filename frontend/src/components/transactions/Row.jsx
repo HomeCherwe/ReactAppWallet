@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { fmtDate, fmtAmount } from '../../utils/format'
-import { Trash2, RotateCcw, Link2Off } from 'lucide-react'
+import { Trash2, RotateCcw, Link2Off, Check } from 'lucide-react'
 
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { getCategoryVisual } from '../../utils/categoryIcon'
@@ -13,6 +13,37 @@ function PendingBadge() {
       <span className="h-1.5 w-1.5 rounded-full bg-white/40" />
       В обробці
     </span>
+  )
+}
+
+/** The category came from the user's rules, not from the user (same as the iPhone app) */
+function AutoBadge() {
+  return (
+    <span
+      className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-[#FFB25C]/[0.12] text-[#FFB25C] whitespace-nowrap"
+      title="Поставлено автоматично за вашими звичками"
+    >
+      авто
+    </span>
+  )
+}
+
+const isSyncCategory = category => /\bsync$/i.test(String(category || '').trim())
+
+/** A waiting bank import the rules have a category for: click ✓ to take it */
+function SuggestionPill({ tx, onAccept }) {
+  return (
+    <button
+      onClick={e => {
+        e.stopPropagation()
+        onAccept(tx)
+      }}
+      className="inline-flex items-center gap-1 max-w-[160px] px-2 py-1 rounded-full text-[11.5px] font-bold bg-[#FFB25C]/[0.14] text-[#FFB25C] border border-[#FFB25C]/40 hover:bg-[#FFB25C]/25 transition"
+      title={`Підтвердити категорію «${tx.suggested_category}»`}
+    >
+      <Check size={12} strokeWidth={3.2} className="shrink-0" />
+      <span className="truncate">{tx.suggested_category}</span>
+    </button>
   )
 }
 
@@ -44,10 +75,13 @@ export default function Row({
   className = '',
   swipeActions = false,
   showEditButton = true,
+  onAcceptSuggestion,
 }) {
   const hideAllBalances = useSettingsStore(state => state.settings.hideAllBalances ?? false)
   const isExp = Number(tx.amount) < 0
   const pending = tx.status === 'pending'
+  const autoCategory = tx.category_source === 'auto'
+  const suggestion = !!onAcceptSuggestion && !!tx.suggested_category && isSyncCategory(tx.category)
   const amountColor = pending ? 'text-white/45' : isExp ? '' : 'text-green-400'
   const pad = compact ? 'p-2' : 'p-3'
   const round = compact ? 'rounded-xl' : 'rounded-2xl'
@@ -135,6 +169,7 @@ export default function Row({
         <div className="min-w-0">
           <div className={`font-semibold ${titleText} flex items-center gap-2 ${pending ? 'text-white/60' : ''}`}>
             {tx.category || 'Без категорії'}
+            {autoCategory && <AutoBadge />}
             {pending && <PendingBadge />}
             {tx.is_transfer && (
               <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-brand/10 text-brand-light border border-brand/[0.12]">
@@ -162,6 +197,7 @@ export default function Row({
       </div>
 
       <div className="flex items-center gap-2">
+        {suggestion && <SuggestionPill tx={tx} onAccept={onAcceptSuggestion} />}
         {amountOverride ? (
           <div className="flex flex-col items-end leading-tight">
             <div className={`font-semibold ${titleText} ${Number(amountOverride.primaryAmount) < 0 ? '' : 'text-green-400'}`}>
@@ -261,6 +297,7 @@ export default function Row({
         <div className="min-w-0">
           <div className={`font-semibold ${titleText} flex items-center gap-2 ${pending ? 'text-white/60' : ''}`}>
             {tx.category || 'Без категорії'}
+            {autoCategory && <AutoBadge />}
             {pending && <PendingBadge />}
           </div>
           <div className={`${metaText} text-white/55`}>
@@ -278,6 +315,7 @@ export default function Row({
       </div>
 
       <div className="flex items-center gap-2">
+        {suggestion && <SuggestionPill tx={tx} onAccept={onAcceptSuggestion} />}
         {amountOverride ? (
           <div className="flex flex-col items-end leading-tight">
             <div className={`font-semibold ${titleText} ${Number(amountOverride.primaryAmount) < 0 ? '' : 'text-green-400'}`}>

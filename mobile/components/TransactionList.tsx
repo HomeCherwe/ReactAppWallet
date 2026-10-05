@@ -14,6 +14,7 @@ import PossibleDuplicates from './PossibleDuplicates'
 import TxRow, { RowMode, closeSwipedRow, fmtMoney } from './TxRow'
 import { MenuAction, MenuFrame, openMenu as openMenuOverlay } from '../store/useMenuOverlay'
 import { pinStateOf, txDisplayTitle } from '../utils/pinned'
+import { isSyncCategory } from '../utils/cardExclusion'
 import { useExcludedCategories } from '../utils/statsCategories'
 
 const PINNED_COLLAPSED_KEY = 'pinned_collapsed'
@@ -26,6 +27,14 @@ function pluralTx(n: number): string {
   if (mod10 === 1 && mod100 !== 11) return 'транзакція'
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'транзакції'
   return 'транзакцій'
+}
+
+function pluralHint(n: number): string {
+  const mod10 = n % 10
+  const mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return 'підказка'
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'підказки'
+  return 'підказок'
 }
 
 /** Can this transaction be picked as the refund of an expense? */
@@ -102,6 +111,8 @@ interface TransactionListProps {
   selectedIds?: Set<string> | null
   onStartSelect?: (tx: Transaction) => void
   onToggleSelect?: (tx: Transaction) => void
+  /** Pinned bank imports with a suggested category: ✓ on a row, or «Підтвердити всі» */
+  onAcceptSuggestions?: (txs: Transaction[]) => Promise<void>
 }
 
 export default React.memo(TransactionList)
@@ -132,6 +143,7 @@ function TransactionList({
   selectedIds = null,
   onStartSelect,
   onToggleSelect,
+  onAcceptSuggestions,
 }: TransactionListProps) {
   // Selection mode: rows show a check circle and a tap selects instead of opening
   const sel = (t: Transaction) => (selectedIds ? selectedIds.has(t.id) : undefined)
@@ -346,6 +358,26 @@ function TransactionList({
     return pinned.filter(t => !(t.refund_for && ids.has(t.refund_for)))
   }, [pinned])
 
+  // Waiting bank imports the rules have a category for
+  const suggested = useMemo(
+    () => pinnedTop.filter(t => t.suggested_category && isSyncCategory(t.category || '')),
+    [pinnedTop]
+  )
+  const [accepting, setAccepting] = useState(false)
+  const acceptSuggestions = useCallback(
+    async (txs: Transaction[]) => {
+      if (!onAcceptSuggestions || accepting || txs.length === 0) return
+      setAccepting(true)
+      try {
+        await onAcceptSuggestions(txs)
+      } finally {
+        setAccepting(false)
+      }
+    },
+    [onAcceptSuggestions, accepting]
+  )
+  const acceptOne = useCallback((tx: Transaction) => acceptSuggestions([tx]), [acceptSuggestions])
+
   // A refund whose expense is loaded shows only under that expense (no duplicate row)
   const regular = useMemo(() => {
     const loaded = new Set(transactions.map(t => t.id))
@@ -433,6 +465,29 @@ function TransactionList({
             </View>
             <Animated.Text style={[styles.pinnedChevron, { transform: [{ rotate: chevronRotate }] }]}>⌄</Animated.Text>
           </Pressable>
+          {!pinnedCollapsed && onAcceptSuggestions && suggested.length > 0 && !selectedIds && !refundFor && (
+            <View style={styles.suggestBar}>
+              <Text style={styles.suggestBarText} numberOfLines={2}>
+                ✨ {suggested.length === 1 ? 'Є підказка' : `${suggested.length} ${pluralHint(suggested.length)}`} — натисніть ✓ біля суми
+              </Text>
+              {suggested.length > 1 && (
+                <Pressable
+                  disabled={accepting}
+                  onPress={() => {
+                    triggerLightHaptic()
+                    acceptSuggestions(suggested)
+                  }}
+                  style={({ pressed }) => [styles.suggestAllBtn, (pressed || accepting) && styles.suggestAllBtnPressed]}
+                >
+                  {accepting ? (
+                    <ActivityIndicator size="small" color="#1D140C" />
+                  ) : (
+                    <Text style={styles.suggestAllText}>Підтвердити всі</Text>
+                  )}
+                </Pressable>
+              )}
+            </View>
+          )}
           {!pinnedCollapsed &&
             pinnedTop.map((tx, i) => {
               const kids = Number(tx.amount) < 0 ? refunds[tx.id] ?? [] : []
@@ -452,6 +507,7 @@ function TransactionList({
                     onLongPress={openMenu}
                     selected={sel(tx)}
                     surface={PINNED_SURFACE}
+                    onAcceptSuggestion={onAcceptSuggestions ? acceptOne : undefined}
                     {...swipeProps}
                   />
                   {kids.map((r, k) => (
@@ -729,6 +785,37 @@ const styles = StyleSheet.create({
   pinnedHeaderOpen: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(255, 122, 26, 0.35)',
+  },
+  suggestBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: PINNED_SURFACE,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255, 122, 26, 0.25)',
+  },
+  suggestBarText: {
+    flex: 1,
+    fontSize: 12.5,
+    color: Colors.white60,
+  },
+  suggestAllBtn: {
+    minWidth: 120,
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 100,
+    backgroundColor: '#FFB25C',
+  },
+  suggestAllBtnPressed: {
+    opacity: 0.6,
+  },
+  suggestAllText: {
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: '#1D140C',
   },
   pinnedHeaderPressed: {
     backgroundColor: 'rgba(255, 107, 0, 0.2)',

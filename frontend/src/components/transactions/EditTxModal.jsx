@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { updateTransaction, getTransaction, getTransactionCategories, getDebtParties } from '../../api/transactions'
+import { autoCategorize } from '../../api/insights'
 import { txBus } from '../../utils/txBus'
 import BaseModal from '../BaseModal'
 import { listCards } from '../../api/cards'
@@ -100,7 +101,12 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
       return {
         kind: isDebt ? 'debt' : (isExp ? 'expense' : 'income'),
         amount: String(abs || ''),
-        category: isDebt ? 'Борг' : (base.category || ''),
+        // A waiting bank import: the rules' suggestion is preselected, saving confirms it
+        category: isDebt
+          ? 'Борг'
+          : /\bsync$/i.test(String(base.category || '').trim()) && base.suggested_category
+            ? base.suggested_category
+            : (base.category || ''),
         cardId: base.card_id || '',
         note: cleanNote,
         rateToUAH: 1,
@@ -464,6 +470,17 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
         created_at: form.date ? new Date(form.date).toISOString() : new Date().toISOString(),
       }
       await updateTransaction(tx.id, payload)
+      // The app learned this merchant's category: its other waiting bank imports get it too
+      if (payload.category && payload.category !== tx.category) {
+        autoCategorize({ gpt: false })
+          .then(r => {
+            if (r?.applied) {
+              toast.success(`Ще ${r.applied} схожих отримали категорію`)
+              txBus.emit({ type: 'REFRESH' })
+            }
+          })
+          .catch(() => {})
+      }
       // Fetch fresh transaction so UI gets computed fields (amount_stat / exclude_from_stats)
       let fresh = null
       try {

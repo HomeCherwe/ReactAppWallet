@@ -223,18 +223,19 @@ export async function apiFetch(endpoint, options = {}) {
     const fetchStartTime = Date.now()
     
     // Add timeout wrapper for fetch
+    const { timeoutMs = 15000, ...fetchOptions } = options
     const fetchPromise = fetch(url, {
-      ...options,
+      ...fetchOptions,
       headers,
       signal: options.signal, // Support AbortController
     })
     
-    // Add 15 second timeout to detect hanging requests
+    // 15 s by default to detect hanging requests; longer for ones that ask GPT (options.timeoutMs)
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => {
         // Не логуємо таймаут - просто відхиляємо проміс
-        reject(new Error(`Fetch timeout after 15s for ${endpoint}`))
-      }, 15000)
+        reject(new Error(`Fetch timeout after ${Math.round(timeoutMs / 1000)}s for ${endpoint}`))
+      }, timeoutMs)
     })
     
     const response = await Promise.race([fetchPromise, timeoutPromise])

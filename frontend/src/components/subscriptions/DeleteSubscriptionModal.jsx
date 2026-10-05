@@ -23,7 +23,7 @@ export default function DeleteSubscriptionModal({ open, subscription, onDelete, 
           Ви справді хочете видалити підписку <strong>{subscription.name}</strong>?
         </p>
         <p className="text-xs text-white/55">
-          Ця дія незворотна. Автоматичні транзакції більше не будуть створюватись.
+          Ця дія незворотна. Транзакції залишаться — зникне лише сама підписка.
         </p>
       </div>
 

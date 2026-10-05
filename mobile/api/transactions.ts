@@ -27,6 +27,10 @@ export interface Transaction {
   count_as_income?: boolean
   /** 'pending' = not settled at the bank yet (TrueLayer banks); absent/'booked' otherwise */
   status?: 'pending' | 'booked'
+  /** 'auto' = the category came from the user's rules (shown as «авто»); null = the user set it */
+  category_source?: 'auto' | null
+  /** A category the rules suggest for a waiting bank import, until the user confirms it */
+  suggested_category?: string | null
 }
 
 export interface ListTransactionsParams {

@@ -9,6 +9,7 @@ import cors from 'cors'
 import crypto from 'crypto'
 import { createClient } from '@supabase/supabase-js'
 import { registerBankConnections, syncAllBankConnections, psuHeadersFrom, pinSyncCategory } from './bankConnections.js'
+import { registerInsights } from './insights.js'
 dotenv.config();
 
 const app = express();
@@ -844,7 +845,7 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       category_in,
       has_pinned_tag,
       limit,
-      fields = 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, merchant_address, merchant_lat, merchant_lng, is_transfer, transfer_role, transfer_id, status'
+      fields = 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, merchant_address, merchant_lat, merchant_lng, is_transfer, transfer_role, transfer_id, status, category_source, suggested_category'
     } = req.query
 
     // Filter out 'currency' field if it doesn't exist in the table
@@ -856,13 +857,13 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       'refund_for',
       'is_debt', 'debt_party', 'debt_direction',
       'merchant_name', 'merchant_address', 'merchant_lat', 'merchant_lng',
-      'status'
+      'status', 'category_source', 'suggested_category', 'subscription_id'
     ]
     const requestedFields = fields.split(',').map(f => f.trim())
     const validFields = requestedFields.filter(f => allowedFields.includes(f))
 
     // Use valid fields, fallback to default if all were filtered out
-    const safeFields = validFields.length > 0 ? validFields.join(', ') : 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, merchant_address, merchant_lat, merchant_lng, is_transfer, transfer_role, transfer_id, status'
+    const safeFields = validFields.length > 0 ? validFields.join(', ') : 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, merchant_address, merchant_lat, merchant_lng, is_transfer, transfer_role, transfer_id, status, category_source, suggested_category'
 
     let q = supabase
       .from('transactions')
@@ -2149,7 +2150,9 @@ app.post('/api/subscriptions', getUserFromToken, async (req, res) => {
 app.put('/api/subscriptions/:id', getUserFromToken, async (req, res) => {
   try {
     const { id } = req.params
-    const updates = req.body
+    // Only what the apps edit (never user_id, source, …): rename, hide ("Це не підписка"), old hand-made ones
+    const editable = ['name', 'category', 'note', 'hidden', 'is_active', 'amount', 'card_id', 'frequency', 'day_of_week', 'day_of_month', 'is_expense', 'participants', 'total_participants']
+    const updates = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => editable.includes(k)))
 
     // Verify ownership
     const { data: existing } = await supabase
@@ -2322,397 +2325,10 @@ function calculateNextExecution(frequency, day_of_week, day_of_month, last_execu
   return nextDate.toISOString()
 }
 
-/**
- * The card's bank already brought this payment (a bank transaction of the same amount within 3 days
- * of the due date, not tied to a subscription yet): the subscription takes it instead of adding a
- * second one. A bank row still in its "<Bank> Sync" category gets the subscription's category.
- * (The other order — subscription first, bank later — is handled by the bank sync.)
- */
-async function linkBankTwinToSubscription(sub, amount) {
-  if (!sub.card_id) return false
-  const at = new Date(sub.next_execution_at).getTime()
-  const pad = 3 * 86400000
-  const { data, error } = await supabase
-    .from('transactions')
-    .select('id, category')
-    .eq('card_id', sub.card_id)
-    .not('transaction_id_card', 'is', null)
-    .is('subscription_id', null)
-    .gte('amount', amount - 0.005)
-    .lte('amount', amount + 0.005)
-    .gte('created_at', new Date(at - pad).toISOString())
-    .lte('created_at', new Date(at + pad).toISOString())
-    .order('created_at', { ascending: true })
-    .limit(1)
-  const twin = !error && data?.[0]
-  if (!twin) return false
-  const { error: linkError } = await supabase
-    .from('transactions')
-    .update({
-      subscription_id: sub.id,
-      ...(/ Sync$/.test(twin.category || '') && { category: sub.category || 'Підписки' }),
-    })
-    .eq('id', twin.id)
-  if (linkError) throw linkError
-  console.log(`[Subscriptions] Sub ${sub.id}: linked the bank's transaction ${twin.id} instead of adding one`)
-  return true
-}
-
-// Функція для обробки підписок всіх користувачів (використовується в таймері)
-async function processAllUsersSubscriptions() {
-  try {
-    const now = new Date()
-    const nowISO = now.toISOString()
-
-    // Знаходимо всі активні підписки, які потребують виконання
-    // Використовуємо service role key, щоб обійти RLS і отримати всіх користувачів
-    const { data: dueSubscriptions, error: fetchError } = await supabase
-      .from('subscriptions')
-      .select('*')
-      .eq('is_active', true)
-      .lte('next_execution_at', nowISO)
-
-    if (fetchError) {
-      console.error('[Auto Subscriptions] Error fetching subscriptions:', fetchError)
-      return
-    }
-
-    if (!dueSubscriptions || dueSubscriptions.length === 0) {
-      return // Немає підписок для обробки
-    }
-
-
-    let processed = 0
-    const errors = []
-
-    // Обробляємо підписки для кожного користувача
-    for (const sub of dueSubscriptions) {
-      try {
-        // Get card name and bank name for display
-        let cardDisplayName = null
-        if (sub.card_id) {
-          const { data: cardData } = await supabase
-            .from('cards')
-            .select('name, banks(name)')
-            .eq('id', sub.card_id)
-            .single()
-          if (cardData) {
-            const bankName = cardData.banks?.name || ''
-            const cardName = cardData.name || ''
-            cardDisplayName = bankName && cardName ? `${bankName} ${cardName}` : (cardName || bankName || null)
-          }
-        }
-
-        // Idempotency Check: Prevent duplicate transaction if already created for this scheduled time
-        const { data: existingTx } = await supabase
-          .from('transactions')
-          .select('id')
-          .eq('subscription_id', sub.id)
-          .eq('created_at', sub.next_execution_at)
-          .maybeSingle()
-
-        if (existingTx) {
-          console.log(`[Auto Subscriptions] Duplicate prevented for sub ${sub.id} at ${sub.next_execution_at}`)
-
-          // Ensure subscription is updated to next date (Self-healing)
-          const nextExecution = calculateNextExecution(
-            sub.frequency,
-            sub.day_of_week,
-            sub.day_of_month,
-            sub.next_execution_at
-          )
-
-          await supabase
-            .from('subscriptions')
-            .update({
-              last_executed_at: sub.next_execution_at,
-              next_execution_at: nextExecution
-            })
-            .eq('id', sub.id)
-
-          continue // Skip creating a new transaction
-        }
-
-        // Create transaction
-        const amount = sub.is_expense ? -Math.abs(sub.amount) : Math.abs(sub.amount)
-
-        // Формуємо опис транзакції
-        let transactionNote = ''
-        if (sub.note && sub.note.trim()) {
-          transactionNote = `${sub.note} | `
-        }
-        transactionNote += `${sub.name} (автоматично створено через підписки)`
-
-        // Використовуємо category з підписки, або 'Підписки' за замовчуванням
-        const transactionCategory = sub.category || 'Підписки'
-
-        // The bank already brought it: take that one instead of adding a second
-        if (!(await linkBankTwinToSubscription(sub, amount))) {
-          const { error: txError } = await supabase
-            .from('transactions')
-            .insert([{
-              user_id: sub.user_id,
-              amount,
-              card_id: sub.card_id,
-              card: cardDisplayName,
-              category: transactionCategory,
-              note: transactionNote,
-              subscription_id: sub.id, // the duplicate check above looks for it
-              created_at: sub.next_execution_at // Use scheduled date
-            }])
-
-          if (txError) {
-            errors.push({ subscription: sub.id, user: sub.user_id, error: txError.message })
-            console.error(`[Auto Subscriptions] Error creating transaction for subscription ${sub.id}:`, txError)
-            continue
-          }
-        }
-
-        // Calculate next execution
-        const nextExecution = calculateNextExecution(
-          sub.frequency,
-          sub.day_of_week,
-          sub.day_of_month,
-          sub.next_execution_at
-        )
-
-        // Update subscription
-        const { error: updateError } = await supabase
-          .from('subscriptions')
-          .update({
-            last_executed_at: sub.next_execution_at,
-            next_execution_at: nextExecution
-          })
-          .eq('id', sub.id)
-
-        if (updateError) {
-          errors.push({ subscription: sub.id, user: sub.user_id, error: updateError.message })
-          console.error(`[Auto Subscriptions] Error updating subscription ${sub.id}:`, updateError)
-          continue
-        }
-
-        processed++
-      } catch (err) {
-        errors.push({ subscription: sub.id, user: sub.user_id, error: err.message })
-        console.error(`[Auto Subscriptions] Error processing subscription ${sub.id}:`, err)
-      }
-    }
-
-    if (processed > 0) {
-    }
-    if (errors.length > 0) {
-      console.error(`[Auto Subscriptions] ❌ Errors processing ${errors.length} subscription(s):`, errors)
-    }
-  } catch (error) {
-    console.error('[Auto Subscriptions] Fatal error:', error)
-  }
-}
-
-// Запускаємо автоматичну обробку підписок
-// Перевіряємо тільки о 00:00 кожного дня
-let subscriptionsTimeout = null
-
-function getNextMidnight() {
-  const now = new Date()
-  const midnight = new Date()
-  midnight.setHours(0, 0, 0, 0)
-  midnight.setDate(midnight.getDate() + 1) // Наступна північ
-
-  const msUntilMidnight = midnight.getTime() - now.getTime()
-  return msUntilMidnight
-}
-
-function scheduleNextCheck() {
-  // Очищаємо попередній таймер, якщо є
-  if (subscriptionsTimeout) {
-    clearTimeout(subscriptionsTimeout)
-  }
-
-  const msUntilMidnight = getNextMidnight()
-
-  subscriptionsTimeout = setTimeout(() => {
-    processAllUsersSubscriptions()
-
-    // Плануємо наступну перевірку
-    scheduleNextCheck()
-  }, msUntilMidnight)
-
-  const nextCheckDate = new Date(Date.now() + msUntilMidnight)
-}
-
-function startSubscriptionsTimer() {
-  // Перевіряємо, чи вже пройшла північ сьогодні
-  const now = new Date()
-  const todayMidnight = new Date()
-  todayMidnight.setHours(0, 0, 0, 0)
-
-  // Якщо зараз після півночі, перевіряємо одразу
-  if (now >= todayMidnight) {
-    const hoursSinceMidnight = now.getHours()
-    const minutesSinceMidnight = now.getMinutes()
-
-    // Якщо минуло менше 1 хвилини після півночі, перевіряємо
-    // Або якщо це перший запуск і вже пройшла північ
-    if (hoursSinceMidnight === 0 && minutesSinceMidnight < 1) {
-      processAllUsersSubscriptions()
-    }
-  }
-
-  // Плануємо наступну перевірку на північ
-  scheduleNextCheck()
-}
-
-function stopSubscriptionsTimer() {
-  if (subscriptionsTimeout) {
-    clearTimeout(subscriptionsTimeout)
-    subscriptionsTimeout = null
-  }
-}
-
-// Process subscriptions - check and execute due subscriptions
-app.post('/api/subscriptions/process', getUserFromToken, async (req, res) => {
-  try {
-    const now = new Date()
-    const nowISO = now.toISOString()
-
-    // Find all active subscriptions that are due
-    const { data: dueSubscriptions, error: fetchError } = await supabase
-      .from('subscriptions')
-      .select('*')
-      .eq('user_id', req.user_id)
-      .eq('is_active', true)
-      .lte('next_execution_at', nowISO)
-
-    if (fetchError) throw fetchError
-
-    if (!dueSubscriptions || dueSubscriptions.length === 0) {
-      return res.json({ processed: 0, message: 'No subscriptions due' })
-    }
-
-    let processed = 0
-    const errors = []
-
-    for (const sub of dueSubscriptions) {
-      try {
-        // Get card name and bank name for display
-        let cardDisplayName = null
-        if (sub.card_id) {
-          const { data: cardData } = await supabase
-            .from('cards')
-            .select('name, banks(name)')
-            .eq('id', sub.card_id)
-            .single()
-          if (cardData) {
-            const bankName = cardData.banks?.name || ''
-            const cardName = cardData.name || ''
-            cardDisplayName = bankName && cardName ? `${bankName} ${cardName}` : (cardName || bankName || null)
-          }
-        }
-
-        // Idempotency Check: Prevent duplicate transaction if already created for this scheduled time
-        const { data: existingTx } = await supabase
-          .from('transactions')
-          .select('id')
-          .eq('subscription_id', sub.id)
-          .eq('created_at', sub.next_execution_at)
-          .maybeSingle() // Use maybeSingle to not throw error if not found
-
-        if (existingTx) {
-          console.log(`[Subscription] Duplicate prevented for sub ${sub.id} at ${sub.next_execution_at}`)
-
-          // Ensure subscription is updated to next date even if we skip tx creation
-          // (Self-healing in case previous run crashed after tx creation but before sub update)
-          const nextExecution = calculateNextExecution(
-            sub.frequency,
-            sub.day_of_week,
-            sub.day_of_month,
-            sub.next_execution_at
-          )
-
-          await supabase
-            .from('subscriptions')
-            .update({
-              last_executed_at: sub.next_execution_at,
-              next_execution_at: nextExecution
-            })
-            .eq('id', sub.id)
-
-          continue // Skip creating a new transaction
-        }
-
-        // Create transaction
-        const amount = sub.is_expense ? -Math.abs(sub.amount) : Math.abs(sub.amount)
-
-        // Формуємо опис транзакції
-        let transactionNote = ''
-        if (sub.note && sub.note.trim()) {
-          // Якщо є користувацький опис, додаємо його
-          transactionNote = `${sub.note} | `
-        }
-        // Завжди додаємо назву підписки та інформацію про автоматичне створення
-        transactionNote += `${sub.name} (автоматично створено через підписки)`
-
-        // Використовуємо category з підписки, або 'Підписки' за замовчуванням
-        const transactionCategory = sub.category || 'Підписки'
-
-        // The bank already brought it: take that one instead of adding a second
-        if (!(await linkBankTwinToSubscription(sub, amount))) {
-          const { error: txError } = await supabase
-            .from('transactions')
-            .insert([{
-              user_id: req.user_id,
-              amount,
-              card_id: sub.card_id,
-              card: cardDisplayName,
-              category: transactionCategory,
-              note: transactionNote,
-              subscription_id: sub.id, // Link to subscription
-              created_at: sub.next_execution_at // Use scheduled date
-            }])
-
-          if (txError) {
-            errors.push({ subscription: sub.id, error: txError.message })
-            continue
-          }
-        }
-
-        // Calculate next execution
-        const nextExecution = calculateNextExecution(
-          sub.frequency,
-          sub.day_of_week,
-          sub.day_of_month,
-          sub.next_execution_at
-        )
-
-        // Update subscription
-        const { error: updateError } = await supabase
-          .from('subscriptions')
-          .update({
-            last_executed_at: sub.next_execution_at,
-            next_execution_at: nextExecution
-          })
-          .eq('id', sub.id)
-
-        if (updateError) {
-          errors.push({ subscription: sub.id, error: updateError.message })
-          continue
-        }
-
-        processed++
-      } catch (err) {
-        errors.push({ subscription: sub.id, error: err.message })
-      }
-    }
-
-    res.json({
-      processed,
-      total: dueSubscriptions.length,
-      errors: errors.length > 0 ? errors : undefined
-    })
-  } catch (error) {
-    console.error('POST /api/subscriptions/process error:', error)
-    res.status(500).json({ error: error.message })
-  }
+// Subscriptions used to add their own transactions; their charges come from the bank now
+// (subscriptions are found in bank transactions, see insights.js). Kept for older clients.
+app.post('/api/subscriptions/process', getUserFromToken, (req, res) => {
+  res.json({ processed: 0, total: 0, message: 'Транзакції підписок приходять з банку' })
 })
 
 // Manually create transaction from subscription
@@ -4470,6 +4086,8 @@ app.post('/api/syncTrueLayer', getUserFromTokenOrApiKey, async (req, res) => {
 // Global error handler for unhandled errors
 // Bank connections through TrueLayer (any bank): catalog, connect, sync, disconnect
 registerBankConnections(app, { supabase, getUserFromToken, getUserFromTokenOrApiKey })
+// Auto-categories, subscriptions found in bank charges, the month's report
+registerInsights(app, { supabase, getUserFromToken })
 
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err)
@@ -4492,20 +4110,5 @@ if (process.env.NODE_ENV !== 'production' || process.env.VERCEL !== '1') {
   app.listen(port, '0.0.0.0', () => {
     console.log(`API on http://localhost:${port}`)
     console.log(`API доступний з мережі на порту ${port}`)
-
-    // Запускаємо таймер для автоматичної обробки підписок
-    startSubscriptionsTimer()
   })
-} else {
-  // Для Vercel serverless - запускаємо таймер одразу
-  // Але на Vercel serverless functions не підтримують довготривалі таймери
-  // Краще використовувати Vercel Cron Jobs або інший сервіс
-  console.warn('[Auto Subscriptions] ⚠️  Vercel serverless mode - subscriptions timer may not work reliably')
-  console.warn('[Auto Subscriptions] 💡 Consider using Vercel Cron Jobs for production')
-  // Спробуємо запустити, але це може не працювати на serverless
-  try {
-    startSubscriptionsTimer()
-  } catch (e) {
-    console.error('[Auto Subscriptions] Failed to start timer in serverless mode:', e)
-  }
 }

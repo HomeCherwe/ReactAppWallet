@@ -4,6 +4,7 @@ import Toast from 'react-native-toast-message'
 import { Colors } from '../constants/theme'
 import { Card } from '../api/cards'
 import { deleteTransactions, getTransactionCategories, Transaction, updateTransactionsBulk } from '../api/transactions'
+import { autoCategorize } from '../api/insights'
 import { isSyncCategory } from '../utils/cardExclusion'
 import { triggerErrorHaptic, triggerLightHaptic, triggerSuccessHaptic } from '../utils/haptics'
 import { GlassSurface } from './LiquidGlass'
@@ -109,7 +110,12 @@ export default function SelectionBar({ selected, cards, onCancel, onSelectAll, o
     [categories, q]
   )
   const canCreate = !!q && !(categories ?? []).some(c => c.toLowerCase() === q.toLowerCase())
-  const pickCategory = (c: string) => run(() => updateTransactionsBulk(ids, { category: c }), `Категорія «${c}» · ${count}`)
+  // The rules learn it: the same merchants' waiting bank imports get it too
+  const pickCategory = (c: string) =>
+    run(async () => {
+      await updateTransactionsBulk(ids, { category: c })
+      await autoCategorize({ gpt: false }).catch(() => null)
+    }, `Категорія «${c}» · ${count}`)
 
   const translateY = slide.interpolate({ inputRange: [0, 1], outputRange: [200, 0] })
 

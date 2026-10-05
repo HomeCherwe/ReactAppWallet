@@ -1,14 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Animated, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native'
 import { initialWindowMetrics } from 'react-native-safe-area-context'
+import { LinearGradient } from 'expo-linear-gradient'
 import Toast from 'react-native-toast-message'
 import PullToRefreshIndicator, { usePullToRefresh } from '../components/PullToRefreshIndicator'
 import CategoryTransactionsSheet, { CategoryView } from '../components/CategoryTransactionsSheet'
+import MonthlyReportCard from '../components/MonthlyReportCard'
+import SubscriptionsCard from '../components/SubscriptionsCard'
+import WrappedModal, { defaultWrappedYear } from '../components/WrappedModal'
+import { MonthlyReportStats } from '../api/insights'
+import { txDisplayTitle } from '../utils/pinned'
 import { checkForAppUpdate } from '../utils/appUpdate'
 import { Colors } from '../constants/theme'
 import { listPeriodTransactions, Transaction } from '../api/transactions'
 import { listCards, Card } from '../api/cards'
-import { convertCurrency, fetchExchangeRates, formatMoney, RatesMap } from '../utils/currency'
+import { fetchExchangeRates, formatMoney, RatesMap } from '../utils/currency'
+import { countedTransactions } from '../utils/statsCount'
 import { getStoredPrimaryCurrency } from '../utils/settings'
 import { getCategoryIcon } from '../utils/categoryIcon'
 import { useExcludedCardIds } from '../utils/cardExclusion'
@@ -66,6 +73,7 @@ export default function AnalyticsScreen() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [openCategory, setOpenCategory] = useState<CategoryView | null>(null)
+  const [wrappedOpen, setWrappedOpen] = useState(false)
   const pullY = useRef(new Animated.Value(0)).current
   const requestId = useRef(0)
 
@@ -107,28 +115,14 @@ export default function AnalyticsScreen() {
   useEffect(() => txBus.subscribe(ev => ev?.type === 'SYNCED' && loadData(true)), [loadData])
 
   // What counts, in the main currency (expenses as positive numbers)
-  const counted = useMemo(() => {
-    const excludedCards = new Set(excludedCardIds)
-    const cardInfo = new Map(
-      cards.map(c => {
-        const bank = String(c.bank || '').toLowerCase()
-        return [c.id, { currency: (c.currency || 'UAH').toUpperCase(), savings: bank.includes('накопич') || bank.includes('savings') }]
-      })
-    )
-    const out: { tx: Transaction; value: number; income: boolean; key: string }[] = []
-    for (const tx of transactions) {
-      if (tx.archives || tx.is_transfer || tx.exclude_from_stats || tx.refund_for) continue
-      if (tx.category && excludedCats.includes(tx.category)) continue
-      if (tx.card_id && excludedCards.has(tx.card_id)) continue
-      const info = tx.card_id ? cardInfo.get(tx.card_id) : undefined
-      if (info?.savings) continue
-      const amount = Number(tx.amount_stat ?? tx.amount ?? 0)
-      if (!amount) continue
-      const value = Math.abs(convertCurrency(amount, info?.currency || 'UAH', currency, rates))
-      out.push({ tx, value, income: amount > 0, key: monthKey(new Date(tx.created_at)) })
-    }
-    return out
-  }, [transactions, cards, rates, currency, excludedCardIds, excludedCats])
+  const counted = useMemo(
+    () =>
+      countedTransactions(transactions, { cards, rates, currency, excludedCardIds, excludedCategories: excludedCats }).map(c => ({
+        ...c,
+        key: monthKey(new Date(c.tx.created_at)),
+      })),
+    [transactions, cards, rates, currency, excludedCardIds, excludedCats]
+  )
 
   const current = monthKey(month)
   const inMonth = useMemo(() => counted.filter(c => c.key === current), [counted, current])
@@ -155,6 +149,32 @@ export default function AnalyticsScreen() {
 
   const isCurrentMonth = monthKey(month) === monthKey(new Date())
   const periodLabel = `${MONTHS[month.getMonth()]} ${month.getFullYear()}`
+
+  // The numbers GPT writes the month's report from — the same ones this screen shows
+  const reportStats = useMemo<MonthlyReportStats>(() => {
+    const round = (v: number) => Math.round(v)
+    const prevKey = monthKey(firstOfMonth(month, -1))
+    const prev = counted.filter(c => c.key === prevKey)
+    const prevByCat = new Map<string, number>()
+    for (const c of prev) if (!c.income) prevByCat.set(c.tx.category || 'Інше', (prevByCat.get(c.tx.category || 'Інше') || 0) + c.value)
+    const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
+    return {
+      income: round(incomeTotal),
+      expense: round(expenseTotal),
+      previous: {
+        income: round(prev.filter(c => c.income).reduce((s, c) => s + c.value, 0)),
+        expense: round(prev.filter(c => !c.income).reduce((s, c) => s + c.value, 0)),
+      },
+      topCategories: expenseCats.slice(0, 8).map(c => ({ name: c.category, amount: round(c.amount), previous: round(prevByCat.get(c.category) || 0) })),
+      biggest: [...expenses]
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 3)
+        .map(c => ({ title: txDisplayTitle(c.tx).slice(0, 60), amount: round(c.value), date: c.tx.created_at.slice(0, 10) })),
+      transactions: inMonth.length,
+      ...(isCurrentMonth && { partial: `${new Date().getDate()} з ${daysInMonth} днів` }),
+    }
+  }, [counted, month, inMonth, isCurrentMonth])
+  const monthId = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}`
   const shift = (by: number) => {
     triggerLightHaptic()
     setMonth(m => firstOfMonth(m, by))
@@ -282,6 +302,8 @@ export default function AnalyticsScreen() {
               <Text style={styles.ratioText}>Витрачено {Math.round((expenseTotal / incomeTotal) * 100)}% доходу</Text>
             )}
 
+            <MonthlyReportCard month={monthId} monthLabel={MONTHS[month.getMonth()]} currency={currency} stats={reportStats} />
+
             {/* 6 months: income vs expenses, tap a month to open it */}
             <View style={styles.card}>
               <View style={styles.cardHead}>
@@ -320,6 +342,25 @@ export default function AnalyticsScreen() {
             {renderCategories(expenseCats, 'expense', expenseTotal)}
             {renderCategories(incomeCats, 'income', incomeTotal)}
 
+            <SubscriptionsCard cards={cards} rates={rates} currency={currency} />
+
+            {/* The year as stories */}
+            <Pressable
+              onPress={() => {
+                triggerLightHaptic()
+                setWrappedOpen(true)
+              }}
+              style={({ pressed }) => [styles.wrapped, pressed && styles.pressed]}
+            >
+              <LinearGradient colors={['#FF6B00', '#7A1FA2']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+              <Text style={styles.wrappedEmoji}>🎁</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.wrappedTitle}>MyWallet Wrapped {defaultWrappedYear()}</Text>
+                <Text style={styles.wrappedSub}>Твій рік у цифрах: улюблене місце, найдорожчий день, кава…</Text>
+              </View>
+              <Text style={styles.wrappedArrow}>›</Text>
+            </Pressable>
+
             {excludedCats.length > 0 && (
               <Text style={styles.footnote}>Не враховуються: {excludedCats.join(', ')} (Налаштування → Категорії поза статистикою)</Text>
             )}
@@ -328,6 +369,8 @@ export default function AnalyticsScreen() {
         <View style={{ height: 130 }} />
       </Animated.ScrollView>
       <PullToRefreshIndicator scrollY={pullY} refreshing={refreshing} top={SAFE_TOP} />
+
+      <WrappedModal visible={wrappedOpen} onClose={() => setWrappedOpen(false)} />
 
       <CategoryTransactionsSheet
         view={openCategory}
@@ -607,6 +650,33 @@ const styles = StyleSheet.create({
   chevron: {
     fontSize: 20,
     color: Colors.white40,
+  },
+  wrapped: {
+    marginTop: 16,
+    borderRadius: 20,
+    padding: 16,
+    overflow: 'hidden',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  wrappedEmoji: {
+    fontSize: 32,
+  },
+  wrappedTitle: {
+    fontSize: 17,
+    fontWeight: '900',
+    color: '#fff',
+  },
+  wrappedSub: {
+    fontSize: 12.5,
+    color: 'rgba(255,255,255,0.85)',
+    marginTop: 3,
+    lineHeight: 17,
+  },
+  wrappedArrow: {
+    fontSize: 26,
+    color: '#fff',
   },
   footnote: {
     fontSize: 12,

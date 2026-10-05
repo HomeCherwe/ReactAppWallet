@@ -15,6 +15,7 @@ import { GlassSurface } from "./components/LiquidGlass"
 import { useSettingsStore } from "./store/useSettingsStore"
 import { useBankAutoSync } from "./hooks/useBankAutoSync"
 import { useMarkAppInstalled } from "./hooks/useMarkAppInstalled"
+import { useSubscriptionReminders } from './hooks/useSubscriptionReminders'
 import { toastConfig } from "./components/ToastConfig"
 import MenuOverlayHost from "./components/MenuOverlayHost"
 
@@ -79,6 +80,8 @@ export default function App() {
   useBankAutoSync(!!session)
   // Lets the website know this user has the app (it stops showing the iPhone app promo)
   useMarkAppInstalled(!!session)
+  // "Завтра спише …": a reminder the day before each subscription found in bank charges
+  useSubscriptionReminders(!!session)
 
   const handleTabPress = (tab: TabId) => {
     if (activeTab !== tab) triggerLightHaptic()

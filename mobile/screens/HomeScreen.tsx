@@ -63,7 +63,8 @@ import SplitTxModal from '../components/SplitTxModal'
 import ScanReceiptModal from '../components/ScanReceiptModal'
 
 import BalanceHistoryModal from '../components/BalanceHistoryModal'
-import { triggerLightHaptic } from '../utils/haptics'
+import { triggerErrorHaptic, triggerLightHaptic, triggerSuccessHaptic } from '../utils/haptics'
+import { acceptSuggestions, autoCategorize } from '../api/insights'
 import { supabase } from '../lib/supabase'
 import { listCards, Card } from '../api/cards'
 import {
@@ -462,6 +463,25 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
     refreshPinned()
   }
 
+  // ✓ on a suggested category (or «Підтвердити всі»): the rules learn it, and the same merchants'
+  // other waiting imports follow right away
+  const handleAcceptSuggestions = async (txs: Transaction[]) => {
+    try {
+      const n = await acceptSuggestions(txs)
+      triggerSuccessHaptic()
+      const more = await autoCategorize({ gpt: false }).catch(() => null)
+      Toast.show({
+        type: 'success',
+        text1: n === 1 ? `Категорія «${txs[0].suggested_category}»` : `Підтверджено: ${n}`,
+        text2: more?.applied ? `Ще ${more.applied} схожих отримали категорію` : 'Транзакції перейшли в загальний список',
+      })
+    } catch (e: any) {
+      triggerErrorHaptic()
+      Toast.show({ type: 'error', text1: 'Не вдалося підтвердити', text2: e?.message })
+    }
+    refreshAfterTxChange()
+  }
+
   const handleLinkRefund = async (expense: Transaction, refund: Transaction) => {
     await linkRefund(expense.id, refund.id)
     refreshAfterTxChange()
@@ -809,6 +829,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
             }}
             onDeleteTx={handleDeleteTx}
             onLinkRefund={handleLinkRefund}
+            onAcceptSuggestions={handleAcceptSuggestions}
             onUnlinkRefund={handleUnlinkRefund}
             refundFor={refundFor}
             onRefundForChange={setRefundFor}

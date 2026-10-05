@@ -10,6 +10,7 @@ import ConfirmModal from '../components/ConfirmModal'
 import { SUPPORTED_CURRENCIES, usePrimaryCurrency, setPrimaryCurrency } from '../utils/primaryCurrency'
 import { EXCLUDED_CATEGORIES_PATH, useExcludedCategories } from '../utils/statsCategories'
 import { getTransactionCategories } from '../api/transactions'
+import AutoCategoriesSettings from '../components/AutoCategoriesSettings'
 
 // Symbol tile colors in the currency list
 const CURRENCY_COLORS = {
@@ -600,6 +601,8 @@ export default function ProfilePage() {
           )}
         </div>
       </section>
+
+      <AutoCategoriesSettings sectionClass={section} SectionTitle={SectionTitle} />
 
       {/* Automation key */}
       <section className={section}>
