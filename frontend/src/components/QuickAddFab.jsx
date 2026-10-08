@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, ArrowLeftRight, ScanLine } from 'lucide-react'
+import { Plus, ArrowLeftRight, ScanLine, Sparkles } from 'lucide-react'
+import { useAssistantStore } from '../store/useAssistantStore'
 import CreateTxModal from './transactions/CreateTxModal'
 import TransferModal from './transactions/TransferModal'
 import ScanReceiptModal from './transactions/ScanReceiptModal'
@@ -81,6 +82,21 @@ export default function QuickAddFab({ variant = 'fab' }) {
                 inline ? 'top-[calc(100%+8px)] left-0' : 'bottom-[76px] right-0'
               }`}
             >
+              {/* The AI first, with its running contour (same as the iPhone app) */}
+              <div className="p-1.5 pb-1">
+                <div className="ai-frame" style={{ '--ai-radius': '14px' }}>
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false)
+                      useAssistantStore.getState().show()
+                    }}
+                    className="w-full h-11 px-3 flex items-center justify-between text-[15px] font-bold text-white bg-[#24222C] hover:bg-[#2c2a36] transition-colors"
+                  >
+                    AI-асистент
+                    <Sparkles size={18} className="text-[#C77DFF]" />
+                  </button>
+                </div>
+              </div>
               {actions.map(({ label, icon: Icon, onClick }, i) => (
                 <button
                   key={label}
@@ -97,6 +113,13 @@ export default function QuickAddFab({ variant = 'fab' }) {
           )}
         </AnimatePresence>
 
+        {/* The AI lives in this menu: its contour runs around the + */}
+        {!inline && (
+          <>
+            <span className="ai-ring-halo" />
+            <span className="ai-ring" />
+          </>
+        )}
         <motion.button
           whileHover={{ scale: 1.06 }}
           whileTap={{ scale: 0.9 }}

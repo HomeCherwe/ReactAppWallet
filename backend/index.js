@@ -10,6 +10,7 @@ import crypto from 'crypto'
 import { createClient } from '@supabase/supabase-js'
 import { registerBankConnections, syncAllBankConnections, psuHeadersFrom, pinSyncCategory } from './bankConnections.js'
 import { registerInsights } from './insights.js'
+import { registerAssistant } from './assistant.js'
 dotenv.config();
 
 const app = express();
@@ -4087,6 +4088,8 @@ app.post('/api/syncTrueLayer', getUserFromTokenOrApiKey, async (req, res) => {
 registerBankConnections(app, { supabase, getUserFromToken, getUserFromTokenOrApiKey })
 // Auto-categories, subscriptions found in bank charges, the month's report
 registerInsights(app, { supabase, getUserFromToken })
+// «AI-асистент»: a chat that reads the user's data through fixed functions
+registerAssistant(app, { supabase, getUserFromToken })
 
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err)

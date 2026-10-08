@@ -7,6 +7,8 @@ export interface MenuAction {
   label: string
   icon: IconName
   destructive?: boolean
+  /** The AI's item: drawn with its running colorful contour */
+  ai?: boolean
   onPress: () => void
 }
 

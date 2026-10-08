@@ -113,6 +113,8 @@ interface TransactionListProps {
   onToggleSelect?: (tx: Transaction) => void
   /** Pinned bank imports with a suggested category: ✓ on a row, or «Підтвердити всі» */
   onAcceptSuggestions?: (txs: Transaction[]) => Promise<void>
+  /** Long-press menu: «Запитати AI» about this transaction */
+  onAskAI?: (tx: Transaction) => void
 }
 
 export default React.memo(TransactionList)
@@ -144,6 +146,7 @@ function TransactionList({
   onStartSelect,
   onToggleSelect,
   onAcceptSuggestions,
+  onAskAI,
 }: TransactionListProps) {
   // Selection mode: rows show a check circle and a tap selects instead of opening
   const sel = (t: Transaction) => (selectedIds ? selectedIds.has(t.id) : undefined)
@@ -325,6 +328,7 @@ function TransactionList({
 
   const menuActions = (tx: Transaction): MenuAction[] => {
     const out: MenuAction[] = []
+    if (onAskAI) out.push({ label: 'Запитати AI', icon: 'sparkles', ai: true, onPress: () => onAskAI(tx) })
     if (onStartSelect) out.push({ label: 'Вибрати', icon: 'check', onPress: () => onStartSelect(tx) })
     const pin = pinStateOf(tx, pinnedCategories)
     if (pin === 'category') {

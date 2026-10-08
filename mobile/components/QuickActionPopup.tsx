@@ -8,6 +8,7 @@ import {
 } from 'react-native'
 import { Colors, Radius, Typography } from '../constants/theme'
 import SheetModal from './SheetModal'
+import { AiGlowBorder } from './AiGlow'
 
 interface QuickActionPopupProps {
   visible: boolean
@@ -17,6 +18,7 @@ interface QuickActionPopupProps {
   onTransfer: () => void
   onAddGoal: () => void
   onScan: () => void
+  onAssistant?: () => void
 }
 
 export default function QuickActionPopup({
@@ -27,6 +29,7 @@ export default function QuickActionPopup({
   onTransfer,
   onAddGoal,
   onScan,
+  onAssistant,
 }: QuickActionPopupProps) {
   const actions = [
     {
@@ -92,6 +95,28 @@ export default function QuickActionPopup({
               <Text style={styles.title}>Швидкі дії</Text>
               <Text style={styles.subtitle}>Оберіть потрібну операцію</Text>
             </View>
+
+            {onAssistant && (
+              <TouchableOpacity
+                activeOpacity={0.75}
+                onPress={() => {
+                  onClose()
+                  onAssistant()
+                }}
+                style={styles.aiWrap}
+              >
+                <AiGlowBorder radius={18} thickness={1.6} background="#1A1820" style={styles.aiItem}>
+                  <View style={[styles.actionIconWrap, styles.aiIconWrap]}>
+                    <Text style={styles.actionIcon}>✨</Text>
+                  </View>
+                  <View style={styles.actionMeta}>
+                    <Text style={styles.actionTitle}>AI-асистент</Text>
+                    <Text style={styles.actionDesc}>Запитай про свої гроші звичайними словами</Text>
+                  </View>
+                  <Text style={styles.chevron}>›</Text>
+                </AiGlowBorder>
+              </TouchableOpacity>
+            )}
 
             {/* Action Items List */}
             <View style={styles.actionsList}>
@@ -196,6 +221,21 @@ const styles = StyleSheet.create({
     ...Typography.caption,
     color: Colors.textMuted,
     marginTop: 2,
+  },
+  aiWrap: {
+    paddingHorizontal: 14,
+    marginBottom: 6,
+  },
+  aiItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+  },
+  aiIconWrap: {
+    backgroundColor: 'rgba(199, 125, 255, 0.18)',
+    borderColor: 'rgba(199, 125, 255, 0.40)',
   },
   actionsList: {
     paddingHorizontal: 14,
