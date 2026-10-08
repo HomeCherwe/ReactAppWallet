@@ -195,6 +195,7 @@ export default function AssistantSheet({ visible, onClose, tx, cards, hidden, on
     const next = [...history.filter(m => !m.error), userMsg]
     setMessages(next)
     setInput('')
+    Keyboard.dismiss()
     setSending(true)
     try {
       const turns: AssistantTurn[] = next.slice(-SEND_MESSAGES).map(m => ({ role: m.role, content: m.text }))
@@ -250,7 +251,15 @@ export default function AssistantSheet({ visible, onClose, tx, cards, hidden, on
           </Pressable>
         </View>
 
-        <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          ref={scrollRef}
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
+          {/* A tap on an empty spot hides the keyboard */}
+          <Pressable style={StyleSheet.absoluteFill} onPress={Keyboard.dismiss} accessible={false} />
           {focus && (
             <View style={styles.context}>
               <Text style={styles.contextLabel}>Про транзакцію</Text>
@@ -318,8 +327,19 @@ export default function AssistantSheet({ visible, onClose, tx, cards, hidden, on
         </ScrollView>
 
         {/* Input with the AI's running contour */}
-        <View style={styles.inputWrap}>
-          <AiGlowBorder radius={22} thickness={1.5} background="#1C1B22" style={styles.inputBox}>
+        <View style={[styles.inputWrap, keyboard > 0 && styles.inputWrapKeyboard]}>
+          {/* With the keyboard up: a button to put it away */}
+          {keyboard > 0 && (
+            <Pressable
+              onPress={Keyboard.dismiss}
+              hitSlop={8}
+              accessibilityLabel="Сховати клавіатуру"
+              style={({ pressed }) => [styles.hideKbBtn, pressed && styles.pressed]}
+            >
+              <Icon name="chevronDown" size={20} color={Colors.white80} strokeWidth={2.4} />
+            </Pressable>
+          )}
+          <AiGlowBorder radius={22} thickness={1.5} background="#1C1B22" style={[styles.inputBox, { flex: 1 }]}>
             <TextInput
               style={styles.input}
               value={input}
@@ -329,6 +349,10 @@ export default function AssistantSheet({ visible, onClose, tx, cards, hidden, on
               multiline
               maxLength={1000}
               editable={!sending}
+              returnKeyType="send"
+              submitBehavior="blurAndSubmit"
+              enablesReturnKeyAutomatically
+              onSubmitEditing={() => send(input)}
             />
             <Pressable onPress={() => send(input)} disabled={!canSend} style={({ pressed }) => [styles.sendBtn, !canSend && styles.sendOff, pressed && styles.pressed]}>
               {sending ? (
@@ -417,7 +441,10 @@ const styles = StyleSheet.create({
   thinking: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 6, paddingVertical: 4 },
   thinkingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: AI_ACCENT },
   thinkingText: { fontSize: 13, color: Colors.white40, marginLeft: 6 },
-  inputWrap: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 28 },
+  inputWrap: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 28 },
+  // Right above the keyboard: no room for the home indicator needed
+  inputWrapKeyboard: { paddingBottom: 10 },
+  hideKbBtn: { width: 40, height: 50, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.07)' },
   inputBox: { flexDirection: 'row', alignItems: 'flex-end', paddingLeft: 16, paddingRight: 6, paddingVertical: 6, minHeight: 50 },
   input: { flex: 1, color: Colors.white, fontSize: 16, lineHeight: 21, maxHeight: 110, paddingTop: 8, paddingBottom: 8 },
   sendBtn: { width: 38, height: 38, borderRadius: 19, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.10)' },
