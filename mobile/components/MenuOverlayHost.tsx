@@ -5,6 +5,7 @@ import { triggerLightHaptic, triggerMediumHaptic, triggerSelectionHaptic } from 
 import { MenuRequest, closeMenu, setMenuPickHandler, useMenuOverlay } from '../store/useMenuOverlay'
 import { GlassSurface } from './LiquidGlass'
 import Icon from './Icon'
+import { AI_ACCENT, AiGlowBorder } from './AiGlow'
 
 // Same look as the + button's native iOS menu: glass panel, white labels, icons on the right,
 // destructive actions in their own section
@@ -135,12 +136,13 @@ export default function MenuOverlayHost() {
                   triggerLightHaptic()
                   pick(i)
                 }}
-                style={({ pressed }) => [styles.item, i > 0 && !gap && styles.itemBorder, (pressed || active) && styles.itemActive]}
+                style={({ pressed }) => [styles.item, i > 0 && !gap && !a.ai && styles.itemBorder, (pressed || active) && styles.itemActive]}
               >
-                <Text style={[styles.itemText, a.destructive && { color: IOS_RED }]} numberOfLines={1}>
+                {a.ai && <AiGlowBorder radius={14} thickness={1.6} background="rgb(36, 34, 44)" style={styles.aiFrame} />}
+                <Text style={[styles.itemText, a.destructive && { color: IOS_RED }, a.ai && styles.aiText]} numberOfLines={1}>
                   {a.label}
                 </Text>
-                <Icon name={a.icon} size={19} color={a.destructive ? IOS_RED : Colors.orange} strokeWidth={1.9} />
+                <Icon name={a.icon} size={19} color={a.destructive ? IOS_RED : a.ai ? AI_ACCENT : Colors.orange} strokeWidth={1.9} />
               </Pressable>
             </React.Fragment>
           )
@@ -200,6 +202,17 @@ const styles = StyleSheet.create({
   itemBorder: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  // The AI item's glowing frame, inset inside the row
+  aiFrame: {
+    position: 'absolute',
+    left: 6,
+    right: 6,
+    top: 5,
+    bottom: 5,
+  },
+  aiText: {
+    fontWeight: '700',
   },
   itemActive: {
     backgroundColor: 'rgba(255, 255, 255, 0.14)',

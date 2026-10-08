@@ -58,6 +58,7 @@ import AddTransactionModal from '../components/AddTransactionModal'
 import AddAccountFlow from '../components/AddAccountFlow'
 import CardTransactionsSheet from '../components/CardTransactionsSheet'
 import TxSheet from '../components/TxSheet'
+import AssistantSheet from '../components/AssistantSheet'
 import TransferModal from '../components/TransferModal'
 import SplitTxModal from '../components/SplitTxModal'
 import ScanReceiptModal from '../components/ScanReceiptModal'
@@ -126,6 +127,8 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
   const [quickActionPopupVisible, setQuickActionPopupVisible] = useState(false)
   const [transferVisible, setTransferVisible] = useState(false)
   const [scanVisible, setScanVisible] = useState(false)
+  // «AI-асистент»: from the + (general chat) or a transaction's long press (about it)
+  const [assistant, setAssistant] = useState<{ tx: Transaction | null } | null>(null)
   const [historyVisible, setHistoryVisible] = useState(false)
 
   // Tx operations modals
@@ -842,6 +845,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
             onDeleteTx={handleDeleteTx}
             onLinkRefund={handleLinkRefund}
             onAcceptSuggestions={handleAcceptSuggestions}
+            onAskAI={tx => setAssistant({ tx })}
             onUnlinkRefund={handleUnlinkRefund}
             refundFor={refundFor}
             onRefundForChange={setRefundFor}
@@ -889,6 +893,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         onTransfer={() => setTransferVisible(true)}
         onAddGoal={() => setAddCardVisible(true)}
         onScan={() => setScanVisible(true)}
+        onAssistant={() => setAssistant({ tx: null })}
         onLongPress={() => setQuickActionPopupVisible(true)}
         onLongPressFallback={() => setQuickActionPopupVisible(true)}
       />
@@ -902,6 +907,16 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         onTransfer={() => setTransferVisible(true)}
         onAddGoal={() => setAddCardVisible(true)}
         onScan={() => setScanVisible(true)}
+        onAssistant={() => setAssistant({ tx: null })}
+      />
+
+      <AssistantSheet
+        visible={!!assistant}
+        tx={assistant?.tx}
+        cards={cards}
+        hidden={hideBalances}
+        onClose={() => setAssistant(null)}
+        onChanged={refreshAfterTxChange}
       />
 
       <CardSettingsModal

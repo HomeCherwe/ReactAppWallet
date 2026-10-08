@@ -1,5 +1,6 @@
 import { fmtDate, fmtAmount } from '../../utils/format'
-import { Pencil } from 'lucide-react'
+import { Pencil, Sparkles } from 'lucide-react'
+import { useAssistantStore } from '../../store/useAssistantStore'
 import BaseModal from '../BaseModal'
 
 export default function DetailsModal({ open, tx, currency, onClose, onEdit, onSplit }) {
@@ -40,6 +41,22 @@ export default function DetailsModal({ open, tx, currency, onClose, onEdit, onSp
                 <div className="flex justify-between">
                   <span className="text-white/55">Статус</span>
                   <span className="text-white/60">В обробці — банк ще не провів</span>
+                </div>
+              )}
+
+              {tx?.id && (
+                <div className="ai-frame mt-1" style={{ '--ai-radius': '14px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose?.()
+                      useAssistantStore.getState().show(tx)
+                    }}
+                    className="w-full h-11 px-4 flex items-center justify-center gap-2 font-bold text-white bg-[#24222C] hover:bg-[#2c2a36] transition-colors"
+                  >
+                    <Sparkles size={16} className="text-[#C77DFF]" />
+                    Запитати AI про цю транзакцію
+                  </button>
                 </div>
               )}
 

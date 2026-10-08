@@ -34,7 +34,7 @@ async function openaiJson(system, user, timeoutMs = 25000) {
   return typeof content === 'string' ? JSON.parse(content) : content
 }
 
-async function readPreferences(supabase, userId) {
+export async function readPreferences(supabase, userId) {
   const { data } = await supabase.from('user_preferences').select('preferences').eq('user_id', userId).maybeSingle()
   return data?.preferences || {}
 }
@@ -53,7 +53,7 @@ async function patchPreferences(supabase, userId, section, values) {
 // ---------------------------------------------------------------------------
 
 /** The user's categories, most used first (what GPT may choose from) */
-async function userCategories(supabase, userId) {
+export async function userCategories(supabase, userId) {
   const counts = new Map()
   for (let from = 0; from < 20000; from += 1000) {
     const { data, error } = await supabase

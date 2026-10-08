@@ -25,12 +25,15 @@ import { HAS_LIQUID_GLASS } from './LiquidGlass'
 import { LinearGradient } from 'expo-linear-gradient'
 import { Colors } from '../constants/theme'
 import { triggerHeavyHaptic } from '../utils/haptics'
+import { AiGlowRing } from './AiGlow'
 
 const FAB_SIZE = 64
 // Label size inside the circular button; the button's own padding brings it to ~FAB_SIZE
 const PLUS_BOX = 38
 // Hold this long on the + and iOS opens its menu
 const MENU_HOLD_MS = 420
+// The AI's living contour around the + (a little wider than the glass circle)
+const RING_SIZE = 68
 
 interface FloatingActionButtonProps {
   onPress: () => void
@@ -38,6 +41,8 @@ interface FloatingActionButtonProps {
   onTransfer?: () => void
   onAddGoal?: () => void
   onScan?: () => void
+  /** «AI-асистент» — the first item of the menu */
+  onAssistant?: () => void
   onLongPress?: () => void
   onLongPressFallback?: () => void
   /** Hidden without unmounting (the native menu host is costly to re-create) */
@@ -58,6 +63,7 @@ export default function FloatingActionButton({
   onTransfer = () => {},
   onAddGoal = () => {},
   onScan = () => {},
+  onAssistant = () => {},
   onLongPress,
   onLongPressFallback,
   hidden = false,
@@ -183,6 +189,10 @@ export default function FloatingActionButton({
   if (Platform.OS === 'ios') {
     return (
       <View style={[styles.fabWrapper, hidden && styles.hidden]} pointerEvents={hidden ? 'none' : 'box-none'}>
+        {/* The AI lives in this menu: its contour runs around the button */}
+        <View style={styles.ringIos} pointerEvents="none">
+          {!hidden && <AiGlowRing size={RING_SIZE} />}
+        </View>
         <View {...holdHandlers}>
         <Host style={styles.host} seedColor={Colors.orange} colorScheme="dark">
           <Menu
@@ -214,10 +224,17 @@ export default function FloatingActionButton({
           >
             <Section>
               <Button
+                label="AI-асистент"
+                systemImage="sparkles"
+                onPress={onAssistant}
+                modifiers={[onAppear(onMenuOpened)]}
+              />
+            </Section>
+            <Section>
+              <Button
                 label="Нова транзакція"
                 systemImage="plus.circle.fill"
                 onPress={onPress}
-                modifiers={[onAppear(onMenuOpened)]}
               />
             </Section>
             <Section title="Рахунки та операції">
@@ -247,6 +264,9 @@ export default function FloatingActionButton({
   return (
     <View style={[styles.fabWrapper, hidden && styles.hidden]} pointerEvents={hidden ? 'none' : 'box-none'}>
       <View style={styles.fabGlowContainer}>
+        <View style={styles.ringFallback} pointerEvents="none">
+          {!hidden && <AiGlowRing size={RING_SIZE} />}
+        </View>
         {renderLiquidGlassButton()}
       </View>
     </View>
@@ -278,6 +298,21 @@ const styles = StyleSheet.create({
   host: {
     width: FAB_SIZE + 24,
     height: FAB_SIZE + 24,
+  },
+  // Centered on the native button (the host is FAB_SIZE + 24 square)
+  ringIos: {
+    position: 'absolute',
+    left: (FAB_SIZE + 24 - RING_SIZE) / 2,
+    top: (FAB_SIZE + 24 - RING_SIZE) / 2,
+    width: RING_SIZE,
+    height: RING_SIZE,
+  },
+  ringFallback: {
+    position: 'absolute',
+    left: (60 - RING_SIZE) / 2,
+    top: (60 - RING_SIZE) / 2,
+    width: RING_SIZE,
+    height: RING_SIZE,
   },
   fabBtn: {
     width: 60,

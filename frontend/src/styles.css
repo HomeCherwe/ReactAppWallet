@@ -139,3 +139,63 @@ html::-webkit-scrollbar { display: none; }
 .scrollbar-hide::-webkit-scrollbar {
   display: none;  /* Chrome, Safari and Opera */
 }
+
+/* ---- AI-асистент: the "living" contour (same colors as the iPhone app) ---- */
+@keyframes ai-spin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+@keyframes ai-breath {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.85; }
+}
+/* A box whose border runs with the AI colors: put one child inside with its own background */
+.ai-frame {
+  position: relative;
+  overflow: hidden;
+  padding: 1.5px;
+  border-radius: var(--ai-radius, 16px);
+}
+.ai-frame::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 250%;
+  aspect-ratio: 1;
+  background: conic-gradient(#FF6B00, #FF3D7F, #A259FF, #3D7BFF, #FF6B00);
+  animation: ai-spin 3.6s linear infinite;
+  pointer-events: none;
+}
+.ai-frame > * {
+  position: relative;
+  border-radius: calc(var(--ai-radius, 16px) - 1.5px);
+}
+/* A ring + soft halo behind a round button (the + ) */
+.ai-ring,
+.ai-ring-halo {
+  position: absolute;
+  inset: -3px;
+  border-radius: 9999px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.ai-ring-halo {
+  inset: -6px;
+  filter: blur(8px);
+  animation: ai-breath 2.6s ease-in-out infinite;
+}
+.ai-ring::before,
+.ai-ring-halo::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 150%;
+  aspect-ratio: 1;
+  background: conic-gradient(#FF6B00, #FF3D7F, #A259FF, #3D7BFF, #FF6B00);
+  animation: ai-spin 3.2s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-frame::before, .ai-ring::before, .ai-ring-halo::before, .ai-ring-halo { animation: none; }
+}

@@ -19,6 +19,7 @@ import { fetchTotalsByBucket } from './api/totals'
 import { useRealtimeTransactions } from './hooks/useRealtimeTransactions'
 import { useBankAutoSync } from './hooks/useBankAutoSync'
 import { useSettingsStore } from './store/useSettingsStore'
+import AssistantPanel from './components/assistant/AssistantPanel'
 
 export default function App(){
   const [session, setSession] = useState(null)
@@ -452,6 +453,8 @@ export default function App(){
       <div className="lg:hidden"><MobileDock /></div>
       {/* Phone & tablet: the floating + (on desktop it sits in the sidebar) */}
       <div className="lg:hidden"><QuickAddFab /></div>
+      {/* «AI-асистент»: from the + or a transaction's «Запитати AI» */}
+      <AssistantPanel />
 
       <div className="max-w-[1300px] mx-auto grid grid-cols-1 lg:grid-cols-[230px_1fr_360px] gap-4">
         <div className="hidden lg:block"><Sidebar /></div>
