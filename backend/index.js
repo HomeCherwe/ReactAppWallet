@@ -845,7 +845,7 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       category_in,
       has_pinned_tag,
       limit,
-      fields = 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, merchant_address, merchant_lat, merchant_lng, is_transfer, transfer_role, transfer_id, status, category_source, suggested_category'
+      fields = 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, is_transfer, transfer_role, transfer_id, status, category_source, suggested_category'
     } = req.query
 
     // Filter out 'currency' field if it doesn't exist in the table
@@ -856,14 +856,14 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       'transfer_id', 'user_id', 'transaction_id_card',
       'refund_for',
       'is_debt', 'debt_party', 'debt_direction',
-      'merchant_name', 'merchant_address', 'merchant_lat', 'merchant_lng',
+      'merchant_name',
       'status', 'category_source', 'suggested_category', 'subscription_id'
     ]
     const requestedFields = fields.split(',').map(f => f.trim())
     const validFields = requestedFields.filter(f => allowedFields.includes(f))
 
     // Use valid fields, fallback to default if all were filtered out
-    const safeFields = validFields.length > 0 ? validFields.join(', ') : 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, merchant_address, merchant_lat, merchant_lng, is_transfer, transfer_role, transfer_id, status, category_source, suggested_category'
+    const safeFields = validFields.length > 0 ? validFields.join(', ') : 'id, created_at, amount, amount_stat, exclude_from_stats, category, note, archives, card, card_id, refund_for, is_debt, debt_party, debt_direction, merchant_name, is_transfer, transfer_role, transfer_id, status, category_source, suggested_category'
 
     let q = supabase
       .from('transactions')
@@ -1215,7 +1215,7 @@ app.get('/api/transactions/:id', getUserFromToken, async (req, res) => {
 
     const { data, error } = await supabase
       .from('transactions')
-      .select('id, amount, amount_stat, exclude_from_stats, category, note, card_id, card, created_at, refund_for, is_debt, debt_party, debt_direction, count_as_income, is_transfer, merchant_name, merchant_address, merchant_lat, merchant_lng')
+      .select('id, amount, amount_stat, exclude_from_stats, category, note, card_id, card, created_at, refund_for, is_debt, debt_party, debt_direction, count_as_income, is_transfer, merchant_name')
       .eq('id', id)
       .eq('user_id', req.user_id)
       .single()
@@ -1255,72 +1255,8 @@ app.post('/api/transactions', getUserFromToken, async (req, res) => {
       payload.amount_stat = payload.amount
     }
 
-    // Автоматичне геокодування мерчанта, якщо він переданий
-    if (payload.merchant_name && !payload.merchant_lat) {
-      try {
-        // Спробувати знайти в кеші або загеокодувати
-        const normalizedName = normalizeMerchantName(payload.merchant_name)
-        const { data: cached } = await supabase
-          .from('merchant_locations')
-          .select('*')
-          .eq('user_id', req.user_id)
-          .eq('normalized_name', normalizedName)
-          .maybeSingle()
-
-        if (cached && cached.lat && cached.lng) {
-          // Використати з кешу
-          payload.merchant_name = cached.merchant_name
-          payload.merchant_address = cached.address
-          payload.merchant_lat = cached.lat
-          payload.merchant_lng = cached.lng
-        } else if (payload.merchant_address) {
-          // Якщо є адреса з чека - спробувати геокодувати
-          const geocodeResult = await geocodeWithGeocoding(payload.merchant_address)
-          if (geocodeResult) {
-            payload.merchant_address = geocodeResult.address
-            payload.merchant_lat = geocodeResult.lat
-            payload.merchant_lng = geocodeResult.lng
-
-            // Зберегти в кеш
-            await supabase.from('merchant_locations').upsert({
-              user_id: req.user_id,
-              merchant_name: payload.merchant_name,
-              normalized_name: normalizedName,
-              address: geocodeResult.address,
-              lat: geocodeResult.lat,
-              lng: geocodeResult.lng,
-              place_id: geocodeResult.place_id,
-              source: 'receipt',
-              confidence: 0.9
-            }, { onConflict: 'user_id,normalized_name' })
-          }
-        } else {
-          // Спробувати геокодувати за назвою
-          const geocodeResult = await geocodeWithPlaces(payload.merchant_name)
-          if (geocodeResult) {
-            payload.merchant_address = geocodeResult.address
-            payload.merchant_lat = geocodeResult.lat
-            payload.merchant_lng = geocodeResult.lng
-
-            // Зберегти в кеш
-            await supabase.from('merchant_locations').upsert({
-              user_id: req.user_id,
-              merchant_name: payload.merchant_name,
-              normalized_name: normalizedName,
-              address: geocodeResult.address,
-              lat: geocodeResult.lat,
-              lng: geocodeResult.lng,
-              place_id: geocodeResult.place_id,
-              source: 'geocoded',
-              confidence: geocodeResult.confidence
-            }, { onConflict: 'user_id,normalized_name' })
-          }
-        }
-      } catch (geoError) {
-        // Не критична помилка - просто логуємо
-        console.warn('Geocoding failed for transaction:', geoError.message)
-      }
-    }
+    // Merchant location fields are gone (the map idea was dropped); older clients may still send them
+    for (const k of ['merchant_address', 'merchant_lat', 'merchant_lng', 'merchant_city']) delete payload[k]
 
     const { data, error } = await supabase
       .from('transactions')
@@ -1402,71 +1338,8 @@ app.put('/api/transactions/:id', getUserFromToken, async (req, res) => {
       patch.exclude_from_stats = false
     }
 
-    // Автоматичне геокодування мерчанта, якщо він переданий і ще не має координат
-    if (patch.merchant_name && !patch.merchant_lat) {
-      try {
-        const normalizedName = normalizeMerchantName(patch.merchant_name)
-        const { data: cached } = await supabase
-          .from('merchant_locations')
-          .select('*')
-          .eq('user_id', req.user_id)
-          .eq('normalized_name', normalizedName)
-          .maybeSingle()
-
-        if (cached && cached.lat && cached.lng) {
-          // Використати з кешу
-          patch.merchant_name = cached.merchant_name
-          patch.merchant_address = cached.address || patch.merchant_address
-          patch.merchant_lat = cached.lat
-          patch.merchant_lng = cached.lng
-        } else if (patch.merchant_address) {
-          // Якщо є адреса - спробувати геокодувати
-          const geocodeResult = await geocodeWithGeocoding(patch.merchant_address)
-          if (geocodeResult) {
-            patch.merchant_address = geocodeResult.address
-            patch.merchant_lat = geocodeResult.lat
-            patch.merchant_lng = geocodeResult.lng
-
-            // Зберегти в кеш
-            await supabase.from('merchant_locations').upsert({
-              user_id: req.user_id,
-              merchant_name: patch.merchant_name,
-              normalized_name: normalizedName,
-              address: geocodeResult.address,
-              lat: geocodeResult.lat,
-              lng: geocodeResult.lng,
-              place_id: geocodeResult.place_id,
-              source: 'receipt',
-              confidence: 0.9
-            }, { onConflict: 'user_id,normalized_name' })
-          }
-        } else {
-          // Спробувати геокодувати за назвою
-          const geocodeResult = await geocodeWithPlaces(patch.merchant_name)
-          if (geocodeResult) {
-            patch.merchant_address = geocodeResult.address
-            patch.merchant_lat = geocodeResult.lat
-            patch.merchant_lng = geocodeResult.lng
-
-            // Зберегти в кеш
-            await supabase.from('merchant_locations').upsert({
-              user_id: req.user_id,
-              merchant_name: patch.merchant_name,
-              normalized_name: normalizedName,
-              address: geocodeResult.address,
-              lat: geocodeResult.lat,
-              lng: geocodeResult.lng,
-              place_id: geocodeResult.place_id,
-              source: 'geocoded',
-              confidence: geocodeResult.confidence
-            }, { onConflict: 'user_id,normalized_name' })
-          }
-        }
-      } catch (geoError) {
-        // Не критична помилка - просто логуємо
-        console.warn('Geocoding failed for transaction update:', geoError.message)
-      }
-    }
+    // Merchant location fields are gone (the map idea was dropped); older clients may still send them
+    for (const k of ['merchant_address', 'merchant_lat', 'merchant_lng', 'merchant_city']) delete patch[k]
 
     const { error } = await supabase
       .from('transactions')
@@ -2640,263 +2513,6 @@ Return ONLY the JSON object { "transactions": [...] }. Nothing else.`
   }
 })
 
-// Helper function to normalize merchant name for caching
-function normalizeMerchantName(name) {
-  if (!name) return ''
-  return name
-    .toLowerCase()
-    .replace(/[^\w\sа-яіїєґ]/gi, '') // прибрати спецсимволи, залишити букви та пробіли
-    .replace(/\s+/g, ' ')           // множинні пробіли в один
-    .trim()
-}
-
-// Helper function to geocode merchant using Google Places API
-async function geocodeWithPlaces(merchantName, city = null) {
-  if (!process.env.GOOGLE_MAPS_API_KEY) {
-    console.warn('GOOGLE_MAPS_API_KEY not set, skipping geocoding')
-    return null
-  }
-
-  try {
-    // Формуємо запит для Places API Text Search
-    const query = city ? `${merchantName}, ${city}, Україна` : `${merchantName}, Україна`
-    const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(query)}&key=${process.env.GOOGLE_MAPS_API_KEY}&language=uk&region=ua`
-
-    const response = await fetch(url)
-    const data = await response.json()
-
-    if (data.status === 'OK' && data.results && data.results.length > 0) {
-      const place = data.results[0] // Беремо перший результат
-      return {
-        merchantName: merchantName,
-        address: place.formatted_address,
-        lat: place.geometry.location.lat,
-        lng: place.geometry.location.lng,
-        place_id: place.place_id,
-        confidence: 0.8
-      }
-    }
-    return null
-  } catch (e) {
-    console.error('Places API error:', e)
-    return null
-  }
-}
-
-// Helper function to geocode merchant using Google Geocoding API (fallback)
-async function geocodeWithGeocoding(merchantName, city = null) {
-  if (!process.env.GOOGLE_MAPS_API_KEY) {
-    return null
-  }
-
-  try {
-    const address = city ? `${merchantName}, ${city}, Україна` : `${merchantName}, Україна`
-    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${process.env.GOOGLE_MAPS_API_KEY}&language=uk&region=ua`
-
-    const response = await fetch(url)
-    const data = await response.json()
-
-    if (data.status === 'OK' && data.results && data.results.length > 0) {
-      const result = data.results[0]
-      return {
-        merchantName: merchantName,
-        address: result.formatted_address,
-        lat: result.geometry.location.lat,
-        lng: result.geometry.location.lng,
-        place_id: result.place_id,
-        confidence: 0.6
-      }
-    }
-    return null
-  } catch (e) {
-    console.error('Geocoding API error:', e)
-    return null
-  }
-}
-
-// POST /api/geocode-merchant - Геокодування назви мерчанта
-app.post('/api/geocode-merchant', getUserFromToken, async (req, res) => {
-  try {
-    const { merchantName, city, address } = req.body
-
-    if (!merchantName || !merchantName.trim()) {
-      return res.status(400).json({ error: 'merchantName is required' })
-    }
-
-    const normalizedName = normalizeMerchantName(merchantName)
-
-    // 1. Перевірка кешу
-    const { data: cached, error: cacheError } = await supabase
-      .from('merchant_locations')
-      .select('*')
-      .eq('user_id', req.user_id)
-      .eq('normalized_name', normalizedName)
-      .maybeSingle()
-
-    if (!cacheError && cached && cached.lat && cached.lng) {
-      return res.json({
-        merchantName: cached.merchant_name,
-        address: cached.address,
-        lat: Number(cached.lat),
-        lng: Number(cached.lng),
-        place_id: cached.place_id,
-        found: true,
-        fromCache: true
-      })
-    }
-
-    // 2. Якщо є адреса з чека - спробувати геокодувати її напряму
-    if (address && address.trim()) {
-      try {
-        const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${process.env.GOOGLE_MAPS_API_KEY}&language=uk&region=ua`
-        const geocodeResponse = await fetch(geocodeUrl)
-        const geocodeData = await geocodeResponse.json()
-
-        if (geocodeData.status === 'OK' && geocodeData.results && geocodeData.results.length > 0) {
-          const result = geocodeData.results[0]
-          const locationData = {
-            merchantName: merchantName,
-            address: result.formatted_address,
-            lat: result.geometry.location.lat,
-            lng: result.geometry.location.lng,
-            place_id: result.place_id,
-            confidence: 0.9,
-            source: 'receipt'
-          }
-
-          // Зберегти в кеш
-          await supabase.from('merchant_locations').upsert({
-            user_id: req.user_id,
-            merchant_name: merchantName,
-            normalized_name: normalizedName,
-            address: locationData.address,
-            lat: locationData.lat,
-            lng: locationData.lng,
-            place_id: locationData.place_id,
-            source: 'receipt',
-            confidence: locationData.confidence
-          }, {
-            onConflict: 'user_id,normalized_name'
-          })
-
-          return res.json({
-            ...locationData,
-            found: true,
-            fromCache: false
-          })
-        }
-      } catch (e) {
-        console.error('Error geocoding address from receipt:', e)
-      }
-    }
-
-    // 3. Google Places API
-    const placesResult = await geocodeWithPlaces(merchantName, city)
-    if (placesResult) {
-      // Зберегти в кеш
-      await supabase.from('merchant_locations').upsert({
-        user_id: req.user_id,
-        merchant_name: merchantName,
-        normalized_name: normalizedName,
-        address: placesResult.address,
-        lat: placesResult.lat,
-        lng: placesResult.lng,
-        place_id: placesResult.place_id,
-        source: 'geocoded',
-        confidence: placesResult.confidence
-      }, {
-        onConflict: 'user_id,normalized_name'
-      })
-
-      return res.json({
-        ...placesResult,
-        found: true,
-        fromCache: false
-      })
-    }
-
-    // 4. Geocoding API fallback
-    const geocodeResult = await geocodeWithGeocoding(merchantName, city)
-    if (geocodeResult) {
-      await supabase.from('merchant_locations').upsert({
-        user_id: req.user_id,
-        merchant_name: merchantName,
-        normalized_name: normalizedName,
-        address: geocodeResult.address,
-        lat: geocodeResult.lat,
-        lng: geocodeResult.lng,
-        place_id: geocodeResult.place_id,
-        source: 'geocoded',
-        confidence: geocodeResult.confidence
-      }, {
-        onConflict: 'user_id,normalized_name'
-      })
-
-      return res.json({
-        ...geocodeResult,
-        found: true,
-        fromCache: false
-      })
-    }
-
-    // 5. Не знайдено
-    return res.json({
-      merchantName: merchantName,
-      found: false,
-      message: `Не вдалося знайти адресу для "${merchantName}". Можна додати вручну.`
-    })
-  } catch (e) {
-    console.error('Geocode merchant error:', e)
-    return res.status(500).json({ error: e.message || 'server error' })
-  }
-})
-
-// PUT /api/merchant-location - Ручне додавання/оновлення адреси мерчанта
-app.put('/api/merchant-location', getUserFromToken, async (req, res) => {
-  try {
-    const { merchantName, address, lat, lng, place_id } = req.body
-
-    if (!merchantName || !merchantName.trim()) {
-      return res.status(400).json({ error: 'merchantName is required' })
-    }
-
-    if (!lat || !lng) {
-      return res.status(400).json({ error: 'lat and lng are required' })
-    }
-
-    const normalizedName = normalizeMerchantName(merchantName)
-
-    const { data, error } = await supabase
-      .from('merchant_locations')
-      .upsert({
-        user_id: req.user_id,
-        merchant_name: merchantName,
-        normalized_name: normalizedName,
-        address: address || null,
-        lat: Number(lat),
-        lng: Number(lng),
-        place_id: place_id || null,
-        source: 'manual',
-        confidence: 1.0
-      }, {
-        onConflict: 'user_id,normalized_name'
-      })
-      .select()
-      .single()
-
-    if (error) throw error
-
-    return res.json({
-      success: true,
-      location: data
-    })
-  } catch (e) {
-    console.error('Update merchant location error:', e)
-    return res.status(500).json({ error: e.message || 'server error' })
-  }
-})
-
-
 // Helpers for Monobank API processing
 function roundAndRemoveNegative(value) {
   if (!value && value !== 0) return 0
@@ -3008,84 +2624,6 @@ async function postNewCheckMonoBank(amount, note, card, id, date, userId) {
     user_id: finalUserId, // Додати user_id для RLS policy
     created_at: date,
     merchant_name: merchantName || null
-  }
-
-  // Автоматичне геокодування мерчанта (асинхронно, не блокуємо створення транзакції)
-  if (merchantName) {
-    // Виконуємо геокодування в фоні, не чекаємо результату
-    ; (async () => {
-      try {
-        const normalizedName = normalizeMerchantName(merchantName)
-        // Перевірка кешу
-        const { data: cached } = await supabase
-          .from('merchant_locations')
-          .select('*')
-          .eq('user_id', finalUserId)
-          .eq('normalized_name', normalizedName)
-          .maybeSingle()
-
-        if (!cached || !cached.lat) {
-          // Спробувати геокодувати
-          const geocodeResult = await geocodeWithPlaces(merchantName)
-          if (geocodeResult) {
-            // Зберегти в кеш
-            await supabase.from('merchant_locations').upsert({
-              user_id: finalUserId,
-              merchant_name: merchantName,
-              normalized_name: normalizedName,
-              address: geocodeResult.address,
-              lat: geocodeResult.lat,
-              lng: geocodeResult.lng,
-              place_id: geocodeResult.place_id,
-              source: 'monobank',
-              confidence: geocodeResult.confidence
-            }, { onConflict: 'user_id,normalized_name' })
-
-            // Оновити транзакцію з координатами
-            const { data: insertedTx } = await supabase
-              .from('transactions')
-              .select('id')
-              .eq('transaction_id_card', String(id))
-              .eq('user_id', finalUserId)
-              .maybeSingle()
-
-            if (insertedTx) {
-              await supabase
-                .from('transactions')
-                .update({
-                  merchant_address: geocodeResult.address,
-                  merchant_lat: geocodeResult.lat,
-                  merchant_lng: geocodeResult.lng
-                })
-                .eq('id', insertedTx.id)
-                .eq('user_id', finalUserId)
-            }
-          }
-        } else if (cached.lat) {
-          // Оновити транзакцію з координатами з кешу
-          const { data: insertedTx } = await supabase
-            .from('transactions')
-            .select('id')
-            .eq('transaction_id_card', String(id))
-            .eq('user_id', finalUserId)
-            .maybeSingle()
-
-          if (insertedTx) {
-            await supabase
-              .from('transactions')
-              .update({
-                merchant_address: cached.address,
-                merchant_lat: cached.lat,
-                merchant_lng: cached.lng
-              })
-              .eq('id', insertedTx.id)
-              .eq('user_id', finalUserId)
-          }
-        }
-      } catch (geoError) {
-        console.warn('Background geocoding failed for Monobank transaction:', geoError.message)
-      }
-    })().catch(err => console.error('Unhandled geocoding error:', err))
   }
 
   const { data, error } = await supabase.from('transactions').insert([payload]).select().single()
