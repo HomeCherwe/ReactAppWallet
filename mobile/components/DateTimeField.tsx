@@ -6,14 +6,14 @@ import { Colors } from '../constants/theme'
 import { triggerLightHaptic } from '../utils/haptics'
 import Icon from './Icon'
 
-const DAY = 864e5
-
 function label(d: Date): string {
   const today = new Date()
   const time = d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
   const isSameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString()
   if (isSameDay(d, today)) return `Сьогодні, ${time}`
-  if (isSameDay(d, new Date(today.getTime() - DAY))) return `Вчора, ${time}`
+  const yesterday = new Date(today)
+  yesterday.setDate(today.getDate() - 1)
+  if (isSameDay(d, yesterday)) return `Вчора, ${time}`
   return `${d.toLocaleDateString('uk-UA', {
     day: 'numeric',
     month: 'long',
@@ -30,19 +30,30 @@ interface Props {
   /** Shown above the row, e.g. «ДАТА І ЧАС»; empty — no label (the screen draws its own) */
   title?: string
   style?: StyleProp<ViewStyle>
+  /** The wheel opened / closed (the add sheet hides its keypad meanwhile) */
+  onOpenChange?: (open: boolean) => void
+}
+
+/** The same time of day, `days` calendar days away (a fixed 24 h drifts across a DST change) */
+function shiftDays(d: Date, days: number): Date {
+  const n = new Date(d)
+  n.setDate(n.getDate() + days)
+  return n
 }
 
 /**
  * Date and time of a transaction: a row with the current value; a tap opens the iOS wheel inline
  * (no pop-up over the sheet), with «Зараз» and «Вчора» to jump quickly.
  */
-export default function DateTimeField({ value, onChange, title = 'ДАТА І ЧАС', style }: Props) {
+export default function DateTimeField({ value, onChange, title = 'ДАТА І ЧАС', style, onOpenChange }: Props) {
   const [open, setOpen] = useState(false)
 
   const toggle = () => {
     triggerLightHaptic()
     smooth()
-    setOpen(o => !o)
+    const next = !open
+    setOpen(next)
+    onOpenChange?.(next)
   }
 
   const quick = (d: Date) => {
@@ -70,13 +81,13 @@ export default function DateTimeField({ value, onChange, title = 'ДАТА І Ч
               <Text style={styles.quickText}>Зараз</Text>
             </Pressable>
             <Pressable
-              onPress={() => quick(new Date(value.getTime() - DAY))}
+              onPress={() => quick(shiftDays(value, -1))}
               style={({ pressed }) => [styles.quick, pressed && styles.pressed]}
             >
               <Text style={styles.quickText}>−1 день</Text>
             </Pressable>
             <Pressable
-              onPress={() => quick(new Date(value.getTime() + DAY))}
+              onPress={() => quick(shiftDays(value, 1))}
               style={({ pressed }) => [styles.quick, pressed && styles.pressed]}
             >
               <Text style={styles.quickText}>+1 день</Text>

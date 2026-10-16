@@ -27,6 +27,8 @@ const BTN = 42
 const REFUND_COLOR = '#FFA53A'
 // Category suggestions (on the pinned block's warm surface)
 const SUGGEST_COLOR = '#FFB25C'
+// Transfers between the user's own accounts
+const TRANSFER_COLOR = '#8AB4FF'
 
 // Only one row is open at a time: opening another closes the previous one
 let closeOpenRow: (() => void) | null = null
@@ -63,6 +65,8 @@ interface TxRowProps {
   surface?: string
   /** A waiting bank import with a suggested category: the ✓ pill accepts it */
   onAcceptSuggestion?: (tx: Transaction) => void
+  /** A transfer leg: the other leg's account, shown as «⇄ на / з …» */
+  transferWith?: string
 }
 
 /**
@@ -88,6 +92,7 @@ function TxRow({
   selected,
   surface,
   onAcceptSuggestion,
+  transferWith,
 }: TxRowProps) {
   const selecting = selected !== undefined
   const x = useRef(new Animated.Value(0)).current
@@ -184,11 +189,20 @@ function TxRow({
   const stat = tx.amount_stat == null ? null : Number(tx.amount_stat)
   const netAmount = !isIncome && stat != null && Math.abs(stat - amount) > 0.004 ? stat : null
   const fullyRefunded = netAmount != null && Math.abs(netAmount) < 0.005
-  const title = txDisplayTitle(tx)
+  // A transfer between the user's own accounts: neither spending nor income
+  const isTransfer = !!tx.is_transfer
+  const rawTitle = txDisplayTitle(tx)
+  const title = isTransfer && (!rawTitle || rawTitle === 'ТРАНСФЕР') ? 'Переказ' : rawTitle
   const d = new Date(tx.created_at)
   const time = d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
   const when = showDate ? `${d.toLocaleDateString('uk-UA', { day: 'numeric', month: 'short' })}, ${time}` : time
-  const metaCategory = isRefund ? '↩︎ Повернення' : tx.category && tx.category !== title ? tx.category : null
+  const metaCategory = isTransfer
+    ? `⇄ ${tx.transfer_role === 'from' ? 'на' : 'з'} ${transferWith ? `«${transferWith}»` : 'інший рахунок'}`
+    : isRefund
+      ? '↩︎ Повернення'
+      : tx.category && tx.category !== title
+        ? tx.category
+        : null
   const metaRest = [card?.name, when].filter(Boolean).join(' · ')
   // The category came from the user's rules, not from the user
   const autoCategory = !isRefund && tx.category_source === 'auto' && !!metaCategory
@@ -285,8 +299,18 @@ function TxRow({
             </View>
           )}
           {nested && <View style={styles.nestLine} />}
-          <View style={[styles.iconWrap, isIncome && styles.iconWrapGreen, nested && styles.iconWrapNested, pending && styles.iconWrapPending]}>
-            {nested ? (
+          <View
+            style={[
+              styles.iconWrap,
+              isIncome && !isTransfer && styles.iconWrapGreen,
+              isTransfer && styles.iconWrapTransfer,
+              nested && styles.iconWrapNested,
+              pending && styles.iconWrapPending,
+            ]}
+          >
+            {isTransfer ? (
+              <Icon name="transfer" size={nested ? 15 : 18} color={TRANSFER_COLOR} strokeWidth={2.4} />
+            ) : nested ? (
               <Icon name="undo" size={15} color={Colors.green} strokeWidth={2.4} />
             ) : (
               <Text style={[styles.iconEmoji, pending && styles.iconEmojiPending]}>{getCategoryIcon(tx.category ?? null, amount)}</Text>
@@ -321,8 +345,9 @@ function TxRow({
                   style={[
                     styles.amount,
                     nested && styles.amountNested,
-                    isIncome && styles.amountGreen,
-                    tx.exclude_from_stats && !nested && styles.amountMuted,
+                    isIncome && !isTransfer && styles.amountGreen,
+                    tx.exclude_from_stats && !nested && !isTransfer && styles.amountMuted,
+                    isTransfer && styles.amountTransfer,
                     pending && styles.amountPending,
                   ]}
                 >
@@ -606,6 +631,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: Colors.white60,
+  },
+  iconWrapTransfer: {
+    backgroundColor: 'rgba(138, 180, 255, 0.14)',
+  },
+  amountTransfer: {
+    color: Colors.white80,
   },
   autoMark: {
     fontSize: 11,

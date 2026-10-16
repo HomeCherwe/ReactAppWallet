@@ -4,7 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { Colors } from '../constants/theme'
 import { Card } from '../api/cards'
-import { CardPeriod, getCardPeriodTotals, listCardTransactions, Transaction } from '../api/transactions'
+import { CardPeriod, getCardPeriodTotals, groupTransferLegs, listCardTransactions, listTransferLegs, Transaction } from '../api/transactions'
 import { triggerLightHaptic } from '../utils/haptics'
 import SheetModal from './SheetModal'
 import { GlassPressable } from './LiquidGlass'
@@ -171,6 +171,21 @@ export default function CardTransactionsSheet({ card, balance, hidden, onClose, 
       .catch(e => console.warn('[CardTx] more failed:', e))
       .finally(() => setLoadingMore(false))
   }, [query, loading, loadingMore, hasMore, txs.length])
+
+  // The other legs of this card's transfers (by transfer_id), for «⇄ на / з …»
+  const [transferLegs, setTransferLegs] = useState<Record<string, Transaction[]>>({})
+  useEffect(() => {
+    const ids = [...new Set(txs.filter(t => t.is_transfer && t.transfer_id && !transferLegs[t.transfer_id]).map(t => t.transfer_id as string))]
+    if (ids.length === 0) return
+    listTransferLegs(ids)
+      .then(legs => setTransferLegs(prev => ({ ...prev, ...groupTransferLegs(legs) })))
+      .catch(() => {})
+  }, [txs])
+  const otherAccount = (t: Transaction) => {
+    const other = (t.transfer_id ? transferLegs[t.transfer_id] ?? [] : []).find(l => l.id !== t.id)
+    if (!other) return undefined
+    return other.card_id ? cards.find(x => x.id === other.card_id)?.name ?? 'інший рахунок' : 'Готівка'
+  }
 
   const excludedCats = useExcludedCategories()
   const sections = useMemo(() => {
@@ -347,6 +362,7 @@ export default function CardTransactionsSheet({ card, balance, hidden, onClose, 
             swipeEnabled={false}
             last={index === section.data.length - 1}
             onPress={setOpenTx}
+            transferWith={item.is_transfer ? otherAccount(item) : undefined}
           />
         )}
         ListEmptyComponent={

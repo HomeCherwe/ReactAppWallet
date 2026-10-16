@@ -42,9 +42,9 @@ export async function transferFromExisting(txId: string, cardId: string, amount:
   invalidateSumByCardCache()
 }
 
-/** Both legs become ordinary transactions again */
-export async function unlinkTransfer(transferId: string): Promise<void> {
-  await apiFetch('/api/transfers/unlink', { method: 'POST', body: JSON.stringify({ transferId }) })
+/** The legs become ordinary transactions again; `deleteIds` (legs made in the app) are deleted instead */
+export async function unlinkTransfer(transferId: string, deleteIds: string[] = []): Promise<void> {
+  await apiFetch('/api/transfers/unlink', { method: 'POST', body: JSON.stringify({ transferId, deleteIds }) })
   invalidateSumByCardCache()
 }
 
@@ -69,5 +69,7 @@ export async function listTransferCandidates(tx: Transaction): Promise<Transacti
   q = tx.card_id ? q.or(`card_id.neq.${tx.card_id},card_id.is.null`) : q.not('card_id', 'is', null)
   const { data, error } = await q
   if (error) throw error
-  return (data || []) as Transaction[]
+  // Refunds belong to their expense, debts to the debt list, and «в обробці» rows may still be
+  // cancelled by the bank
+  return ((data || []) as Transaction[]).filter(c => !c.refund_for && !c.is_debt && c.status !== 'pending')
 }

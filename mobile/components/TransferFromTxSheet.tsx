@@ -41,6 +41,8 @@ export default function TransferFromTxSheet({ tx, cards, hidden, onClose, onDone
   const [targetId, setTargetId] = useState<string | null>(null)
   const [amount, setAmount] = useState('')
   const [busy, setBusy] = useState(false)
+  // Answers for a transaction opened earlier are dropped
+  const loadFor = useRef<string | null>(null)
 
   const cardsById = useMemo(() => Object.fromEntries(cards.map(c => [c.id, c])), [cards])
   const currencyOf = (x: Transaction) => x.currency || (x.card_id && cardsById[x.card_id]?.currency) || 'UAH'
@@ -55,9 +57,10 @@ export default function TransferFromTxSheet({ tx, cards, hidden, onClose, onDone
     setTargetId(null)
     setAmount('')
     fetchExchangeRates().then(setRates).catch(() => {})
+    loadFor.current = tx.id
     listTransferCandidates(tx)
-      .then(setCandidates)
-      .catch(() => setCandidates([]))
+      .then(list => loadFor.current === tx.id && setCandidates(list))
+      .catch(() => loadFor.current === tx.id && setCandidates([]))
   }, [tx?.id])
 
   // The other side, most likely first: the same amount (in one currency, or converted), then the closest date
