@@ -119,7 +119,8 @@ export interface FeedParams {
 
 /**
  * Transactions for the home feed, filtered in the query itself (so pagination stays exact):
- * no archived ones, no transfers, nothing from excluded cards.
+ * no archived ones, nothing from excluded cards. Transfers only under «Всі» (they're neither an
+ * expense nor an income); the list shows their two legs as one pair.
  */
 export async function listFeedTransactions({
   from,
@@ -135,7 +136,7 @@ export async function listFeedTransactions({
     .select('*')
     .eq('user_id', user.id)
     .not('archives', 'is', true)
-    .not('is_transfer', 'is', true)
+  if (transactionType !== 'all') q = q.not('is_transfer', 'is', true)
 
   if (excludeCardIds.length > 0) {
     // `not in` alone would also drop transactions without a card (NULL), so keep those explicitly
@@ -278,6 +279,32 @@ export async function searchTransactions(p: SearchParams): Promise<Transaction[]
 }
 
 /** Refunds linked to these expenses (refund_for), oldest first — shown nested under them. */
+/** Both legs of the given transfers (by transfer_id), whatever card or page they're on */
+export async function listTransferLegs(transferIds: string[]): Promise<Transaction[]> {
+  const ids = [...new Set(transferIds.filter(Boolean))]
+  if (ids.length === 0) return []
+  const out: Transaction[] = []
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .in('transfer_id', ids.slice(i, i + 100))
+      .not('archives', 'is', true)
+      .order('created_at', { ascending: true })
+    if (error) throw error
+    out.push(...((data || []) as Transaction[]))
+  }
+  return out
+}
+
+/** transfer_id → its legs, the money out ('from') first */
+export function groupTransferLegs(legs: Transaction[]): Record<string, Transaction[]> {
+  const map: Record<string, Transaction[]> = {}
+  for (const l of legs) if (l.transfer_id) (map[l.transfer_id] ||= []).push(l)
+  for (const list of Object.values(map)) list.sort((a, b) => (a.transfer_role === 'from' ? -1 : 0) - (b.transfer_role === 'from' ? -1 : 0))
+  return map
+}
+
 export async function listRefundsFor(expenseIds: string[]): Promise<Transaction[]> {
   if (expenseIds.length === 0) return []
   const { data: { user } } = await supabase.auth.getUser()

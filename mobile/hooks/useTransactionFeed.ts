@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { listFeedTransactions, listRefundsFor, searchTransactions, Transaction } from '../api/transactions'
+import { groupTransferLegs, listFeedTransactions, listRefundsFor, listTransferLegs, searchTransactions, Transaction } from '../api/transactions'
 import { PeriodId, periodRange } from '../utils/periods'
 
 export type TxFilter = 'all' | 'expense' | 'income'
@@ -56,6 +56,8 @@ export function useTransactionFeed({
   const [error, setError] = useState(false)
   // Refunds of the loaded expenses, by expense id (shown nested under them, like the web)
   const [refunds, setRefunds] = useState<Record<string, Transaction[]>>({})
+  // Both legs of the loaded transfers, by transfer_id (the list shows them as one pair)
+  const [transfers, setTransfers] = useState<Record<string, Transaction[]>>({})
 
   const requestId = useRef(0)
   const busy = useRef(false)
@@ -73,6 +75,15 @@ export function useTransactionFeed({
       return map
     } catch (e) {
       console.warn('[Feed] refunds load failed:', e)
+      return {}
+    }
+  }
+
+  const fetchTransfers = async (page: Transaction[]) => {
+    try {
+      return groupTransferLegs(await listTransferLegs(page.filter(t => t.is_transfer).map(t => t.transfer_id as string)))
+    } catch (e) {
+      console.warn('[Feed] transfer legs load failed:', e)
       return {}
     }
   }
@@ -107,10 +118,11 @@ export function useTransactionFeed({
     setSearching(true)
     try {
       const page = await fetchPage(0)
-      const pageRefunds = await fetchRefunds(page)
+      const [pageRefunds, pageTransfers] = await Promise.all([fetchRefunds(page), fetchTransfers(page)])
       if (id !== requestId.current) return
       setItems(page)
       setRefunds(pageRefunds)
+      setTransfers(pageTransfers)
       setHasMore(page.length === PAGE_SIZE)
     } catch {
       if (id === requestId.current) {
@@ -135,9 +147,10 @@ export function useTransactionFeed({
     setLoadingMore(true)
     try {
       const page = await fetchPage(itemsRef.current.length)
-      const pageRefunds = await fetchRefunds(page)
+      const [pageRefunds, pageTransfers] = await Promise.all([fetchRefunds(page), fetchTransfers(page)])
       if (id !== requestId.current) return
       setRefunds(prev => ({ ...prev, ...pageRefunds }))
+      setTransfers(prev => ({ ...prev, ...pageTransfers }))
       setItems(prev => {
         const seen = new Set(prev.map(t => t.id))
         return [...prev, ...page.filter(t => !seen.has(t.id))]
@@ -207,5 +220,5 @@ export function useTransactionFeed({
     [query, period, cardId, category, searchActive, searching, typing, resetSearch]
   )
 
-  return { items, refunds, filter, changeFilter, loading, loadingMore, hasMore, error, refresh, loadMore, retry, search }
+  return { items, refunds, transfers, filter, changeFilter, loading, loadingMore, hasMore, error, refresh, loadMore, retry, search }
 }

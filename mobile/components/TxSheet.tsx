@@ -13,7 +13,7 @@ import {
 } from 'react-native'
 import Toast from 'react-native-toast-message'
 import { Colors } from '../constants/theme'
-import { Transaction, getTransactionCategories, updateTransaction } from '../api/transactions'
+import { Transaction, getTransactionCategories, listTransferLegs, updateTransaction } from '../api/transactions'
 import { autoCategorize } from '../api/insights'
 import { Card } from '../api/cards'
 import { getCategoryIcon } from '../utils/categoryIcon'
@@ -21,6 +21,7 @@ import { hasPinTag, stripPinTag, txDisplayTitle, withPinTag } from '../utils/pin
 import { isSyncCategory } from '../utils/cardExclusion'
 import { triggerErrorHaptic, triggerLightHaptic, triggerSuccessHaptic } from '../utils/haptics'
 import SheetModal from './SheetModal'
+import { confirmUnlinkTransfer } from '../utils/transferActions'
 import DateTimeField from './DateTimeField'
 import { GlassPressable } from './LiquidGlass'
 import Icon from './Icon'
@@ -56,6 +57,8 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
   // "Враховувати в статистиці" (exclude_from_stats), same switch as the web's editor
   const [counted, setCounted] = useState(true)
   const [date, setDate] = useState(() => new Date())
+  // A transfer: both of its legs (this one and the other account's)
+  const [legs, setLegs] = useState<Transaction[] | null>(null)
   const [categories, setCategories] = useState<string[]>([])
   const [catQuery, setCatQuery] = useState('')
   const [saving, setSaving] = useState(false)
@@ -74,6 +77,12 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
     setCounted(!tx.exclude_from_stats)
     setDate(new Date(tx.created_at))
     setCatQuery('')
+    setLegs(null)
+    if (tx.is_transfer && tx.transfer_id) {
+      listTransferLegs([tx.transfer_id])
+        .then(list => setLegs([...list].sort((a, b) => (a.transfer_role === 'from' ? -1 : 0) - (b.transfer_role === 'from' ? -1 : 0))))
+        .catch(() => setLegs([]))
+    }
   }, [tx?.id])
 
   useEffect(() => {
@@ -240,6 +249,55 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
           ) : null}
           {t.merchant_name ? <Text style={styles.merchant}>🏪 {t.merchant_name}</Text> : null}
         </View>
+
+        {/* A transfer between the user's accounts: both legs, money out first */}
+        {t.is_transfer && t.transfer_id ? (
+          <View style={styles.transferBox}>
+            <View style={styles.transferHead}>
+              <Icon name="transfer" size={15} color="#8AB4FF" strokeWidth={2.4} />
+              <Text style={styles.transferTitle}>Переказ між рахунками</Text>
+            </View>
+            {legs === null ? (
+              <ActivityIndicator color={Colors.orange} style={{ marginVertical: 8 }} />
+            ) : (
+              legs.map((leg, i) => {
+                const legCard = leg.card_id ? cards.find(c => c.id === leg.card_id) : undefined
+                const legAmount = Number(leg.amount)
+                return (
+                  <React.Fragment key={leg.id}>
+                    {i > 0 && <Text style={styles.transferArrow}>↓</Text>}
+                    <View style={[styles.legRow, leg.id === t.id && styles.legRowThis]}>
+                      <Text style={styles.legDir}>{legAmount < 0 ? 'З' : 'На'}</Text>
+                      <Text style={styles.legCard} numberOfLines={1}>
+                        {legCard ? legCard.name : leg.card_id ? 'Рахунок' : 'Готівка'}
+                        {leg.id === t.id ? <Text style={styles.legThisMark}>  · ця</Text> : null}
+                      </Text>
+                      <Text style={styles.legAmount}>
+                        {hidden ? '••••' : `${legAmount < 0 ? '−' : '+'}${fmtMoney(legAmount, leg.currency || legCard?.currency)}`}
+                      </Text>
+                    </View>
+                  </React.Fragment>
+                )
+              })
+            )}
+            {legs !== null && legs.length < 2 ? (
+              <Text style={styles.transferHint}>Другої частини переказу не знайдено (можливо, вона в архіві).</Text>
+            ) : (
+              <Text style={styles.transferHint}>Не рахується ні витратою, ні доходом.</Text>
+            )}
+            <Pressable
+              onPress={() =>
+                confirmUnlinkTransfer(t, cards, () => {
+                  onSaved(t)
+                  onClose()
+                })
+              }
+              style={({ pressed }) => [styles.transferUndo, pressed && { opacity: 0.6 }]}
+            >
+              <Text style={styles.transferUndoText}>Скасувати переказ</Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         {/* Category */}
         <View style={[styles.section, waitingCategory && styles.sectionAttention]}>
@@ -547,6 +605,35 @@ const styles = StyleSheet.create({
     color: Colors.green,
     marginTop: 4,
   },
+  transferBox: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 16,
+    backgroundColor: 'rgba(138, 180, 255, 0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(138, 180, 255, 0.35)',
+    gap: 6,
+  },
+  transferHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
+  transferTitle: { fontSize: 13, fontWeight: '800', color: '#8AB4FF' },
+  transferArrow: { fontSize: 14, color: Colors.white40, marginLeft: 10 },
+  legRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  legRowThis: { backgroundColor: 'rgba(255,255,255,0.10)' },
+  legDir: { width: 22, fontSize: 12.5, fontWeight: '800', color: Colors.white60 },
+  legCard: { flex: 1, fontSize: 14.5, fontWeight: '700', color: Colors.white },
+  legThisMark: { fontSize: 12, fontWeight: '600', color: Colors.white40 },
+  legAmount: { fontSize: 14.5, fontWeight: '800', color: Colors.white, fontVariant: ['tabular-nums'] },
+  transferHint: { fontSize: 12, lineHeight: 16, color: Colors.white40, marginTop: 2 },
+  transferUndo: { alignSelf: 'flex-start', marginTop: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 100, backgroundColor: 'rgba(255,255,255,0.08)' },
+  transferUndoText: { fontSize: 13, fontWeight: '700', color: Colors.white80 },
   merchant: {
     fontSize: 13,
     color: Colors.white60,

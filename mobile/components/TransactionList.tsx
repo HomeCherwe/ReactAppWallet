@@ -105,6 +105,8 @@ interface TransactionListProps {
   onRefundForChange: (tx: Transaction | null) => void
   /** Refunds of loaded expenses, by expense id: shown nested under the expense */
   refunds?: Record<string, Transaction[]>
+  /** Both legs of loaded transfers, by transfer_id: the second leg shows nested under the first */
+  transfers?: Record<string, Transaction[]>
   /** Search field + period/card/category filters over the list */
   search?: FeedSearch
   /** Selection mode (long press → «Вибрати»): the selected ids, null when not selecting */
@@ -144,6 +146,7 @@ function TransactionList({
   refundFor,
   onRefundForChange,
   refunds = {},
+  transfers = {},
   search,
   selectedIds = null,
   onStartSelect,
@@ -344,7 +347,7 @@ function TransactionList({
     if (onSplitTx && !tx.refund_for) out.push({ label: 'Розділити', icon: 'split', onPress: () => onSplitTx(tx) })
     if (tx.is_transfer && tx.transfer_id) {
       if (onUnlinkTransfer) out.push({ label: 'Скасувати переказ', icon: 'transfer', onPress: () => onUnlinkTransfer(tx) })
-    } else if (onMakeTransfer && !tx.refund_for) {
+    } else if (onMakeTransfer && !tx.refund_for && !tx.is_debt && tx.status !== 'pending') {
       out.push({ label: 'Зробити переказом', icon: 'transfer', onPress: () => onMakeTransfer(tx) })
     }
     if (onLinkRefund && Number(tx.amount) < 0 && !tx.is_transfer) {
@@ -392,15 +395,26 @@ function TransactionList({
   )
   const acceptOne = useCallback((tx: Transaction) => acceptSuggestions([tx]), [acceptSuggestions])
 
-  // A refund whose expense is loaded shows only under that expense (no duplicate row)
+  // A refund whose expense is loaded shows only under that expense (no duplicate row);
+  // a transfer shows once: its first leg in the list, the other nested under it
   const regular = useMemo(() => {
     const loaded = new Set(transactions.map(t => t.id))
-    return transactions.filter(
-      t =>
-        (searching || pinStateOf(t, pinnedCategories) === 'none') &&
-        !(t.refund_for && (loaded.has(t.refund_for) || refunds[t.refund_for]))
-    )
+    const shownTransfers = new Set<string>()
+    return transactions.filter(t => {
+      if (!(searching || pinStateOf(t, pinnedCategories) === 'none')) return false
+      if (t.refund_for && (loaded.has(t.refund_for) || refunds[t.refund_for])) return false
+      if (t.is_transfer && t.transfer_id) {
+        if (shownTransfers.has(t.transfer_id)) return false
+        shownTransfers.add(t.transfer_id)
+      }
+      return true
+    })
   }, [transactions, pinnedCategories, refunds, searching])
+
+  // The other legs of a transfer, and the account a leg's money went to / came from
+  const partnersOf = (tx: Transaction) =>
+    tx.is_transfer && tx.transfer_id ? (transfers[tx.transfer_id] ?? []).filter(l => l.id !== tx.id) : []
+  const accountName = (t?: Transaction) => (t?.card_id ? cardsById[t.card_id]?.name : t ? 'Готівка' : undefined)
 
   const excludedCats = useExcludedCategories()
   const groups = useMemo(() => {
@@ -589,7 +603,8 @@ function TransactionList({
               </View>
 
               {group.items.map((tx, i) => {
-                const kids = Number(tx.amount) < 0 ? refunds[tx.id] ?? [] : []
+                const partners = partnersOf(tx)
+                const kids = [...(Number(tx.amount) < 0 ? refunds[tx.id] ?? [] : []), ...partners]
                 const lastInDay = i === group.items.length - 1
                 return (
                   <React.Fragment key={tx.id}>
@@ -604,6 +619,7 @@ function TransactionList({
                       onPress={handlePress}
                       onLongPress={openMenu}
                       selected={sel(tx)}
+                      transferWith={tx.is_transfer ? accountName(partners[0]) : undefined}
                       {...swipeProps}
                     />
                     {kids.map((r, k) => (
@@ -613,6 +629,7 @@ function TransactionList({
                         tx={r}
                         card={r.card_id ? cardsById[r.card_id] : undefined}
                         hidden={hidden}
+                        transferWith={r.is_transfer ? accountName(tx) : undefined}
                         nested
                         showDate={new Date(r.created_at).toDateString() !== new Date(tx.created_at).toDateString()}
                         last={lastInDay && k === kids.length - 1}

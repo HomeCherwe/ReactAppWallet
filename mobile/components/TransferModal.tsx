@@ -34,10 +34,17 @@ export default function TransferModal({
   const [errorMsg, setErrorMsg] = useState('')
   const [date, setDate] = useState(() => new Date())
 
-  // A fresh "now" each time the window opens
+  // A fresh "now" each time the window opens; a typed amount for another currency never carries over
+  const [dateTouched, setDateTouched] = useState(false)
   useEffect(() => {
-    if (visible) setDate(new Date())
+    if (!visible) return
+    setDate(new Date())
+    setDateTouched(false)
+    setAmountTo('')
   }, [visible])
+  useEffect(() => {
+    setAmountTo('')
+  }, [fromCardId, toCardId])
 
   useEffect(() => {
     if (cards.length >= 2) {
@@ -65,7 +72,15 @@ export default function TransferModal({
       return
     }
 
-    const toAmt = amountTo ? parseFloat(amountTo.replace(',', '.')) : fromAmt
+    // The amount credited is asked for only between currencies; within one currency it's the same
+    const fromC = cards.find(c => c.id === fromCardId)
+    const toC = cards.find(c => c.id === toCardId)
+    const differentCurrency = !!fromC && !!toC && fromC.currency !== toC.currency
+    const toAmt = differentCurrency ? parseFloat(amountTo.replace(',', '.')) : fromAmt
+    if (differentCurrency && (!toAmt || isNaN(toAmt) || toAmt <= 0)) {
+      setErrorMsg(`Вкажіть суму зарахування в ${toC?.currency}`)
+      return
+    }
 
     setSaving(true)
     setErrorMsg('')
@@ -76,7 +91,8 @@ export default function TransferModal({
         to_card_id: toCardId,
         amount_from: fromAmt,
         amount_to: toAmt,
-        created_at: date.toISOString(),
+        // Untouched: the moment of saving, not of opening the window
+        created_at: (dateTouched ? date : new Date()).toISOString(),
         note: note.trim() || undefined,
       })
 
@@ -188,7 +204,14 @@ export default function TransferModal({
               </View>
             )}
 
-            <DateTimeField value={date} onChange={setDate} style={styles.section} />
+            <DateTimeField
+              value={date}
+              onChange={d => {
+                setDate(d)
+                setDateTouched(true)
+              }}
+              style={styles.section}
+            />
 
             {/* Note */}
             <View style={styles.section}>

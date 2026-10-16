@@ -1583,7 +1583,7 @@ app.post('/api/transfers/mark-existing', getUserFromToken, async (req, res) => {
     // Load both transactions
     const { data: txs, error: loadErr } = await supabase
       .from('transactions')
-      .select('id, amount, card_id, card, created_at')
+      .select('id, amount, card_id, card, created_at, is_transfer, transfer_id, refund_for, status, is_debt')
       .eq('user_id', req.user_id)
       .in('id', [fromTxId, toTxId])
 
@@ -1601,9 +1601,30 @@ app.post('/api/transfers/mark-existing', getUserFromToken, async (req, res) => {
     const a1 = Number(t1.amount || 0)
     const a2 = Number(t2.amount || 0)
 
+    // Only two ordinary transactions: money out on one account, in on another
+    const notPlain = [t1, t2].find(t => t.is_transfer || t.transfer_id || t.refund_for || t.is_debt || t.status === 'pending')
+    if (notPlain) {
+      return res.status(400).json({ error: 'Переказом можна зробити лише звичайні проведені транзакції (не повернення, не борг і не «в обробці»)' })
+    }
+    if (!((a1 < 0 && a2 > 0) || (a1 > 0 && a2 < 0))) {
+      return res.status(400).json({ error: 'Потрібні списання й надходження' })
+    }
+    if ((t1.card_id || null) === (t2.card_id || null)) {
+      return res.status(400).json({ error: 'Обидві транзакції на одному рахунку' })
+    }
+
     // Determine roles by sign
-    const src = a1 <= 0 ? t1 : t2
-    const tgt = a1 <= 0 ? t2 : t1
+    const src = a1 < 0 ? t1 : t2
+    const tgt = a1 < 0 ? t2 : t1
+
+    // From savings to a regular account counts as income (same rule as the other transfer routes)
+    const { data: pairCards } = await supabase
+      .from('cards')
+      .select('id, bank, name')
+      .eq('user_id', req.user_id)
+      .in('id', [src.card_id, tgt.card_id].filter(Boolean))
+    const cardOf = id => (pairCards || []).find(c => c.id === id) || null
+    const countAsIncome = transferBucket(cardOf(src.card_id)) === 'savings' && transferBucket(cardOf(tgt.card_id)) !== 'savings'
 
     const srcUpdate = {
       is_transfer: true,
@@ -1620,6 +1641,7 @@ app.post('/api/transfers/mark-existing', getUserFromToken, async (req, res) => {
       transfer_id: transferId,
       category: 'ТРАНСФЕР',
       exclude_from_stats: true,
+      count_as_income: countAsIncome,
       ...(note ? { note } : {}),
     }
 
@@ -1670,13 +1692,17 @@ app.post('/api/transfers/from-existing', getUserFromToken, async (req, res) => {
 
     const { data: tx, error: txErr } = await supabase
       .from('transactions')
-      .select('id, amount, card_id, created_at, is_transfer, transfer_id')
+      .select('id, amount, card_id, created_at, is_transfer, transfer_id, refund_for, status, is_debt')
       .eq('id', txId)
       .eq('user_id', req.user_id)
       .maybeSingle()
     if (txErr) throw txErr
     if (!tx) return res.status(404).json({ error: 'Транзакцію не знайдено' })
     if (tx.is_transfer || tx.transfer_id) return res.status(400).json({ error: 'Ця транзакція вже є переказом' })
+    if (tx.refund_for) return res.status(400).json({ error: 'Повернення не може бути переказом' })
+    if (tx.is_debt) return res.status(400).json({ error: 'Борг не може бути переказом' })
+    if (tx.status === 'pending') return res.status(400).json({ error: 'Транзакція ще «в обробці» — зачекай, доки банк її проведе' })
+    if (!Number(tx.amount)) return res.status(400).json({ error: 'Транзакція з нульовою сумою' })
     if (tx.card_id === cardId) return res.status(400).json({ error: 'Оберіть інший рахунок' })
 
     const ids = [...new Set([tx.card_id, cardId].filter(Boolean))]
@@ -1744,12 +1770,35 @@ app.post('/api/transfers/from-existing', getUserFromToken, async (req, res) => {
   }
 })
 
-// POST /api/transfers/unlink { transferId } — both legs become ordinary transactions again
-// (back in statistics, without a category: the person gives them one)
+// POST /api/transfers/unlink { transferId, deleteIds? } — the legs become ordinary transactions
+// again (back in statistics, without a category: the person gives them one). `deleteIds`: legs to
+// delete instead, e.g. the one the app created when the transfer was made; never a bank import
+// (the next sync would bring it back).
 app.post('/api/transfers/unlink', getUserFromToken, async (req, res) => {
   try {
     const transferId = String(req.body?.transferId || '')
     if (!transferId) return res.status(400).json({ error: 'transferId is required' })
+    const deleteIds = Array.isArray(req.body?.deleteIds) ? req.body.deleteIds.map(String) : []
+    if (deleteIds.length > 0) {
+      const { data: legs, error: legsErr } = await supabase
+        .from('transactions')
+        .select('id, transaction_id_card')
+        .eq('user_id', req.user_id)
+        .eq('transfer_id', transferId)
+      if (legsErr) throw legsErr
+      const removable = (legs || []).filter(l => deleteIds.includes(l.id) && !l.transaction_id_card).map(l => l.id)
+      if (removable.length !== deleteIds.length) {
+        return res.status(400).json({ error: 'Видалити можна лише частину, створену в застосунку' })
+      }
+      const { error: delErr } = await supabase
+        .from('transactions')
+        .delete()
+        .eq('user_id', req.user_id)
+        .eq('transfer_id', transferId)
+        .in('id', removable)
+      if (delErr) throw delErr
+      if (removable.length === (legs || []).length) return res.json({ success: true, count: 0, deleted: removable.length })
+    }
     const { data, error } = await supabase
       .from('transactions')
       .update({

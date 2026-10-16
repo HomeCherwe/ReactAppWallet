@@ -60,7 +60,7 @@ import CardTransactionsSheet from '../components/CardTransactionsSheet'
 import TxSheet from '../components/TxSheet'
 import AssistantSheet from '../components/AssistantSheet'
 import TransferFromTxSheet from '../components/TransferFromTxSheet'
-import { unlinkTransfer } from '../api/transfers'
+import { confirmUnlinkTransfer } from '../utils/transferActions'
 import TransferModal from '../components/TransferModal'
 import SplitTxModal from '../components/SplitTxModal'
 import ScanReceiptModal from '../components/ScanReceiptModal'
@@ -490,30 +490,8 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
     refreshAfterTxChange()
   }
 
-  // «Скасувати переказ»: both legs become ordinary transactions again
-  const handleUnlinkTransfer = (tx: Transaction) => {
-    if (!tx.transfer_id) return
-    Alert.alert(
-      'Скасувати переказ?',
-      'Обидві частини переказу знову стануть звичайними транзакціями й повернуться в статистику — без категорії, її треба буде поставити.',
-      [
-        { text: 'Ні', style: 'cancel' },
-        {
-          text: 'Скасувати переказ',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await unlinkTransfer(tx.transfer_id as string)
-              Toast.show({ type: 'success', text1: 'Переказ скасовано', text2: 'Постав обом транзакціям категорію' })
-              refreshAfterTxChange()
-            } catch (e: any) {
-              Alert.alert('Помилка', e?.message || 'Не вдалося скасувати переказ')
-            }
-          },
-        },
-      ]
-    )
-  }
+  // «Скасувати переказ»: unlink, or delete the leg the app created
+  const handleUnlinkTransfer = (tx: Transaction) => confirmUnlinkTransfer(tx, cards, refreshAfterTxChange)
 
   const handleLinkRefund = async (expense: Transaction, refund: Transaction) => {
     await linkRefund(expense.id, refund.id)
@@ -881,6 +859,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
             refundFor={refundFor}
             onRefundForChange={setRefundFor}
             refunds={allRefunds}
+            transfers={txFeed.transfers}
             pinned={pinned.items}
             pinnedCategories={pinnedCategories}
             search={txFeed.search}

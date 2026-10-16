@@ -80,6 +80,10 @@ export default function AddTransactionModal({
   const [errorMsg, setErrorMsg] = useState('')
   // When it happened: now by default, any date and time can be picked
   const [date, setDate] = useState(() => new Date())
+  // Untouched, the transaction gets the moment it's saved; the wheel being open hides the keypad
+  const [dateTouched, setDateTouched] = useState(false)
+  const [dateOpen, setDateOpen] = useState(false)
+  const bodyScroll = useRef<ScrollView>(null)
 
   // Cards and categories: most recently used first, then the rest
   const orderedCards = useMemo(() => {
@@ -128,6 +132,8 @@ export default function AddTransactionModal({
     setCatQuery('')
     setCustomCategory('')
     setDate(new Date())
+    setDateTouched(false)
+    setDateOpen(false)
     getRecentUsage(excludedCardIds)
       .then(setUsage)
       .catch(() => setUsage({ expense: [], income: [], cardIds: [] }))
@@ -209,7 +215,7 @@ export default function AddTransactionModal({
         card_id: selectedCardId || undefined,
         category: selectedCategory || undefined,
         note: note.trim() || selectedCategory,
-        created_at: date.toISOString(),
+        created_at: (dateTouched ? date : new Date()).toISOString(),
       })
       invalidateCategoriesCache() // so the recency order includes this one next time
       triggerSuccessHaptic()
@@ -242,6 +248,7 @@ export default function AddTransactionModal({
       </View>
 
       <ScrollView
+        ref={bodyScroll}
         style={styles.body}
         contentContainerStyle={styles.bodyContent}
         showsVerticalScrollIndicator={false}
@@ -404,7 +411,18 @@ export default function AddTransactionModal({
           )}
         </View>
 
-        <DateTimeField value={date} onChange={setDate} style={styles.section} />
+        <DateTimeField
+          value={date}
+          onChange={d => {
+            setDate(d)
+            setDateTouched(true)
+          }}
+          onOpenChange={open => {
+            setDateOpen(open)
+            if (open) setTimeout(() => bodyScroll.current?.scrollToEnd({ animated: true }), 250)
+          }}
+          style={styles.section}
+        />
 
         {/* Note */}
         <TextInput
@@ -420,7 +438,7 @@ export default function AddTransactionModal({
       </ScrollView>
 
       {/* The calculator keypad replaces the system keyboard; it hides while typing a note */}
-      {!textFocused && <CalcKeypad onKey={handleKey} />}
+      {!textFocused && !dateOpen && <CalcKeypad onKey={handleKey} />}
 
       <View style={styles.footer}>
         <Pressable

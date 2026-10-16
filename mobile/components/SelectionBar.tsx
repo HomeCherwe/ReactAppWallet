@@ -77,6 +77,7 @@ export default function SelectionBar({ selected, cards, onCancel, onSelectAll, o
     const out = list.find(t => Number(t.amount) < 0)
     const into = list.find(t => Number(t.amount) > 0)
     if (!out || !into || out.is_transfer || into.is_transfer) return null
+    if (out.refund_for || into.refund_for || out.is_debt || into.is_debt || out.status === 'pending' || into.status === 'pending') return null
     if ((out.card_id ?? null) === (into.card_id ?? null)) return null
     return { out, into }
   })()
