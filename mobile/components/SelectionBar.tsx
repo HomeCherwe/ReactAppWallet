@@ -5,6 +5,7 @@ import { Colors } from '../constants/theme'
 import { Card } from '../api/cards'
 import { deleteTransactions, getTransactionCategories, Transaction, updateTransactionsBulk } from '../api/transactions'
 import { autoCategorize } from '../api/insights'
+import { markExistingAsTransfer } from '../api/transfers'
 import { isSyncCategory } from '../utils/cardExclusion'
 import { triggerErrorHaptic, triggerLightHaptic, triggerSuccessHaptic } from '../utils/haptics'
 import { GlassSurface } from './LiquidGlass'
@@ -70,10 +71,35 @@ export default function SelectionBar({ selected, cards, onCancel, onSelectAll, o
   }
 
   const allExcluded = count > 0 && list.every(t => t.exclude_from_stats)
+  // Exactly two, money out and money in, on different accounts, neither a transfer yet
+  const transferPair = (() => {
+    if (count !== 2) return null
+    const out = list.find(t => Number(t.amount) < 0)
+    const into = list.find(t => Number(t.amount) > 0)
+    if (!out || !into || out.is_transfer || into.is_transfer) return null
+    if ((out.card_id ?? null) === (into.card_id ?? null)) return null
+    return { out, into }
+  })()
 
   const actions: { icon: IconName; label: string; destructive?: boolean; onPress: () => void }[] = [
     { icon: 'tag', label: 'Категорія', onPress: () => setPicker('category') },
     { icon: 'card', label: 'Картка', onPress: () => setPicker('card') },
+    ...(transferPair
+      ? [
+          {
+            icon: 'transfer' as IconName,
+            label: 'Переказ',
+            onPress: () =>
+              Alert.alert('Об’єднати в переказ?', 'Ці дві транзакції стануть одним переказом між рахунками й вийдуть зі статистики.', [
+                { text: 'Скасувати', style: 'cancel' },
+                {
+                  text: 'Об’єднати',
+                  onPress: () => run(() => markExistingAsTransfer(transferPair.out.id, transferPair.into.id), 'Переказ готовий'),
+                },
+              ]),
+          },
+        ]
+      : []),
     {
       icon: 'chart',
       label: allExcluded ? 'Враховувати' : 'Без статист.',

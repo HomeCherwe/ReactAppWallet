@@ -10,6 +10,7 @@ import { listRecentTransactions, Transaction } from '../api/transactions'
 import GlassButton from './GlassButton'
 import { GlassPressable } from './LiquidGlass'
 import SheetModal from './SheetModal'
+import DateTimeField from './DateTimeField'
 
 interface TransferModalProps {
   visible: boolean
@@ -31,6 +32,12 @@ export default function TransferModal({
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+  const [date, setDate] = useState(() => new Date())
+
+  // A fresh "now" each time the window opens
+  useEffect(() => {
+    if (visible) setDate(new Date())
+  }, [visible])
 
   useEffect(() => {
     if (cards.length >= 2) {
@@ -69,6 +76,7 @@ export default function TransferModal({
         to_card_id: toCardId,
         amount_from: fromAmt,
         amount_to: toAmt,
+        created_at: date.toISOString(),
         note: note.trim() || undefined,
       })
 
@@ -179,6 +187,8 @@ export default function TransferModal({
                 />
               </View>
             )}
+
+            <DateTimeField value={date} onChange={setDate} style={styles.section} />
 
             {/* Note */}
             <View style={styles.section}>

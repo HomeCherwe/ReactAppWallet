@@ -21,6 +21,7 @@ import {
 } from '../api/transactions'
 import { LinearGradient } from 'expo-linear-gradient'
 import { GlassPressable } from './LiquidGlass'
+import DateTimeField from './DateTimeField'
 import SheetModal from './SheetModal'
 import CalcKeypad from './CalcKeypad'
 import { evaluate, formatExpr, hasOperator, pressKey } from '../utils/calc'
@@ -77,6 +78,8 @@ export default function AddTransactionModal({
   const [usage, setUsage] = useState<RecentUsage | null>(null)
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+  // When it happened: now by default, any date and time can be picked
+  const [date, setDate] = useState(() => new Date())
 
   // Cards and categories: most recently used first, then the rest
   const orderedCards = useMemo(() => {
@@ -124,6 +127,7 @@ export default function AddTransactionModal({
     setErrorMsg('')
     setCatQuery('')
     setCustomCategory('')
+    setDate(new Date())
     getRecentUsage(excludedCardIds)
       .then(setUsage)
       .catch(() => setUsage({ expense: [], income: [], cardIds: [] }))
@@ -205,6 +209,7 @@ export default function AddTransactionModal({
         card_id: selectedCardId || undefined,
         category: selectedCategory || undefined,
         note: note.trim() || selectedCategory,
+        created_at: date.toISOString(),
       })
       invalidateCategoriesCache() // so the recency order includes this one next time
       triggerSuccessHaptic()
@@ -398,6 +403,8 @@ export default function AddTransactionModal({
             </ScrollView>
           )}
         </View>
+
+        <DateTimeField value={date} onChange={setDate} style={styles.section} />
 
         {/* Note */}
         <TextInput

@@ -115,6 +115,9 @@ interface TransactionListProps {
   onAcceptSuggestions?: (txs: Transaction[]) => Promise<void>
   /** Long-press menu: «Запитати AI» about this transaction */
   onAskAI?: (tx: Transaction) => void
+  /** Long-press menu: make this transaction a transfer between accounts / undo one */
+  onMakeTransfer?: (tx: Transaction) => void
+  onUnlinkTransfer?: (tx: Transaction) => void
 }
 
 export default React.memo(TransactionList)
@@ -147,6 +150,8 @@ function TransactionList({
   onToggleSelect,
   onAcceptSuggestions,
   onAskAI,
+  onMakeTransfer,
+  onUnlinkTransfer,
 }: TransactionListProps) {
   // Selection mode: rows show a check circle and a tap selects instead of opening
   const sel = (t: Transaction) => (selectedIds ? selectedIds.has(t.id) : undefined)
@@ -337,6 +342,11 @@ function TransactionList({
       out.push({ label: pin === 'tag' ? 'Відкріпити' : 'Закріпити', icon: pin === 'tag' ? 'pinOff' : 'pin', onPress: () => onTogglePin(tx) })
     }
     if (onSplitTx && !tx.refund_for) out.push({ label: 'Розділити', icon: 'split', onPress: () => onSplitTx(tx) })
+    if (tx.is_transfer && tx.transfer_id) {
+      if (onUnlinkTransfer) out.push({ label: 'Скасувати переказ', icon: 'transfer', onPress: () => onUnlinkTransfer(tx) })
+    } else if (onMakeTransfer && !tx.refund_for) {
+      out.push({ label: 'Зробити переказом', icon: 'transfer', onPress: () => onMakeTransfer(tx) })
+    }
     if (onLinkRefund && Number(tx.amount) < 0 && !tx.is_transfer) {
       out.push({ label: 'Прив’язати повернення', icon: 'undo', onPress: () => startRefund(tx) })
     }

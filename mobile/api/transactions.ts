@@ -23,6 +23,9 @@ export interface Transaction {
   split_from?: string | null
   merchant_name?: string | null
   is_transfer?: boolean
+  /** Both legs of a transfer share it; 'from' is the money out, 'to' the money in */
+  transfer_id?: string | null
+  transfer_role?: 'from' | 'to' | null
   count_as_income?: boolean
   /** 'pending' = not settled at the bank yet (TrueLayer banks); absent/'booked' otherwise */
   status?: 'pending' | 'booked'
