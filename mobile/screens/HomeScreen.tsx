@@ -59,6 +59,8 @@ import AddAccountFlow from '../components/AddAccountFlow'
 import CardTransactionsSheet from '../components/CardTransactionsSheet'
 import TxSheet from '../components/TxSheet'
 import AssistantSheet from '../components/AssistantSheet'
+import TransferFromTxSheet from '../components/TransferFromTxSheet'
+import { unlinkTransfer } from '../api/transfers'
 import TransferModal from '../components/TransferModal'
 import SplitTxModal from '../components/SplitTxModal'
 import ScanReceiptModal from '../components/ScanReceiptModal'
@@ -129,6 +131,8 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
   const [scanVisible, setScanVisible] = useState(false)
   // «AI-асистент»: from the + (general chat) or a transaction's long press (about it)
   const [assistant, setAssistant] = useState<{ tx: Transaction | null } | null>(null)
+  // «Зробити переказом» from a transaction's long press
+  const [transferFor, setTransferFor] = useState<Transaction | null>(null)
   const [historyVisible, setHistoryVisible] = useState(false)
 
   // Tx operations modals
@@ -484,6 +488,31 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
       Toast.show({ type: 'error', text1: 'Не вдалося підтвердити', text2: e?.message })
     }
     refreshAfterTxChange()
+  }
+
+  // «Скасувати переказ»: both legs become ordinary transactions again
+  const handleUnlinkTransfer = (tx: Transaction) => {
+    if (!tx.transfer_id) return
+    Alert.alert(
+      'Скасувати переказ?',
+      'Обидві частини переказу знову стануть звичайними транзакціями й повернуться в статистику — без категорії, її треба буде поставити.',
+      [
+        { text: 'Ні', style: 'cancel' },
+        {
+          text: 'Скасувати переказ',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await unlinkTransfer(tx.transfer_id as string)
+              Toast.show({ type: 'success', text1: 'Переказ скасовано', text2: 'Постав обом транзакціям категорію' })
+              refreshAfterTxChange()
+            } catch (e: any) {
+              Alert.alert('Помилка', e?.message || 'Не вдалося скасувати переказ')
+            }
+          },
+        },
+      ]
+    )
   }
 
   const handleLinkRefund = async (expense: Transaction, refund: Transaction) => {
@@ -846,6 +875,8 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
             onLinkRefund={handleLinkRefund}
             onAcceptSuggestions={handleAcceptSuggestions}
             onAskAI={tx => setAssistant({ tx })}
+            onMakeTransfer={setTransferFor}
+            onUnlinkTransfer={handleUnlinkTransfer}
             onUnlinkRefund={handleUnlinkRefund}
             refundFor={refundFor}
             onRefundForChange={setRefundFor}
@@ -908,6 +939,14 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         onAddGoal={() => setAddCardVisible(true)}
         onScan={() => setScanVisible(true)}
         onAssistant={() => setAssistant({ tx: null })}
+      />
+
+      <TransferFromTxSheet
+        tx={transferFor}
+        cards={cards}
+        hidden={hideBalances}
+        onClose={() => setTransferFor(null)}
+        onDone={refreshAfterTxChange}
       />
 
       <AssistantSheet

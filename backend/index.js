@@ -1485,7 +1485,15 @@ app.post('/api/transactions/bulk-delete', getUserFromToken, async (req, res) => 
 // Transfers API
 app.post('/api/transfers', getUserFromToken, async (req, res) => {
   try {
-    const { fromCardId, toCardId, amount, amountTo, note } = req.body
+    const b = req.body || {}
+    // The web sends camelCase; older iPhone builds sent snake_case (from_card_id, amount_from, ...)
+    const fromCardId = b.fromCardId ?? b.from_card_id ?? null
+    const toCardId = b.toCardId ?? b.to_card_id ?? null
+    const amount = b.amount ?? b.amount_from
+    const amountTo = b.amountTo ?? b.amount_to
+    const note = b.note
+    // When it happened (picked in the app); now when not given
+    const when = b.createdAt ?? b.created_at
 
     // Get cards info
     const ids = [...new Set([fromCardId, toCardId].filter(Boolean))]
@@ -1514,7 +1522,7 @@ app.post('/api/transfers', getUserFromToken, async (req, res) => {
     // Generate transfer ID
     const transferId = crypto.randomUUID()
 
-    const now = new Date().toISOString()
+    const now = when && !Number.isNaN(Date.parse(when)) ? new Date(when).toISOString() : new Date().toISOString()
     const fromAmountAbs = Math.abs(Number(amount || 0))
     const toAmountAbs = Math.abs(Number((amountTo ?? amount) || 0))
 
@@ -1636,6 +1644,130 @@ app.post('/api/transfers/mark-existing', getUserFromToken, async (req, res) => {
     res.json([updatedSrc, updatedTgt])
   } catch (error) {
     console.error('POST /api/transfers/mark-existing error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Which bucket a card is in, for count_as_income (same rule as /api/transfers)
+function transferBucket(card) {
+  if (!card) return 'cash'
+  const bank = (card.bank || '').toLowerCase()
+  if (bank.includes('збер') || bank.includes('savings')) return 'savings'
+  if (bank.includes('гот')) return 'cash'
+  return 'cards'
+}
+
+// POST /api/transfers/from-existing { txId, cardId, amount, note? }
+// An existing transaction becomes one leg of a transfer; the other leg is created on `cardId`
+// (opposite sign, same date). For money that left one account and the other side was never
+// recorded (cash withdrawn, a top-up of a card that isn't synced).
+app.post('/api/transfers/from-existing', getUserFromToken, async (req, res) => {
+  try {
+    const { txId, cardId, note } = req.body || {}
+    const amountAbs = Math.abs(Number(req.body?.amount || 0))
+    if (!txId || !cardId) return res.status(400).json({ error: 'Оберіть транзакцію і рахунок' })
+    if (!amountAbs) return res.status(400).json({ error: 'Вкажіть суму' })
+
+    const { data: tx, error: txErr } = await supabase
+      .from('transactions')
+      .select('id, amount, card_id, created_at, is_transfer, transfer_id')
+      .eq('id', txId)
+      .eq('user_id', req.user_id)
+      .maybeSingle()
+    if (txErr) throw txErr
+    if (!tx) return res.status(404).json({ error: 'Транзакцію не знайдено' })
+    if (tx.is_transfer || tx.transfer_id) return res.status(400).json({ error: 'Ця транзакція вже є переказом' })
+    if (tx.card_id === cardId) return res.status(400).json({ error: 'Оберіть інший рахунок' })
+
+    const ids = [...new Set([tx.card_id, cardId].filter(Boolean))]
+    const { data: cards, error: cardsErr } = await supabase
+      .from('cards')
+      .select('id, bank, name, currency')
+      .eq('user_id', req.user_id)
+      .in('id', ids)
+    if (cardsErr) throw cardsErr
+    const other = (cards || []).find(c => c.id === cardId)
+    if (!other) return res.status(404).json({ error: 'Рахунок не знайдено' })
+    const own = (cards || []).find(c => c.id === tx.card_id) || null
+
+    // Money left this transaction's account → it is the "from" leg; arrived → the "to" leg
+    const isOutgoing = Number(tx.amount) < 0
+    const fromCard = isOutgoing ? own : other
+    const toCard = isOutgoing ? other : own
+    const countAsIncome = transferBucket(fromCard) === 'savings' && transferBucket(toCard) !== 'savings'
+    const transferId = crypto.randomUUID()
+
+    const { data: created, error: insErr } = await supabase
+      .from('transactions')
+      .insert([{
+        amount: isOutgoing ? amountAbs : -amountAbs,
+        card_id: other.id,
+        card: `${other.bank} ${other.name}`,
+        created_at: tx.created_at,
+        is_transfer: true,
+        transfer_role: isOutgoing ? 'to' : 'from',
+        transfer_id: transferId,
+        count_as_income: isOutgoing ? countAsIncome : false,
+        archives: false,
+        category: 'ТРАНСФЕР',
+        note: note || null,
+        user_id: req.user_id,
+        exclude_from_stats: true,
+      }])
+      .select()
+      .single()
+    if (insErr) throw insErr
+
+    const { data: updated, error: updErr } = await supabase
+      .from('transactions')
+      .update({
+        is_transfer: true,
+        transfer_role: isOutgoing ? 'from' : 'to',
+        transfer_id: transferId,
+        category: 'ТРАНСФЕР',
+        exclude_from_stats: true,
+        ...(isOutgoing ? {} : { count_as_income: countAsIncome }),
+      })
+      .eq('id', tx.id)
+      .eq('user_id', req.user_id)
+      .select()
+      .single()
+    if (updErr) {
+      // Don't leave half a transfer behind
+      await supabase.from('transactions').delete().eq('id', created.id).eq('user_id', req.user_id)
+      throw updErr
+    }
+    res.json(isOutgoing ? [updated, created] : [created, updated])
+  } catch (error) {
+    console.error('POST /api/transfers/from-existing error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// POST /api/transfers/unlink { transferId } — both legs become ordinary transactions again
+// (back in statistics, without a category: the person gives them one)
+app.post('/api/transfers/unlink', getUserFromToken, async (req, res) => {
+  try {
+    const transferId = String(req.body?.transferId || '')
+    if (!transferId) return res.status(400).json({ error: 'transferId is required' })
+    const { data, error } = await supabase
+      .from('transactions')
+      .update({
+        is_transfer: false,
+        transfer_role: null,
+        transfer_id: null,
+        exclude_from_stats: false,
+        count_as_income: false,
+        category: null,
+      })
+      .eq('user_id', req.user_id)
+      .eq('transfer_id', transferId)
+      .select('id')
+    if (error) throw error
+    if (!data?.length) return res.status(404).json({ error: 'Переказ не знайдено' })
+    res.json({ success: true, count: data.length })
+  } catch (error) {
+    console.error('POST /api/transfers/unlink error:', error)
     res.status(500).json({ error: error.message })
   }
 })

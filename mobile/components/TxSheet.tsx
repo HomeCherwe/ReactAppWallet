@@ -21,6 +21,7 @@ import { hasPinTag, stripPinTag, txDisplayTitle, withPinTag } from '../utils/pin
 import { isSyncCategory } from '../utils/cardExclusion'
 import { triggerErrorHaptic, triggerLightHaptic, triggerSuccessHaptic } from '../utils/haptics'
 import SheetModal from './SheetModal'
+import DateTimeField from './DateTimeField'
 import { GlassPressable } from './LiquidGlass'
 import Icon from './Icon'
 import { fmtMoney } from './TxRow'
@@ -54,6 +55,7 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
   const [note, setNote] = useState('')
   // "Враховувати в статистиці" (exclude_from_stats), same switch as the web's editor
   const [counted, setCounted] = useState(true)
+  const [date, setDate] = useState(() => new Date())
   const [categories, setCategories] = useState<string[]>([])
   const [catQuery, setCatQuery] = useState('')
   const [saving, setSaving] = useState(false)
@@ -70,6 +72,7 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
     setCardId(tx.card_id ?? null)
     setNote(stripPinTag(tx.note))
     setCounted(!tx.exclude_from_stats)
+    setDate(new Date(tx.created_at))
     setCatQuery('')
   }, [tx?.id])
 
@@ -87,10 +90,13 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
       cardId: t.card_id ?? null,
       note: stripPinTag(t.note),
       counted: !t.exclude_from_stats,
+      dateMs: new Date(t.created_at).getTime(),
     }
-  }, [t?.id, t?.amount, t?.category, t?.card_id, t?.note, t?.exclude_from_stats])
+  }, [t?.id, t?.amount, t?.category, t?.card_id, t?.note, t?.exclude_from_stats, t?.created_at])
 
   const parsed = parseAmount(amount)
+  // The picker works in minutes: a different minute is a change
+  const dateChanged = !!original && Math.abs(date.getTime() - original.dateMs) >= 60000
   const dirty =
     !!original &&
     (kind !== original.kind ||
@@ -98,6 +104,7 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
       category.trim() !== original.category ||
       cardId !== original.cardId ||
       counted !== original.counted ||
+      dateChanged ||
       note.trim() !== original.note.trim())
 
   useEffect(() => {
@@ -127,7 +134,7 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
 
   const card = t.card_id ? cards.find(c => c.id === t.card_id) : undefined
   const currency = t.currency || card?.currency
-  const d = new Date(t.created_at)
+  const d = date
   const when = d.toLocaleDateString('uk-UA', { day: 'numeric', month: 'long', year: 'numeric' }) +
     ', ' + d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
   const waitingCategory = isSyncCategory(t.category || '') && !category.trim()
@@ -149,6 +156,7 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
       // Keep the pin (the tag isn't shown in the editor)
       note: withPinTag(note.trim(), hasPinTag(t.note)) ?? (null as unknown as string),
       exclude_from_stats: !counted,
+      ...(dateChanged && { created_at: date.toISOString() }),
     }
     const categoryChanged = payload.category !== t.category
     try {
@@ -328,6 +336,15 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
             </ScrollView>
           </View>
         )}
+
+        {/* When it happened */}
+        <View style={styles.section}>
+          <View style={styles.sectionHead}>
+            <Icon name="calendar" size={14} color={Colors.white60} />
+            <Text style={styles.sectionLabel}>Дата і час</Text>
+          </View>
+          <DateTimeField value={date} onChange={setDate} title="" />
+        </View>
 
         {/* Counted in statistics */}
         <View style={[styles.section, styles.switchRow]}>
