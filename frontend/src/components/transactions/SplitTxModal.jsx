@@ -6,6 +6,7 @@ import { getTransactionCategories, createTransaction, updateTransaction, listTra
 import { txBus } from '../../utils/txBus'
 import { fmtAmount, fmtDate } from '../../utils/format'
 import { useSettingsStore } from '../../store/useSettingsStore'
+import { useCardLabeler } from '../../store/useCardsStore'
 import toast from 'react-hot-toast'
 import { Plus, Trash2, Check, ArrowRight, RefreshCw, ChevronDown, Split, Sparkles, Search } from 'lucide-react'
 
@@ -15,6 +16,7 @@ const DEFAULT_CATEGORIES = [
 ]
 
 export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSplitComplete }) {
+  const labelOf = useCardLabeler()
   const [step, setStep] = useState('build') // 'build' | 'review'
   const [cards, setCards] = useState([])
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES)
@@ -250,7 +252,7 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
           <div>
             <div className="text-xs font-semibold uppercase tracking-wider text-brand/80">Основна транзакція</div>
             <div className="font-semibold text-white text-base">{tx.category || 'Без категорії'}</div>
-            <div className="text-xs text-white/55">{tx.card || 'Карта'} · {fmtDate(tx.created_at)}</div>
+            <div className="text-xs text-white/55">{labelOf(tx) || 'Карта'} · {fmtDate(tx.created_at)}</div>
           </div>
           <div className="text-right">
             <div className={`text-lg font-bold ${isExp ? 'text-white' : 'text-emerald-400'}`}>
@@ -417,7 +419,7 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
                                 />
                                 <div>
                                   <div className="font-semibold text-white">{eTx.category || 'Без категорії'}</div>
-                                  <div className="text-[11px] text-white/55">{fmtDate(eTx.created_at)} · {eTx.card || 'Карта'}</div>
+                                  <div className="text-[11px] text-white/55">{fmtDate(eTx.created_at)} · {labelOf(eTx) || 'Карта'}</div>
                                 </div>
                               </div>
                               <div className="font-bold text-sm text-brand">
@@ -503,7 +505,7 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
                       />
                       <div>
                         <div className="font-semibold text-white text-sm">{p.category}</div>
-                        <div className="text-xs text-white/55">{tx.card || 'Карта'} · {p.note || 'Без нотатки'}</div>
+                        <div className="text-xs text-white/55">{labelOf(tx) || 'Карта'} · {p.note || 'Без нотатки'}</div>
                       </div>
                     </div>
                     <div className="text-right font-bold text-sm text-white">
@@ -518,7 +520,7 @@ export default function SplitTxModal({ open, tx, currency = 'UAH', onClose, onSp
             <div className="p-3 rounded-xl bg-amber-500/[0.06] border border-amber-500/25 flex items-center justify-between text-xs">
               <div>
                 <div className="font-semibold text-amber-200">Основна транзакція після розділу</div>
-                <div className="text-amber-300/80">{tx.category} · {tx.card || 'Карта'}</div>
+                <div className="text-amber-300/80">{tx.category} · {labelOf(tx) || 'Карта'}</div>
               </div>
               <div className={`font-bold text-base ${isExp ? 'text-amber-300' : 'text-emerald-300'}`}>
                 {fmtAmount(reviewMainSigned, currency)}

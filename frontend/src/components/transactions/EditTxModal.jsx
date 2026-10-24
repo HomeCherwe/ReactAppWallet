@@ -5,6 +5,11 @@ import { autoCategorize } from '../../api/insights'
 import { txBus } from '../../utils/txBus'
 import BaseModal from '../BaseModal'
 import { listCards } from '../../api/cards'
+import { cardLabel } from '../../utils/cardLabel'
+
+// "YYYY-MM-DDTHH:mm" in local time for <input type="datetime-local">, with that moment's own UTC
+// offset (a winter transaction edited in summer keeps its hour)
+const toLocalInput = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
 import useMonoRates from '../../hooks/useMonoRates'
 import { getApiUrl } from '../../utils.jsx'
 import toast from 'react-hot-toast'
@@ -114,9 +119,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
         debtIsLend,
         excludeFromStats: base?.exclude_from_stats === true || base?.exclude_from_stats === 'true' || base?.exclude_from_stats === 1,
         pinned: isPinned,
-        date: base.created_at
-          ? new Date(new Date(base.created_at).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
-          : new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16),
+        date: toLocalInput(base.created_at ? new Date(base.created_at) : new Date()),
       }
     }
 
@@ -448,7 +451,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
         ? raw
         : (form.debtIsLend ? -raw : raw)
     const sel = cards.find(c => c.id === form.cardId)
-    const cardLabel = sel ? `${sel.bank} ${sel.name}` : null
+    const cardText = sel ? cardLabel(sel) : null
 
     setSaving(true)
     try {
@@ -461,14 +464,18 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
         amount: signed,
         category: form.kind === 'debt' ? 'Борг' : (form.category || null),
         note: finalNote || null,
-        card: cardLabel,
         card_id: form.cardId || null,
         is_debt: form.kind === 'debt',
         debt_party: form.kind === 'debt' ? (form.debtParty || null) : null,
         debt_direction: form.kind === 'debt' ? (form.debtIsLend ? 'lend' : 'borrow') : null,
         exclude_from_stats: form.kind === 'debt' ? true : (form.excludeFromStats || false),
-        created_at: form.date ? new Date(form.date).toISOString() : new Date().toISOString(),
       }
+      // The field holds minutes: saving it unchanged would cut the seconds off a bank's time
+      const base = originalRef.current || tx
+      const originalDate = base?.created_at ? toLocalInput(new Date(base.created_at)) : ''
+      if (form.date && form.date !== originalDate) payload.created_at = new Date(form.date).toISOString()
+      // The account's name is written only when the account changes (saving untouched kept renaming it)
+      if ((form.cardId || null) !== (base?.card_id || null)) payload.card = cardText
       await updateTransaction(tx.id, payload)
       // The app learned this merchant's category: its other waiting bank imports get it too
       if (payload.category && payload.category !== tx.category) {

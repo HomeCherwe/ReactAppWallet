@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { scanTransactions, createTransaction, getTransactionCategories, listCardTransactionsBetween } from '../../api/transactions'
 import { matchExisting, matchWindow } from '../../utils/scanDuplicates'
 import { listCards } from '../../api/cards'
+import { cardLabel } from '../../utils/cardLabel'
 import { txBus } from '../../utils/txBus'
 import BaseModal from '../BaseModal'
 import toast from 'react-hot-toast'
@@ -318,7 +319,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
     try {
       for (const tx of toSave) {
         const card = cards.find(c => c.id === tx.cardId)
-        const cardLabel = card ? `${card.bank} ${card.name}` : null
+        const cardText = card ? cardLabel(card) : null
         const raw = Math.abs(Number(tx.amount || 0))
         const signed = tx.type === 'income' ? raw : -raw
 
@@ -326,7 +327,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
           amount: signed,
           category: tx.category || 'Інше',
           note: tx.note || null,
-          card: cardLabel,
+          card: cardText,
           card_id: tx.cardId || null,
           created_at: tx.dateLocal ? new Date(tx.dateLocal).toISOString() : new Date().toISOString(),
           archives: false,

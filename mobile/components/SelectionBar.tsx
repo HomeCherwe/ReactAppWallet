@@ -11,6 +11,7 @@ import { triggerErrorHaptic, triggerLightHaptic, triggerSuccessHaptic } from '..
 import { GlassSurface } from './LiquidGlass'
 import Icon, { IconName } from './Icon'
 import SheetModal from './SheetModal'
+import { cardLabel } from '../utils/cardLabel'
 
 interface Props {
   /** null: not selecting (the bar slides away) */
@@ -248,7 +249,7 @@ export default function SelectionBar({ selected, cards, onCancel, onSelectAll, o
             <Pressable
               key={c.id}
               disabled={busy}
-              onPress={() => run(() => updateTransactionsBulk(ids, { card_id: c.id }), `Перенесено на «${c.name}» · ${count}`)}
+              onPress={() => run(() => updateTransactionsBulk(ids, { card_id: c.id, card: cardLabel(c) }), `Перенесено на «${cardLabel(c)}» · ${count}`)}
               style={({ pressed }) => [styles.cardRow, i < cards.length - 1 && styles.cardRowBorder, pressed && styles.pressed]}
             >
               <View style={styles.cardIcon}>

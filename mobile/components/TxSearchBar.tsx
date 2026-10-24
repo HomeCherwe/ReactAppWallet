@@ -8,6 +8,7 @@ import { triggerLightHaptic, triggerSelectionHaptic } from '../utils/haptics'
 import { PERIODS } from '../utils/periods'
 import Icon from './Icon'
 import SheetModal from './SheetModal'
+import { cardLabel } from '../utils/cardLabel'
 
 type PickerKind = 'period' | 'card' | 'category'
 
@@ -46,9 +47,9 @@ export default function TxSearchBar({ search, cards }: { search: FeedSearch; car
     }
   }
 
-  const sortedCards = useMemo(() => [...cards].sort((a, b) => a.name.localeCompare(b.name, 'uk')), [cards])
+  const sortedCards = useMemo(() => [...cards].sort((a, b) => cardLabel(a).localeCompare(cardLabel(b), 'uk')), [cards])
   const periodLabel = search.period !== 'all' ? PERIODS.find(p => p.id === search.period)?.label ?? null : null
-  const cardLabel = search.cardId ? cards.find(c => c.id === search.cardId)?.name ?? 'Картка' : null
+  const cardChip = search.cardId ? cardLabel(cards.find(c => c.id === search.cardId)) || 'Картка' : null
 
   const options: Option[] =
     picker === 'period'
@@ -58,7 +59,7 @@ export default function TxSearchBar({ search, cards }: { search: FeedSearch; car
             { key: '', label: 'Усі картки', selected: !search.cardId, onPick: () => search.setCardId(null) },
             ...sortedCards.map(c => ({
               key: c.id,
-              label: c.name,
+              label: cardLabel(c),
               hint: c.currency,
               selected: search.cardId === c.id,
               onPick: () => search.setCardId(c.id),
@@ -106,7 +107,7 @@ export default function TxSearchBar({ search, cards }: { search: FeedSearch; car
         contentContainerStyle={styles.chips}
       >
         <Chip label={periodLabel ?? 'Період'} active={!!periodLabel} onPress={() => openPicker('period')} onClear={() => search.setPeriod('all')} />
-        <Chip label={cardLabel ?? 'Картка'} active={!!cardLabel} onPress={() => openPicker('card')} onClear={() => search.setCardId(null)} />
+        <Chip label={cardChip ?? 'Картка'} active={!!cardChip} onPress={() => openPicker('card')} onClear={() => search.setCardId(null)} />
         <Chip
           label={search.category ?? 'Категорія'}
           active={!!search.category}

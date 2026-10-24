@@ -199,3 +199,20 @@ html::-webkit-scrollbar { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .ai-frame::before, .ai-ring::before, .ai-ring-halo::before, .ai-ring-halo { animation: none; }
 }
+
+/* ---- Refund picking: the incomes you can pick jiggle like iOS edit mode (same as the iPhone app) ---- */
+@keyframes tx-wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(0.45deg); }
+  75% { transform: rotate(-0.45deg); }
+}
+.tx-wiggle { animation: tx-wiggle 0.44s linear infinite; }
+.tx-wiggle-rev { animation: tx-wiggle 0.44s linear infinite reverse; }
+@media (prefers-reduced-motion: reduce) {
+  .tx-wiggle, .tx-wiggle-rev { animation: none; }
+}
+/* The pulsing ring behind the refund-picking bar's icon */
+@keyframes refund-ring {
+  0%, 100% { transform: scale(1); opacity: 0.6; }
+  50% { transform: scale(1.35); opacity: 0; }
+}

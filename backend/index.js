@@ -954,6 +954,12 @@ app.get('/api/transactions', getUserFromToken, async (req, res) => {
       q = q.ilike('note', '%[pinned]%')
     }
 
+    // Transfers between the user's own accounts are neither spending nor income: the «Витрати» /
+    // «Доходи» lists leave them out (same as the iPhone app)
+    if (req.query.exclude_transfers === 'true') {
+      q = q.not('is_transfer', 'is', true)
+    }
+
     // Exclude USDT filter - join with cards to filter by currency
     const excludeUsdt = req.query.exclude_usdt === 'true'
     if (excludeUsdt) {
@@ -1215,7 +1221,7 @@ app.get('/api/transactions/:id', getUserFromToken, async (req, res) => {
 
     const { data, error } = await supabase
       .from('transactions')
-      .select('id, amount, amount_stat, exclude_from_stats, category, note, card_id, card, created_at, refund_for, is_debt, debt_party, debt_direction, count_as_income, is_transfer, merchant_name')
+      .select('id, amount, amount_stat, exclude_from_stats, category, note, card_id, card, created_at, refund_for, is_debt, debt_party, debt_direction, count_as_income, is_transfer, transfer_id, transfer_role, status, merchant_name')
       .eq('id', id)
       .eq('user_id', req.user_id)
       .single()
@@ -1229,9 +1235,37 @@ app.get('/api/transactions/:id', getUserFromToken, async (req, res) => {
   }
 })
 
+// How an account is named on its transactions (same as the web and iPhone apps): bank + card name,
+// without doubling the bank when the name already starts with it («Commerzbank EUR»)
+function cardLabelOf(card) {
+  if (!card) return null
+  const bank = String(card.banks?.name || card.bank || '').trim()
+  const name = String(card.name || '').trim()
+  if (!bank) return name || null
+  if (!name) return bank
+  if (name.toLowerCase().startsWith(bank.toLowerCase())) return name
+  return `${bank} ${name}`
+}
+
+async function cardLabelFor(userId, cardId) {
+  if (!cardId) return null
+  const { data } = await supabase
+    .from('cards')
+    .select('name, bank, banks(name)')
+    .eq('id', cardId)
+    .eq('user_id', userId)
+    .maybeSingle()
+  return cardLabelOf(data)
+}
+
 app.post('/api/transactions', getUserFromToken, async (req, res) => {
   try {
     const payload = { ...req.body, user_id: req.user_id }
+
+    // The account's name comes with the card (the iPhone app sends only card_id)
+    if (payload.card_id && !payload.card) {
+      payload.card = await cardLabelFor(req.user_id, payload.card_id)
+    }
 
     // Debt rule: always excluded from stats and forced category
     if (payload.is_debt === true || payload.is_debt === 'true' || payload.is_debt === 1) {
@@ -1282,12 +1316,26 @@ app.put('/api/transactions/:id', getUserFromToken, async (req, res) => {
     // We'll need the current transaction for robust amount_stat recompute (refund children & parent updates).
     const { data: existingTx, error: existingErr } = await supabase
       .from('transactions')
-      .select('id, amount, amount_stat, refund_for, is_debt, debt_direction, archives')
+      .select('id, amount, amount_stat, refund_for, is_debt, debt_direction, archives, card_id, card')
       .eq('id', id)
       .eq('user_id', req.user_id)
       .maybeSingle()
     if (existingErr) throw existingErr
     if (!existingTx) return res.status(404).json({ error: 'Transaction not found' })
+
+    // The account's name follows the account: saving the same card keeps it (it used to be renamed
+    // on every save), another card brings its own name
+    if (patch.card_id !== undefined) {
+      const newCardId = patch.card_id || null
+      if (newCardId === (existingTx.card_id || null)) {
+        if (existingTx.card || !newCardId) delete patch.card
+        else patch.card = await cardLabelFor(req.user_id, newCardId)
+      } else {
+        patch.card = newCardId ? await cardLabelFor(req.user_id, newCardId) : null
+      }
+    } else {
+      delete patch.card
+    }
 
     const hadParentBefore = !!existingTx.refund_for
     const parentBeforeId = existingTx.refund_for || null
@@ -1529,7 +1577,7 @@ app.post('/api/transfers', getUserFromToken, async (req, res) => {
     const src = {
       amount: -fromAmountAbs,
       card_id: fromCardId || null,
-      card: fromCard ? `${fromCard.bank} ${fromCard.name}` : null,
+      card: fromCard ? cardLabelOf(fromCard) : null,
       created_at: now,
       is_transfer: true,
       transfer_role: 'from',
@@ -1544,7 +1592,7 @@ app.post('/api/transfers', getUserFromToken, async (req, res) => {
     const tgt = {
       amount: toAmountAbs,
       card_id: toCardId || null,
-      card: toCard ? `${toCard.bank} ${toCard.name}` : null,
+      card: toCard ? cardLabelOf(toCard) : null,
       created_at: now,
       is_transfer: true,
       transfer_role: 'to',
@@ -1728,7 +1776,7 @@ app.post('/api/transfers/from-existing', getUserFromToken, async (req, res) => {
       .insert([{
         amount: isOutgoing ? amountAbs : -amountAbs,
         card_id: other.id,
-        card: `${other.bank} ${other.name}`,
+        card: cardLabelOf(other),
         created_at: tx.created_at,
         is_transfer: true,
         transfer_role: isOutgoing ? 'to' : 'from',

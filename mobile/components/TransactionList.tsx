@@ -16,6 +16,7 @@ import { MenuAction, MenuFrame, openMenu as openMenuOverlay } from '../store/use
 import { pinStateOf, txDisplayTitle } from '../utils/pinned'
 import { isSyncCategory } from '../utils/cardExclusion'
 import { useExcludedCategories } from '../utils/statsCategories'
+import { cardLabel } from '../utils/cardLabel'
 
 const PINNED_COLLAPSED_KEY = 'pinned_collapsed'
 // Rows inside the pinned block sit on a warm surface, so the block stands apart from the list
@@ -280,7 +281,8 @@ function TransactionList({
         triggerSuccessHaptic()
         setRefundFor(null)
         const refundAmount = Number(refund.amount)
-        const left = Math.abs(Number(expense.amount)) - refundAmount
+        // What's left after all its refunds (earlier ones are already in amount_stat)
+        const left = -(Number(expense.amount_stat ?? expense.amount) + refundAmount)
         Toast.show({
           type: 'success',
           text1: 'Повернення прив’язано',
@@ -414,7 +416,7 @@ function TransactionList({
   // The other legs of a transfer, and the account a leg's money went to / came from
   const partnersOf = (tx: Transaction) =>
     tx.is_transfer && tx.transfer_id ? (transfers[tx.transfer_id] ?? []).filter(l => l.id !== tx.id) : []
-  const accountName = (t?: Transaction) => (t?.card_id ? cardsById[t.card_id]?.name : t ? 'Готівка' : undefined)
+  const accountName = (t?: Transaction) => (t?.card_id ? cardLabel(cardsById[t.card_id]) || undefined : t ? 'Готівка' : undefined)
 
   const excludedCats = useExcludedCategories()
   const groups = useMemo(() => {

@@ -11,6 +11,7 @@ import { GlassPressable } from './LiquidGlass'
 import TxRow, { fmtMoney } from './TxRow'
 import TxSheet from './TxSheet'
 import { useExcludedCategories } from '../utils/statsCategories'
+import { cardLabel } from '../utils/cardLabel'
 
 type PeriodId = 'week' | 'month' | '3m' | 'year' | 'all'
 
@@ -184,7 +185,7 @@ export default function CardTransactionsSheet({ card, balance, hidden, onClose, 
   const otherAccount = (t: Transaction) => {
     const other = (t.transfer_id ? transferLegs[t.transfer_id] ?? [] : []).find(l => l.id !== t.id)
     if (!other) return undefined
-    return other.card_id ? cards.find(x => x.id === other.card_id)?.name ?? 'інший рахунок' : 'Готівка'
+    return other.card_id ? cardLabel(cards.find(x => x.id === other.card_id)) || 'інший рахунок' : 'Готівка'
   }
 
   const excludedCats = useExcludedCategories()

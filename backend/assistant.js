@@ -4,6 +4,16 @@
 
 import { readPreferences, userCategories } from './insights.js'
 
+// An account as the user sees it in the apps: bank + card name («Готівка EUR», not just «EUR»)
+function accountLabel(card) {
+  if (!card) return ''
+  const bank = String(card.bank || '').trim()
+  const name = String(card.name || '').trim()
+  if (!bank) return name
+  if (!name) return bank
+  return name.toLowerCase().startsWith(bank.toLowerCase()) ? name : `${bank} ${name}`
+}
+
 const OPENAI_MODEL = 'gpt-5.1'
 const MAX_TOOL_ROUNDS = 6
 const MAX_HISTORY = 16
@@ -137,7 +147,7 @@ function compactRow(t, ctx) {
     currency: card?.currency || 'UAH',
     category: t.category || null,
     title: titleOf(t),
-    card: card ? card.name : 'Готівка',
+    card: card ? accountLabel(card) : 'Готівка',
     ...(flags.length && { flags }),
   }
 }
@@ -307,7 +317,7 @@ async function runTool(name, args, { supabase, userId, ctx, seen }) {
         const monday = new Date(local.getTime() - ((local.getUTCDay() + 6) % 7) * DAY)
         key = `тиждень з ${monday.toISOString().slice(0, 10)}`
       } else if (args.group_by === 'weekday') key = ['нд', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'][local.getUTCDay()]
-      else key = t.card_id ? ctx.cardById.get(t.card_id)?.name || 'Картка' : 'Готівка'
+      else key = t.card_id ? accountLabel(ctx.cardById.get(t.card_id)) || 'Картка' : 'Готівка'
       const g = groups.get(key) || { key, total: 0, count: 0 }
       g.total += value
       g.count += 1
