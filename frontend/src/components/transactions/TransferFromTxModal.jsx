@@ -37,7 +37,7 @@ export default function TransferFromTxModal({ tx, cards = [], onClose, onDone })
   const currencyOf = x => x?.currency || (x?.card_id && cardsById[x.card_id]?.currency) || 'UAH'
   const isOutgoing = !!t && Number(t.amount) < 0
   const ownCard = t?.card_id ? cardsById[t.card_id] : null
-  const otherCards = useMemo(() => cards.filter(c => c.id !== t?.card_id), [cards, t?.card_id])
+  const otherCards = useMemo(() => cards.filter(c => c.id !== t?.card_id && !c.archived), [cards, t?.card_id])
   const target = targetId ? cardsById[targetId] : null
 
   useEffect(() => {

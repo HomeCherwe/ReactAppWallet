@@ -1,29 +1,20 @@
 import { supabase } from '../lib/supabase'
 import { convertAmount } from './primaryCurrency'
+import { kindOutOfStats } from './accountKind'
 
 // Same as the iPhone app (mobile/utils/statsCount.ts): what statistics count, in the main currency —
 // no archived rows, transfers, refunds (amount_stat already takes them off their expense), "not in
-// stats" transactions, categories or cards, savings or Binance.
+// stats" transactions, categories or cards, savings or investments.
 
 const cardExcluded = c => !!(c.exclude_from_stats || c.bank_exclude_from_stats || c.banks?.exclude_from_stats)
-const lower = v => String(v || '').toLowerCase()
 
 /** [{ tx, value, income }] — value in `currency`, positive for expenses too */
 export function countedTransactions(transactions, { cards = [], rates, currency, excludedCategories = [] }) {
   const info = new Map(
-    cards.map(c => {
-      const bank = lower(c.bank)
-      const name = lower(c.name)
-      return [
-        c.id,
-        {
-          currency: String(c.currency || 'UAH').toUpperCase(),
-          skip:
-            cardExcluded(c) ||
-            ['накопич', 'savings', 'збер', 'binance'].some(w => bank.includes(w) || name.includes(w)),
-        },
-      ]
-    })
+    cards.map(c => [
+      c.id,
+      { currency: String(c.currency || 'UAH').toUpperCase(), skip: cardExcluded(c) || kindOutOfStats(c) },
+    ])
   )
   const out = []
   for (const tx of transactions) {

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence } from 'framer-motion'
-import { Building2, List, MoreHorizontal, Settings, Trash2 } from 'lucide-react'
+import { Archive, ArchiveRestore, Building2, ChevronDown, List, MoreHorizontal, Settings, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import BankConnections from '../components/BankConnections'
 import AddBankChoiceModal from '../components/AddBankChoiceModal'
 import OwnAccountModal from '../components/cards/OwnAccountModal'
-import { BankModal, CardModal } from '../components/cards/CardModals'
+import { BankModal, CardModal, cardPatchFromForm } from '../components/cards/CardModals'
 import ConfirmModal from '../components/ConfirmModal'
 import CardTransactionsDrawer from '../components/transactions/CardTransactionsDrawer'
 import { listCards, updateCard, deleteCard } from '../api/cards'
@@ -14,18 +14,29 @@ import { listBanks, updateBank, deleteBank } from '../api/banks'
 import { sumTransactionsByCard } from '../api/transactions'
 import { invalidateCardsCache, invalidateSumByCardCache } from '../utils/dataCache'
 import { txBus } from '../utils/txBus'
-import { getBucket } from '../utils/cardTheme'
+import { ACCOUNT_KINDS, KIND_META, accountKind, goalProgress, isEmptyBalance } from '../utils/accountKind'
 import { useSettingsStore } from '../store/useSettingsStore'
+import { cardLabel } from '../utils/cardLabel'
 
-// Same groups, accents and icons as the iPhone cards screen
-const GROUPS = [
-  { id: 'cards', title: '💳 Картки', icon: '💳', accent: ['#FF8A2A', '#FF4D00'] },
-  { id: 'savings', title: '🎯 Скарбнички', icon: '🎯', accent: ['#34D399', '#0E9F6E'] },
-  { id: 'cash', title: '💵 Готівка', icon: '💵', accent: ['#FBBF24', '#D97706'] },
-]
+// Same groups, accents and icons as the iPhone cards screen: one per account kind
+const GROUPS = ACCOUNT_KINDS.map(kind => ({
+  id: kind,
+  title: `${KIND_META[kind].icon} ${KIND_META[kind].many}`,
+  icon: KIND_META[kind].icon,
+  accent: KIND_META[kind].accent,
+}))
+const ARCHIVE_ACCENT = ['#6B7280', '#4B5563']
 
 const fmtAmount = (v, currency) =>
   `${v < 0 ? '−' : ''}${Math.abs(v).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency || ''}`.trim()
+
+function emptyAccountsText(n) {
+  const mod10 = n % 10
+  const mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return `${n} порожній рахунок`
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} порожні рахунки`
+  return `${n} порожніх рахунків`
+}
 
 function accountsWord(n) {
   const mod10 = n % 10
@@ -102,6 +113,7 @@ export default function CardsPage() {
   const [cardToDelete, setCardToDelete] = useState(null)
   const [bankToDelete, setBankToDelete] = useState(null)
   const [menu, setMenu] = useState(null)
+  const [archiveOpen, setArchiveOpen] = useState(false)
 
   const load = useCallback(async ({ fresh = false } = {}) => {
     if (fresh) {
@@ -148,10 +160,26 @@ export default function CardsPage() {
   }, [load])
 
   const balances = useMemo(() => Object.fromEntries(cards.map(c => [c.id, c._balance])), [cards])
+  // Archived accounts keep their history but leave the groups (and the pickers)
+  const active = useMemo(() => cards.filter(c => !c.archived), [cards])
+  const archived = useMemo(() => cards.filter(c => c.archived), [cards])
   const groups = useMemo(
-    () => GROUPS.map(g => ({ ...g, cards: cards.filter(c => getBucket(c) === g.id) })).filter(g => g.cards.length > 0),
-    [cards]
+    () => GROUPS.map(g => ({ ...g, cards: active.filter(c => accountKind(c) === g.id) })).filter(g => g.cards.length > 0),
+    [active]
   )
+  const emptyAccounts = useMemo(() => active.filter(c => isEmptyBalance(c._balance)), [active])
+
+  const setArchived = async (list, value) => {
+    try {
+      await Promise.all(list.map(c => updateCard(c.id, { archived: value })))
+      toast.success(value ? (list.length === 1 ? 'Сховано в архів' : `Сховано в архів: ${list.length}`) : 'Повернуто з архіву')
+      load({ fresh: true })
+      txBus.emit({ type: 'SYNC' })
+    } catch (e) {
+      toast.error(e?.message || 'Не вдалося змінити архів')
+      load({ fresh: true })
+    }
+  }
 
   const openMenu = (card, x, y) => {
     const bank = banks.find(b => b.id === card.bank_id)
@@ -162,8 +190,13 @@ export default function CardsPage() {
       subtitle: `${card.bank || 'Рахунок'} · ${hidden ? '••••' : fmtAmount(card._balance, card.currency)}`,
       actions: [
         { label: 'Транзакції та статистика', icon: List, onPress: () => setSelectedCard(card) },
-        { label: 'Налаштування картки', icon: Settings, onPress: () => setEditCard(card) },
+        { label: 'Налаштування рахунку', icon: Settings, onPress: () => setEditCard(card) },
         ...(bank ? [{ label: `Банк «${bank.name}»`, icon: Building2, onPress: () => setEditBank(bank) }] : []),
+        ...(card.archived
+          ? [{ label: 'Повернути з архіву', icon: ArchiveRestore, onPress: () => setArchived([card], false) }]
+          : isEmptyBalance(card._balance)
+          ? [{ label: 'Сховати в архів', icon: Archive, onPress: () => setArchived([card], true) }]
+          : []),
         { label: 'Видалити', icon: Trash2, destructive: true, onPress: () => setCardToDelete(card) },
       ],
     })
@@ -171,13 +204,9 @@ export default function CardsPage() {
 
   const saveCard = async (form, file) => {
     try {
-      await updateCard(
-        editCard.id,
-        { bank_id: form.bank_id || null, name: form.name, currency: form.currency || 'EUR', exclude_from_stats: !!form.exclude_from_stats },
-        file
-      )
+      await updateCard(editCard.id, cardPatchFromForm(form, editCard), file)
       setEditCard(null)
-      toast.success('Картку оновлено')
+      toast.success(form.archived && !editCard.archived ? 'Сховано в архів' : 'Збережено')
       load({ fresh: true })
       txBus.emit({ type: 'SYNC' })
     } catch (e) {
@@ -225,6 +254,79 @@ export default function CardsPage() {
     }
   }
 
+  // One account: colored edge, icon, name, bank, balance (a piggy bank also shows its goal)
+  const renderRow = (card, g) => {
+    const excluded = !!(card.exclude_from_stats || card.bank_exclude_from_stats)
+    const progress = accountKind(card) === 'savings' ? goalProgress(card, card._balance) : null
+    return (
+      <div
+        key={card.id}
+        role="button"
+        tabIndex={0}
+        onClick={() => setSelectedCard(card)}
+        onKeyDown={(e) => e.key === 'Enter' && setSelectedCard(card)}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          openMenu(card, e.clientX, e.clientY)
+        }}
+        className="group relative flex items-center justify-between rounded-[22px] py-3.5 pl-[18px] pr-2.5 overflow-hidden bg-white/[0.04] border border-white/[0.14] backdrop-blur-xl cursor-pointer hover:bg-white/[0.065] transition-colors"
+      >
+        {/* Colored edge on the left */}
+        <span
+          className="absolute left-0 top-3.5 bottom-3.5 w-[3px] rounded-r-[3px]"
+          style={{ background: `linear-gradient(180deg, ${g.accent[0]}, ${g.accent[1]})` }}
+        />
+        <div className="flex items-center gap-3 flex-1 min-w-0 mr-2.5">
+          <span
+            className="h-[42px] w-[42px] shrink-0 rounded-[14px] grid place-items-center text-[19px]"
+            style={{ background: `linear-gradient(135deg, ${g.accent[0]}, ${g.accent[1]})` }}
+          >
+            {g.icon}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-base font-bold text-white truncate">{card.name}</div>
+            <div className="text-xs text-white/60 truncate mt-0.5">
+              {card.bank || 'Рахунок'}
+              {card.card_number ? ` · •• ${String(card.card_number).slice(-4)}` : ''}
+              {progress != null ? ` · ціль ${hidden ? '••••' : fmtAmount(Number(card.goal_amount), card.currency)}` : ''}
+              {excluded ? ' · поза статистикою' : ''}
+            </div>
+            {progress != null && (
+              <div className="mt-1.5 flex items-center gap-2">
+                <span className="flex-1 h-1.5 rounded-full bg-white/[0.08] overflow-hidden">
+                  <span
+                    className="block h-full rounded-full"
+                    style={{ width: `${progress * 100}%`, background: `linear-gradient(90deg, ${g.accent[0]}, ${g.accent[1]})` }}
+                  />
+                </span>
+                <span className="text-[11px] font-semibold text-white/50 tabular-nums">{progress >= 1 ? '✓' : `${Math.floor(progress * 100)}%`}</span>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <div className={`text-base font-extrabold tabular-nums ${card._balance < 0 ? 'text-[#FF6B6B]' : 'text-white'}`}>
+            {hidden ? '••••' : fmtAmount(card._balance, card.currency)}
+          </div>
+          <div className="text-[11px] font-bold tracking-wide text-white/40 mt-0.5">{card.currency}</div>
+        </div>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            const r = e.currentTarget.getBoundingClientRect()
+            openMenu(card, r.right - 260, r.bottom + 6)
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          className="ml-1.5 h-8 w-8 shrink-0 grid place-items-center rounded-full text-white/45 hover:text-white hover:bg-white/10 transition-colors"
+          title="Дії"
+        >
+          <MoreHorizontal size={18} />
+        </button>
+      </div>
+    )
+  }
+
   const bankCardsCount = bankToDelete ? cards.filter(c => c.bank_id === bankToDelete.id).length : 0
 
   return (
@@ -234,7 +336,8 @@ export default function CardsPage() {
         <div>
           <h1 className="text-[22px] font-semibold text-white">Рахунки та картки</h1>
           <div className="text-[13px] text-white/55 mt-0.5">
-            {cards.length} {accountsWord(cards.length)}
+            {active.length} {accountsWord(active.length)}
+            {archived.length > 0 && ` · ${archived.length} в архіві`}
           </div>
         </div>
         <button
@@ -269,74 +372,56 @@ export default function CardsPage() {
               <div className="text-[13px] text-white/55 mt-1">Натисніть «+ Додати», щоб підключити банк або додати рахунок вручну</div>
             </div>
           ) : (
-            groups.map(g => (
+            <>
+              {groups.map(g => (
               <section key={g.id} className="mb-6">
                 <h3 className="text-lg font-semibold text-brand mb-3 ml-1">{g.title}</h3>
                 <div className="grid gap-2.5">
-                  {g.cards.map(card => {
-                    const excluded = !!(card.exclude_from_stats || card.bank_exclude_from_stats)
-                    return (
-                      <div
-                        key={card.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setSelectedCard(card)}
-                        onKeyDown={(e) => e.key === 'Enter' && setSelectedCard(card)}
-                        onContextMenu={(e) => {
-                          e.preventDefault()
-                          openMenu(card, e.clientX, e.clientY)
-                        }}
-                        className="group relative flex items-center justify-between rounded-[22px] py-3.5 pl-[18px] pr-2.5 overflow-hidden bg-white/[0.04] border border-white/[0.14] backdrop-blur-xl cursor-pointer hover:bg-white/[0.065] transition-colors"
-                      >
-                        {/* Colored edge on the left */}
-                        <span
-                          className="absolute left-0 top-3.5 bottom-3.5 w-[3px] rounded-r-[3px]"
-                          style={{ background: `linear-gradient(180deg, ${g.accent[0]}, ${g.accent[1]})` }}
-                        />
-                        <div className="flex items-center gap-3 flex-1 min-w-0 mr-2.5">
-                          <span
-                            className="h-[42px] w-[42px] shrink-0 rounded-[14px] grid place-items-center text-[19px]"
-                            style={{ background: `linear-gradient(135deg, ${g.accent[0]}, ${g.accent[1]})` }}
-                          >
-                            {g.icon}
-                          </span>
-                          <div className="min-w-0">
-                            <div className="text-base font-bold text-white truncate">{card.name}</div>
-                            <div className="text-xs text-white/60 truncate mt-0.5">
-                              {card.bank || 'Рахунок'}
-                              {card.card_number ? ` · •• ${String(card.card_number).slice(-4)}` : ''}
-                              {excluded ? ' · поза статистикою' : ''}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <div className={`text-base font-extrabold tabular-nums ${card._balance < 0 ? 'text-[#FF6B6B]' : 'text-white'}`}>
-                            {hidden ? '••••' : fmtAmount(card._balance, card.currency)}
-                          </div>
-                          <div className="text-[11px] font-bold tracking-wide text-white/40 mt-0.5">{card.currency}</div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            const r = e.currentTarget.getBoundingClientRect()
-                            openMenu(card, r.right - 260, r.bottom + 6)
-                          }}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          className="ml-1.5 h-8 w-8 shrink-0 grid place-items-center rounded-full text-white/45 hover:text-white hover:bg-white/10 transition-colors"
-                          title="Дії"
-                        >
-                          <MoreHorizontal size={18} />
-                        </button>
-                      </div>
-                    )
-                  })}
+                  {g.cards.map(card => renderRow(card, g))}
                 </div>
               </section>
-            ))
+              ))}
+
+              {/* Accounts with nothing on them: one click hides them all */}
+              {emptyAccounts.length >= 2 && (
+                <div className="mb-6 flex items-center gap-3 rounded-[22px] border border-dashed border-white/15 px-4 py-3">
+                  <Archive size={18} className="text-white/45 shrink-0" />
+                  <div className="flex-1 min-w-0 text-[13px] text-white/60">
+                    <span className="text-white/85 font-semibold">{emptyAccountsText(emptyAccounts.length)}</span>
+                    <span className="block truncate text-xs text-white/45">{emptyAccounts.map(cardLabel).join(', ')}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setArchived(emptyAccounts, true)}
+                    className="shrink-0 px-3 h-8 rounded-full bg-white/[0.08] hover:bg-white/[0.12] text-xs font-bold text-white transition-colors"
+                  >
+                    Сховати в архів
+                  </button>
+                </div>
+              )}
+
+              {archived.length > 0 && (
+                <section className="mb-6">
+                  <button
+                    type="button"
+                    onClick={() => setArchiveOpen(o => !o)}
+                    className="flex items-center gap-2 text-lg font-semibold text-white/55 hover:text-white/80 mb-3 ml-1 transition-colors"
+                  >
+                    🗄 Архів · {archived.length}
+                    <ChevronDown size={18} className={`transition-transform ${archiveOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {archiveOpen && (
+                    <div className="grid gap-2.5 opacity-70">
+                      {archived.map(card => renderRow(card, { ...GROUPS.find(g => g.id === accountKind(card)), accent: ARCHIVE_ACCENT }))}
+                    </div>
+                  )}
+                </section>
+              )}
+            </>
           )}
         </div>
       </div>
+
 
       <CardMenu menu={menu} onClose={() => setMenu(null)} />
 

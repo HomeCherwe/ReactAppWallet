@@ -1,6 +1,7 @@
 import { Transaction } from '../api/transactions'
 import { Card } from '../api/cards'
 import { convertCurrency, RatesMap } from './currency'
+import { kindOutOfStats } from './accountKind'
 
 export interface CountedTx {
   tx: Transaction
@@ -12,7 +13,8 @@ export interface CountedTx {
 /**
  * What statistics count, in the main currency — the same rules everywhere (Analytics, the month's
  * report, Wrapped): no archived rows, transfers, refunds (they're taken off their expense through
- * amount_stat), "not in stats" transactions, categories or cards, and no savings accounts.
+ * amount_stat), "not in stats" transactions, categories or cards, and no piggy banks or investments
+ * (the same as the web, frontend/src/utils/statsCount.js).
  */
 export function countedTransactions(
   transactions: Transaction[],
@@ -26,10 +28,7 @@ export function countedTransactions(
 ): CountedTx[] {
   const excludedCards = new Set(excludedCardIds)
   const cardInfo = new Map(
-    cards.map(c => {
-      const bank = String(c.bank || '').toLowerCase()
-      return [c.id, { currency: (c.currency || 'UAH').toUpperCase(), savings: bank.includes('накопич') || bank.includes('savings') }]
-    })
+    cards.map(c => [c.id, { currency: (c.currency || 'UAH').toUpperCase(), savings: kindOutOfStats(c) }])
   )
   const out: CountedTx[] = []
   for (const tx of transactions) {

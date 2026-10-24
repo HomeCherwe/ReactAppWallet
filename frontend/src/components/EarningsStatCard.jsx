@@ -6,6 +6,7 @@ import { listCards } from '../api/cards'
 import { apiFetch } from '../utils.jsx'
 import { usePrimaryCurrency, convertAmount, currencySymbol } from '../utils/primaryCurrency'
 import { isCategoryExcluded, useExcludedCategories } from '../utils/statsCategories'
+import { kindOutOfStats } from '../utils/accountKind'
 
 const MONTHS = [
   'Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень',
@@ -68,22 +69,16 @@ export default function EarningsStatCard({ title, mode }) {
         if (aborted()) return
         const cardMap = new Map()
         cards.forEach(c => {
-          const bank = String(c.bank || '').toLowerCase()
-          const name = String(c.name || '').toLowerCase()
-          cardMap.set(c.id, {
-            isSavings: bank.includes('збер') || bank.includes('savings'),
-            isBinance: bank.includes('binance') || name.includes('binance'),
-            currency: (c.currency || 'UAH').toUpperCase(),
-          })
+          cardMap.set(c.id, { outOfStats: kindOutOfStats(c), currency: (c.currency || 'UAH').toUpperCase() })
         })
 
-        // Sum of this mode's amounts in the main currency (savings and Binance left out)
+        // Sum of this mode's amounts in the main currency (piggy banks and investments left out)
         const sumInPrimary = (txs) => {
           let sum = 0
           for (const tx of txs || []) {
             if (tx.archives || isExcludedFromStats(tx)) continue
             const card = cardMap.get(tx.card_id) || { currency: 'UAH' }
-            if (card.isSavings || card.isBinance) continue
+            if (card.outOfStats) continue
             const amt = amountForStats(tx)
             if (mode === 'spending' ? amt >= 0 : amt <= 0) continue
             const cur = tx.currency ? String(tx.currency).toUpperCase() : card.currency

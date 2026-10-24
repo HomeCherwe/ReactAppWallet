@@ -11,6 +11,7 @@ import { createClient } from '@supabase/supabase-js'
 import { registerBankConnections, syncAllBankConnections, psuHeadersFrom, pinSyncCategory } from './bankConnections.js'
 import { registerInsights } from './insights.js'
 import { registerAssistant } from './assistant.js'
+import { ACCOUNT_KINDS, cardBucket, withCardV2 } from './accountKind.js'
 dotenv.config();
 
 const app = express();
@@ -352,13 +353,33 @@ async function getExcludedCardIds(userId) {
 const isSyncCategory = (category) => /\bsync$/i.test(String(category || '').trim())
 
 // Cards API
+const CARD_COLUMNS = 'id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, exclude_from_stats, banks(name, iban, bic, beneficiary, exclude_from_stats)'
+
+// kind / goal_amount / archived sent by the apps, checked; fields that aren't sent stay as they are
+function cardV2Fields(body) {
+  const fields = {}
+  if (body.kind !== undefined) {
+    if (!ACCOUNT_KINDS.includes(body.kind)) return { error: 'Невідомий тип рахунку' }
+    fields.kind = body.kind
+  }
+  if (body.goal_amount !== undefined) {
+    const goal = body.goal_amount === null || body.goal_amount === '' ? null : Number(body.goal_amount)
+    if (goal !== null && !(goal > 0)) return { error: 'Ціль має бути більшою за нуль' }
+    fields.goal_amount = goal === null ? null : Math.round(goal * 100) / 100
+  }
+  if (body.archived !== undefined) fields.archived = !!body.archived
+  return { fields }
+}
+
 app.get('/api/cards', getUserFromToken, async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from('cards')
-      .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, exclude_from_stats, banks(name, iban, bic, beneficiary, exclude_from_stats)')
-      .eq('user_id', req.user_id)
-      .order('created_at', { ascending: false })
+    const { data, error } = await withCardV2(extra =>
+      supabase
+        .from('cards')
+        .select(CARD_COLUMNS + extra)
+        .eq('user_id', req.user_id)
+        .order('created_at', { ascending: false })
+    )
 
     if (error) throw error
 
@@ -382,6 +403,8 @@ app.get('/api/cards', getUserFromToken, async (req, res) => {
 app.post('/api/cards', getUserFromToken, async (req, res) => {
   try {
     const { bank_id, name, currency, bg_url, exclude_from_stats = false, initial_balance, card_number } = req.body
+    const v2 = cardV2Fields(req.body)
+    if (v2.error) return res.status(400).json({ error: v2.error })
 
     // Отримуємо назву банку, якщо bank_id вказано
     let bankName = null
@@ -415,11 +438,14 @@ app.post('/api/cards', getUserFromToken, async (req, res) => {
       user_id: req.user_id
     }
 
-    const { data, error } = await supabase
-      .from('cards')
-      .insert([payload])
-      .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, exclude_from_stats, banks(name, iban, bic, beneficiary, exclude_from_stats)')
-      .single()
+    // Without the new columns yet, the account is still created (its kind is then guessed from the name)
+    const { data, error } = await withCardV2(extra =>
+      supabase
+        .from('cards')
+        .insert([extra ? { ...payload, ...v2.fields } : payload])
+        .select(CARD_COLUMNS + extra)
+        .single()
+    )
 
     if (error) {
       // Supabase/PostgreSQL string length violation
@@ -458,6 +484,12 @@ app.put('/api/cards/:id', getUserFromToken, async (req, res) => {
     // Обчислювані поля з GET — не колонки таблиці
     delete patch.banks
     delete patch.bank_exclude_from_stats
+    const v2 = cardV2Fields(req.body)
+    if (v2.error) return res.status(400).json({ error: v2.error })
+    delete patch.kind
+    delete patch.goal_amount
+    delete patch.archived
+    const changesV2 = Object.keys(v2.fields).length > 0
     if (patch.exclude_from_stats !== undefined) {
       patch.exclude_from_stats = !!patch.exclude_from_stats
     }
@@ -486,14 +518,20 @@ app.put('/api/cards/:id', getUserFromToken, async (req, res) => {
       }
     }
 
-    const { data, error } = await supabase
-      .from('cards')
-      .update(patch)
-      .eq('id', id)
-      .eq('user_id', req.user_id) // Тільки свої картки
-      .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, exclude_from_stats, banks(name, iban, bic, beneficiary, exclude_from_stats)')
-      .single()
+    const { data, error } = await withCardV2(extra => {
+      if (!extra && changesV2) return { data: null, error: { v2Missing: true } }
+      return supabase
+        .from('cards')
+        .update(extra ? { ...patch, ...v2.fields } : patch)
+        .eq('id', id)
+        .eq('user_id', req.user_id) // Тільки свої картки
+        .select(CARD_COLUMNS + extra)
+        .single()
+    })
 
+    if (error?.v2Missing) {
+      return res.status(503).json({ error: 'Тип рахунку, ціль і архів запрацюють, щойно оновиться база даних' })
+    }
     if (error) {
       if (error.code === '22001' || (error.message && error.message.includes('value too long'))) {
         return res.status(400).json({ error: 'Назва картки занадто довга. Скоротіть назву і спробуйте ще раз.' })
@@ -662,23 +700,20 @@ app.get('/api/balance/history', getUserFromToken, async (req, res) => {
     }
 
     // Fetch cards to determine bucket and currency membership
-    const { data: cards, error: cardsError } = await supabase
-      .from('cards')
-      .select('id, name, bank, currency, bank_id, exclude_from_stats')
-      .eq('user_id', userId)
+    const { data: cards, error: cardsError } = await withCardV2(extra =>
+      supabase
+        .from('cards')
+        .select('id, name, bank, currency, bank_id, exclude_from_stats' + extra)
+        .eq('user_id', userId)
+    )
     if (cardsError) throw cardsError
 
     // The history has to end at the balance the apps show: that balance counts every card except
     // those of a bank switched off (a card's own "not in stats" only affects statistics)
     const isCardExcluded = (card) => !!card && !!card.bank_id && excludedBankIds.has(card.bank_id)
 
-    const getBucket = (card) => {
-      if (!card) return 'cash'
-      const full = `${(card.bank || '').toLowerCase()} ${(card.name || '').toLowerCase()}`
-      if (full.includes('збер') || full.includes('savings')) return 'savings'
-      if (full.includes('гот') || full.includes('cash')) return 'cash'
-      return 'cards'
-    }
+    // Same groups as the apps: cards, cash, savings, investments (accountKind.js)
+    const getBucket = cardBucket
 
     const cardMap = new Map((cards || []).map(c => [c.id, c]))
 
@@ -1547,11 +1582,13 @@ app.post('/api/transfers', getUserFromToken, async (req, res) => {
     const ids = [...new Set([fromCardId, toCardId].filter(Boolean))]
     let cards = []
     if (ids.length) {
-      const { data, error } = await supabase
-        .from('cards')
-        .select('id, bank, name, currency')
-        .eq('user_id', req.user_id)
-        .in('id', ids)
+      const { data, error } = await withCardV2(extra =>
+        supabase
+          .from('cards')
+          .select('id, bank, name, currency' + extra)
+          .eq('user_id', req.user_id)
+          .in('id', ids)
+      )
 
       if (error) throw error
       cards = data || []
@@ -1561,11 +1598,7 @@ app.post('/api/transfers', getUserFromToken, async (req, res) => {
     const fromCard = findCard(fromCardId)
     const toCard = findCard(toCardId)
 
-    const isSavings = (c) => ((c?.bank || '').toLowerCase().includes('збер') || (c?.bank || '').toLowerCase().includes('savings'))
-    const fromBucket = fromCard ? (isSavings(fromCard) ? 'savings' : (fromCard.bank && fromCard.bank.toLowerCase().includes('гот') ? 'cash' : 'cards')) : 'cash'
-    const toBucket = toCard ? (isSavings(toCard) ? 'savings' : (toCard.bank && toCard.bank.toLowerCase().includes('гот') ? 'cash' : 'cards')) : 'cash'
-
-    const countAsIncome = (fromBucket === 'savings' && toBucket !== 'savings')
+    const countAsIncome = transferBucket(fromCard) === 'savings' && transferBucket(toCard) !== 'savings'
 
     // Generate transfer ID
     const transferId = crypto.randomUUID()
@@ -1666,11 +1699,13 @@ app.post('/api/transfers/mark-existing', getUserFromToken, async (req, res) => {
     const tgt = a1 < 0 ? t2 : t1
 
     // From savings to a regular account counts as income (same rule as the other transfer routes)
-    const { data: pairCards } = await supabase
-      .from('cards')
-      .select('id, bank, name')
-      .eq('user_id', req.user_id)
-      .in('id', [src.card_id, tgt.card_id].filter(Boolean))
+    const { data: pairCards } = await withCardV2(extra =>
+      supabase
+        .from('cards')
+        .select('id, bank, name' + extra)
+        .eq('user_id', req.user_id)
+        .in('id', [src.card_id, tgt.card_id].filter(Boolean))
+    )
     const cardOf = id => (pairCards || []).find(c => c.id === id) || null
     const countAsIncome = transferBucket(cardOf(src.card_id)) === 'savings' && transferBucket(cardOf(tgt.card_id)) !== 'savings'
 
@@ -1718,14 +1753,8 @@ app.post('/api/transfers/mark-existing', getUserFromToken, async (req, res) => {
   }
 })
 
-// Which bucket a card is in, for count_as_income (same rule as /api/transfers)
-function transferBucket(card) {
-  if (!card) return 'cash'
-  const bank = (card.bank || '').toLowerCase()
-  if (bank.includes('збер') || bank.includes('savings')) return 'savings'
-  if (bank.includes('гот')) return 'cash'
-  return 'cards'
-}
+// Which group a card is in, for count_as_income (money taken out of savings counts as income)
+const transferBucket = cardBucket
 
 // POST /api/transfers/from-existing { txId, cardId, amount, note? }
 // An existing transaction becomes one leg of a transfer; the other leg is created on `cardId`
@@ -1754,11 +1783,13 @@ app.post('/api/transfers/from-existing', getUserFromToken, async (req, res) => {
     if (tx.card_id === cardId) return res.status(400).json({ error: 'Оберіть інший рахунок' })
 
     const ids = [...new Set([tx.card_id, cardId].filter(Boolean))]
-    const { data: cards, error: cardsErr } = await supabase
-      .from('cards')
-      .select('id, bank, name, currency')
-      .eq('user_id', req.user_id)
-      .in('id', ids)
+    const { data: cards, error: cardsErr } = await withCardV2(extra =>
+      supabase
+        .from('cards')
+        .select('id, bank, name, currency' + extra)
+        .eq('user_id', req.user_id)
+        .in('id', ids)
+    )
     if (cardsErr) throw cardsErr
     const other = (cards || []).find(c => c.id === cardId)
     if (!other) return res.status(404).json({ error: 'Рахунок не знайдено' })

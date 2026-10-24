@@ -2,21 +2,24 @@ import { apiFetch } from '../lib/apiFetch'
 import { listCards, Card } from './cards'
 import { sumTransactionsByCard } from './transactions'
 import { supabase } from '../lib/supabase'
-import { getBucket } from '../utils/currency'
+import { getBucket } from '../utils/accountKind'
 
 export interface TotalsBucket {
   [currency: string]: number
 }
 
+/** Balance per group (utils/accountKind BUCKETS) and currency */
 export interface TotalsData {
-  cash: TotalsBucket
   cards: TotalsBucket
   savings: TotalsBucket
+  cash: TotalsBucket
+  investments: TotalsBucket
 }
 
-function emptyOut(): TotalsData {
-  return { cash: {}, cards: {}, savings: {} }
+export function emptyTotals(): TotalsData {
+  return { cards: {}, savings: {}, cash: {}, investments: {} }
 }
+const emptyOut = emptyTotals
 
 export async function fetchTotalsByBucket(): Promise<TotalsData> {
   try {
@@ -68,7 +71,7 @@ export async function fetchTotalsByBucket(): Promise<TotalsData> {
 }
 
 export async function fetchBalanceHistory(params: {
-  bucket?: 'all' | 'cash' | 'cards' | 'savings',
+  bucket?: 'all' | 'cash' | 'cards' | 'savings' | 'investments',
   period?: 'day' | 'week' | 'month' | 'year',
   currency?: string,
   start?: string,

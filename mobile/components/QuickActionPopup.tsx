@@ -78,9 +78,9 @@ export default function QuickActionPopup({
     },
     {
       id: 'goal',
-      icon: '🎯',
-      title: 'Створити ціль / накопичення',
-      desc: 'Відкласти на важливу покупку',
+      icon: '🐷',
+      title: 'Нова скарбничка',
+      desc: 'Відкладати гроші, можна з ціллю',
       onPress: () => {
         onClose()
         onAddGoal()

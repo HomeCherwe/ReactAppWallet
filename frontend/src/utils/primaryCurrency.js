@@ -45,3 +45,19 @@ export function convertAmount(amount, from, to, rates) {
   if (!rate) return null
   return inUAH / rate
 }
+
+/** { EUR: 7250, USD: 3800 } as one number in `to` (0 for a currency whose rate isn't loaded) */
+export function sumIn(byCurrency, to, rates) {
+  return Object.entries(byCurrency || {}).reduce(
+    (sum, [cur, amount]) => sum + (convertAmount(Number(amount) || 0, cur, to, rates) ?? 0),
+    0
+  )
+}
+
+/** The other two of UAH / EUR / USD next to a total in the main currency, like the iPhone app */
+export function equivalentCurrencies(primary) {
+  if (primary === 'UAH') return ['EUR', 'USD']
+  if (primary === 'EUR') return ['UAH', 'USD']
+  if (primary === 'USD') return ['UAH', 'EUR']
+  return ['UAH', 'EUR']
+}

@@ -106,9 +106,9 @@ export default function BalanceHistoryModal({
   }, [visible, bucket, period, activeCurrency, dateRange])
 
   // The balance Home shows for this section: every currency in it, in the chosen one.
-  // (totals is { cash, cards, savings } → currency → amount)
+  // (totals is { cards, savings, cash, investments } → currency → amount)
   const currentBalance = useMemo(() => {
-    const sections = bucket === 'all' ? [totals.cash, totals.cards, totals.savings] : [totals[bucket]]
+    const sections = bucket === 'all' ? Object.values(totals) : [totals[bucket]]
     let sum = 0
     for (const section of sections) {
       for (const [cur, amount] of Object.entries(section || {})) {
