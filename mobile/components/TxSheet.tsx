@@ -26,6 +26,7 @@ import DateTimeField from './DateTimeField'
 import { GlassPressable } from './LiquidGlass'
 import Icon from './Icon'
 import { fmtMoney } from './TxRow'
+import { cardLabel } from '../utils/cardLabel'
 
 interface Props {
   tx: Transaction | null
@@ -269,7 +270,7 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
                     <View style={[styles.legRow, leg.id === t.id && styles.legRowThis]}>
                       <Text style={styles.legDir}>{legAmount < 0 ? 'З' : 'На'}</Text>
                       <Text style={styles.legCard} numberOfLines={1}>
-                        {legCard ? legCard.name : leg.card_id ? 'Рахунок' : 'Готівка'}
+                        {legCard ? cardLabel(legCard) : leg.card_id ? 'Рахунок' : 'Готівка'}
                         {leg.id === t.id ? <Text style={styles.legThisMark}>  · ця</Text> : null}
                       </Text>
                       <Text style={styles.legAmount}>

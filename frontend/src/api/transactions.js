@@ -5,7 +5,7 @@ import { apiFetch } from '../utils.jsx'
 // Forward declaration для invalidateCategoriesCache
 let invalidateCategoriesCacheFn = null
 
-export async function listTransactions({ from = 0, to = 9, search = '', transactionType = 'all', category = '', categoryIn = [], hasPinnedTag = false, excludeUsdt = false, isDebt = undefined } = {}) {
+export async function listTransactions({ from = 0, to = 9, search = '', transactionType = 'all', category = '', categoryIn = [], hasPinnedTag = false, excludeUsdt = false, isDebt = undefined, excludeTransfers = false } = {}) {
   const params = new URLSearchParams({
     from: from.toString(),
     to: to.toString(),
@@ -15,7 +15,8 @@ export async function listTransactions({ from = 0, to = 9, search = '', transact
     ...(categoryIn && categoryIn.length > 0 && { category_in: categoryIn.join(',') }),
     ...(hasPinnedTag && { has_pinned_tag: 'true' }),
     ...(excludeUsdt && { exclude_usdt: 'true' }),
-    ...(typeof isDebt === 'boolean' ? { is_debt: isDebt ? 'true' : 'false' } : {})
+    ...(typeof isDebt === 'boolean' ? { is_debt: isDebt ? 'true' : 'false' } : {}),
+    ...(excludeTransfers && { exclude_transfers: 'true' })
   })
 
   return await apiFetch(`/api/transactions?${params}`)
@@ -45,7 +46,8 @@ const timeZone = (() => {
 /**
  * Server-side search (SQL function search_transactions, same as the iPhone app): words over
  * merchant, note, category, card, address, amount ("250"), date ("12.09"), month ("вересень"),
- * plus period / card / category / type filters. No archived rows; transfers included like this list.
+ * plus period / card / category / type filters. No archived rows; transfers included like the list
+ * («Всі» only — a transfer is neither spending nor income).
  */
 export async function searchTransactions({
   offset = 0,
@@ -57,6 +59,7 @@ export async function searchTransactions({
   categories = [],
   transactionType = 'all',
   excludeCardIds = [],
+  includeTransfers = true,
 } = {}) {
   const { data, error } = await supabase.rpc('search_transactions', {
     p_query: query.trim() || null,
@@ -69,7 +72,7 @@ export async function searchTransactions({
     p_tz: timeZone,
     p_limit: limit,
     p_offset: offset,
-    p_include_transfers: true,
+    p_include_transfers: includeTransfers,
   })
   if (error) throw error
   return data || []

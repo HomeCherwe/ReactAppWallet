@@ -7,6 +7,8 @@ import {
 } from 'lucide-react'
 import { listTransactionsByCard } from '../../api/transactions'
 import { listCards } from '../../api/cards'
+import { groupTransferLegs, listTransferLegs } from '../../api/transfers'
+import { useCardLabeler } from '../../store/useCardsStore'
 import useMonoRates from '../../hooks/useMonoRates'
 import { usePreferences } from '../../context/PreferencesContext'
 import { updatePreferencesSection } from '../../api/preferences'
@@ -188,6 +190,24 @@ export default function CardTransactionsDrawer({ card, onClose, onOpenSettings, 
   const txsRef = useRef([])
 
   useEffect(() => { txsRef.current = txs }, [txs])
+
+  // The other legs of this card's transfers (by transfer_id), for «⇄ на / з …» (like the iPhone app)
+  const [transferLegs, setTransferLegs] = useState({})
+  const labelOf = useCardLabeler()
+  useEffect(() => {
+    const ids = [...new Set(txs.filter(t => t.is_transfer && t.transfer_id && !transferLegs[t.transfer_id]).map(t => t.transfer_id))]
+    if (ids.length === 0) return
+    let alive = true
+    listTransferLegs(ids)
+      .then(legs => alive && setTransferLegs(prev => ({ ...prev, ...groupTransferLegs(legs) })))
+      .catch(() => {})
+    return () => { alive = false }
+  }, [txs])
+  const otherAccount = (t) => {
+    const other = (t.transfer_id ? transferLegs[t.transfer_id] || [] : []).find(l => l.id !== t.id)
+    if (!other) return undefined
+    return other.card_id ? labelOf(other) || 'інший рахунок' : 'Готівка'
+  }
 
   const loadPage = useCallback(async ({ append = false } = {}) => {
     if (!card?.id) return
@@ -630,6 +650,7 @@ export default function CardTransactionsDrawer({ card, onClose, onOpenSettings, 
                           tx={tx}
                           currency={cardMap[tx.card_id] || cur}
                           compact
+                          transferWith={tx.is_transfer ? otherAccount(tx) : undefined}
                         />
                       ))}
                     </div>

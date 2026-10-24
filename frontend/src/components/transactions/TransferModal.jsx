@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
-import { createTransfer, markExistingAsTransfer } from '../../api/transfers'
+import { canBeTransfer, createTransfer, markExistingAsTransfer } from '../../api/transfers'
 import { txBus } from '../../utils/txBus'
 import BaseModal from '../BaseModal'
 import { listCards } from '../../api/cards'
 import { apiFetch } from '../../utils.jsx'
 import { useSettingsStore } from '../../store/useSettingsStore'
+import { cardLabel } from '../../utils/cardLabel'
+
+// "YYYY-MM-DDTHH:mm" in local time, for <input type="datetime-local">
+function toLocalInput(d) {
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+}
 
 export default function TransferModal({ open, onClose, onDone }) {
   const settings = useSettingsStore((state) => state.settings)
@@ -26,6 +32,9 @@ export default function TransferModal({ open, onClose, onDone }) {
   const [toTxId, setToTxId] = useState('')
   const [fromOpen, setFromOpen] = useState(false)
   const [toOpen, setToOpen] = useState(false)
+  // When it happened (like the iPhone app); untouched, the transfer gets the moment it's saved
+  const [date, setDate] = useState(() => toLocalInput(new Date()))
+  const [dateTouched, setDateTouched] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -37,15 +46,17 @@ export default function TransferModal({ open, onClose, onDone }) {
       try {
         const excludeUsdtParam = !showUsdt ? '&exclude_usdt=true' : ''
         const txs = await apiFetch(
-          `/api/transactions?limit=200&fields=id,amount,card,card_id,created_at,note&order_by=created_at&order_asc=false${excludeUsdtParam}`
+          `/api/transactions?limit=200&fields=id,amount,card,card_id,created_at,note,is_transfer,transfer_id,refund_for,is_debt,status&order_by=created_at&order_asc=false${excludeUsdtParam}`
         ) || []
-      const opts = (txs || []).map(t => {
+      // Only plain booked transactions can become a transfer (no transfers, refunds, debts or «в обробці»)
+      const opts = (txs || []).filter(canBeTransfer).map(t => {
         const amt = Number(t.amount || 0)
         return {
           id: t.id,
+          cardId: t.card_id || null,
           amount: amt,
           sign: amt === 0 ? 0 : (amt > 0 ? 1 : -1),
-          label: `${new Date(t.created_at).toLocaleDateString('uk-UA')} · ${t.card || '—'} · ${amt > 0 ? '+' : ''}${amt.toFixed(2)}${t.note ? ` (${t.note})` : ''}`
+          label: `${new Date(t.created_at).toLocaleDateString('uk-UA')} · ${cardLabel((cards || []).find(c => c.id === t.card_id)) || t.card || '—'} · ${amt > 0 ? '+' : ''}${amt.toFixed(2)}${t.note ? ` (${t.note})` : ''}`
         }
       })
         setTxOptions(opts)
@@ -67,8 +78,17 @@ export default function TransferModal({ open, onClose, onDone }) {
       setNote('')
       setFromTxId('')
       setToTxId('')
+    } else {
+      // A fresh "now" each time the window opens
+      setDate(toLocalInput(new Date()))
+      setDateTouched(false)
     }
   }, [open])
+
+  // A typed amount for another currency never carries over to other cards
+  useEffect(() => {
+    setAmountTo('')
+  }, [from, to])
 
   const fromCard = cards.find(c => String(c.id) === String(from))
   const toCard = cards.find(c => String(c.id) === String(to))
@@ -79,6 +99,9 @@ export default function TransferModal({ open, onClose, onDone }) {
     setFromOpen(false); setToOpen(false)
     // If both existing tx selected -> mark them as transfer
     if (fromTxId && toTxId) {
+      const fromOpt = fromOptions.find(o => o.id === fromTxId)
+      const toOpt = toOptions.find(o => o.id === toTxId)
+      if (fromOpt && toOpt && fromOpt.cardId === toOpt.cardId) return alert('Обидві транзакції на одному рахунку — оберіть з різних')
       setSaving(true)
       try {
         const res = await markExistingAsTransfer({ fromTxId, toTxId, note })
@@ -103,10 +126,14 @@ export default function TransferModal({ open, onClose, onDone }) {
     const a = Number(amount || 0)
     if (!a || a <= 0) return alert('Введіть суму > 0')
     if (from === to) return alert('Оберіть різні рахунки')
+    const toAmt = differentCurrency ? Number(amountTo || 0) : null
+    if (differentCurrency && !(toAmt > 0)) return alert(`Вкажіть суму зарахування в ${toCard?.currency}`)
+    const when = dateTouched && date ? new Date(date) : new Date()
+    if (Number.isNaN(when.getTime())) return alert('Невірна дата')
 
     setSaving(true)
     try {
-      const res = await createTransfer({ fromCardId: from || null, toCardId: to || null, amount: a, amountTo: differentCurrency ? Number(amountTo || 0) : null, note })
+      const res = await createTransfer({ fromCardId: from || null, toCardId: to || null, amount: a, amountTo: toAmt, note, createdAt: when.toISOString() })
       // emit events for UI refresh
       try {
         const src = res.find(r => r.transfer_role === 'from')
@@ -153,6 +180,16 @@ export default function TransferModal({ open, onClose, onDone }) {
                   </motion.div>
                 )}
               </AnimatePresence>
+
+              <label className="grid gap-1">
+                <span className="text-[11px] text-white/55">Дата і час</span>
+                <input
+                  type="datetime-local"
+                  className="border rounded px-3 py-2"
+                  value={date}
+                  onChange={e => { setDate(e.target.value); setDateTouched(true) }}
+                />
+              </label>
 
               <input className="border rounded px-3 py-2" placeholder="Нотатка" value={note} onChange={e=>setNote(e.target.value)} />
 

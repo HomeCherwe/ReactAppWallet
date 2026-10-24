@@ -1,10 +1,11 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { fmtDate, fmtAmount } from '../../utils/format'
-import { Trash2, RotateCcw, Link2Off, Check } from 'lucide-react'
+import { Trash2, RotateCcw, Link2Off, Check, Plus } from 'lucide-react'
 
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { getCategoryVisual } from '../../utils/categoryIcon'
+import { useCardLabeler } from '../../store/useCardsStore'
 
 /** Not settled at the bank yet (TrueLayer banks) — same pill as the iPhone app */
 function PendingBadge() {
@@ -76,13 +77,28 @@ export default function Row({
   swipeActions = false,
   showEditButton = true,
   onAcceptSuggestion,
+  // A transfer leg: the other leg's account, shown as «⇄ на / з …»
+  transferWith,
+  // A nested transfer leg: unlink / undo the transfer (like a nested refund's button)
+  onUnlinkTransfer,
+  // Refund picking (like the iPhone app): 'pickable' incomes jiggle with «Обрати», the expense is
+  // the 'target' («Повертаємо»), everything else is 'dimmed'
+  mode = 'normal',
+  // Alternate jiggle direction per row so the list doesn't sway as one block
+  wiggleDir = 1,
 }) {
   const hideAllBalances = useSettingsStore(state => state.settings.hideAllBalances ?? false)
+  const labelOf = useCardLabeler()
   const isExp = Number(tx.amount) < 0
   const pending = tx.status === 'pending'
   const autoCategory = tx.category_source === 'auto'
   const suggestion = !!onAcceptSuggestion && !!tx.suggested_category && isSyncCategory(tx.category)
-  const amountColor = pending ? 'text-white/45' : isExp ? '' : 'text-green-400'
+  // A transfer between the user's own accounts: neither spending nor income
+  const isTransfer = !!tx.is_transfer
+  const title = isTransfer && (!tx.category || tx.category === 'ТРАНСФЕР') ? 'Переказ' : tx.category || 'Без категорії'
+  const outgoing = tx.transfer_role ? tx.transfer_role === 'from' : isExp
+  const transferMeta = isTransfer ? `⇄ ${outgoing ? 'на' : 'з'} ${transferWith ? `«${transferWith}»` : 'інший рахунок'}` : null
+  const amountColor = pending ? 'text-white/45' : isTransfer ? 'text-white/80' : isExp ? '' : 'text-green-400'
   const pad = compact ? 'p-2' : 'p-3'
   const round = compact ? 'rounded-xl' : 'rounded-2xl'
   const titleText = compact ? 'text-[13px]' : 'text-[15px]'
@@ -107,6 +123,11 @@ export default function Row({
   const [wasDragged, setWasDragged] = useState(false)
   const rowRef = useRef(null)
 
+  // Swiping turned off (e.g. refund picking started): an open row closes
+  useEffect(() => {
+    if (!swipeEnabled) setSwipeOpen(false)
+  }, [swipeEnabled])
+
   // Close swipe when clicking outside
   useEffect(() => {
     if (!swipeEnabled || !swipeOpen) return
@@ -128,8 +149,28 @@ export default function Row({
     }
   }, [swipeEnabled, swipeOpen])
 
-  const bg = 'bg-white/[0.035]'
-  const hover = 'hover:bg-white/[0.07]'
+  const bg =
+    mode === 'pickable'
+      ? 'bg-[#15201A]'
+      : mode === 'target'
+        ? 'bg-[#2A1709] border-l-[3px] border-brand'
+        : 'bg-white/[0.035]'
+  const hover = mode === 'pickable' ? 'hover:bg-[#1B2C22]' : mode === 'target' ? '' : 'hover:bg-white/[0.07]'
+  // Refund picking: the outer box jiggles (pickable) or fades (dimmed)
+  const pickBox = `${mode === 'pickable' ? (wiggleDir === 1 ? 'tx-wiggle' : 'tx-wiggle-rev') : ''} transition-opacity duration-200`
+  const pickStyle = mode === 'dimmed' ? { opacity: 0.28 } : undefined
+  const pickPill =
+    mode === 'pickable' ? (
+      <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-[#22C55E] text-[#0B2E17] text-[11px] font-extrabold whitespace-nowrap">
+        <Plus size={11} strokeWidth={3.2} />
+        Обрати
+      </span>
+    ) : mode === 'target' ? (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-brand text-white text-[11px] font-extrabold whitespace-nowrap">
+        <RotateCcw size={11} strokeWidth={2.8} />
+        Повертаємо
+      </span>
+    ) : null
 
   const onRowClick = () => {
     if (wasDragged) {
@@ -168,22 +209,13 @@ export default function Row({
         <CategoryIcon tx={tx} compact={compact} />
         <div className="min-w-0">
           <div className={`font-semibold ${titleText} flex items-center gap-2 ${pending ? 'text-white/60' : ''}`}>
-            {tx.category || 'Без категорії'}
+            {title}
             {autoCategory && <AutoBadge />}
             {pending && <PendingBadge />}
-            {tx.is_transfer && (
-              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-brand/10 text-brand-light border border-brand/[0.12]">
-                ⇄ Переказ
-              </span>
-            )}
           </div>
           <div className={`${metaText} text-white/55`}>
-            {[tx.card].filter(Boolean).join(' · ') || '—'} · {fmtDate(tx.created_at)}
-            {tx.is_transfer && tx.transfer_role && (
-              <span className="ml-1.5 text-brand/85 font-medium">
-                ({tx.transfer_role === 'from' ? 'відправлено' : 'отримано'})
-              </span>
-            )}
+            {labelOf(tx) || '—'} · {fmtDate(tx.created_at)}
+            {transferMeta && <span className="ml-1.5 text-[#8AB4FF] font-semibold">{transferMeta}</span>}
             {noteSnippet && (
               <span
                 className="ml-2 text-brand inline-block align-bottom max-w-[220px] truncate"
@@ -208,10 +240,14 @@ export default function Row({
                 {hideAllBalances ? '***' : `${Number(amountOverride.secondaryAmount) > 0 ? '+' : ''}${fmtAmount(amountOverride.secondaryAmount, amountOverride.currency || currency)}`}
               </div>
             )}
+            {pickPill && <div className="mt-1">{pickPill}</div>}
           </div>
         ) : (
-          <div className={`font-semibold ${titleText} ${amountColor}`}>
-            {hideAllBalances ? '***' : `${!isExp ? '+' : ''}${fmtAmount(tx.amount, currency)}`}
+          <div className="flex flex-col items-end gap-1">
+            <div className={`font-semibold ${titleText} ${amountColor}`}>
+              {hideAllBalances ? '***' : `${!isExp ? '+' : ''}${fmtAmount(tx.amount, currency)}`}
+            </div>
+            {pickPill}
           </div>
         )}
 
@@ -224,6 +260,19 @@ export default function Row({
             }}
             className={`${btn} rounded-full bg-white/[0.07] hover:bg-white/15 grid place-items-center text-white/85`}
             title="Скасувати повернення"
+          >
+            <Link2Off size={icon} />
+          </button>
+        )}
+
+        {onUnlinkTransfer && isTransfer && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onUnlinkTransfer(tx)
+            }}
+            className={`${btn} rounded-full bg-white/[0.07] hover:bg-white/15 grid place-items-center text-white/85`}
+            title="Скасувати переказ"
           >
             <Link2Off size={icon} />
           </button>
@@ -296,12 +345,13 @@ export default function Row({
         <CategoryIcon tx={tx} compact={compact} />
         <div className="min-w-0">
           <div className={`font-semibold ${titleText} flex items-center gap-2 ${pending ? 'text-white/60' : ''}`}>
-            {tx.category || 'Без категорії'}
+            {title}
             {autoCategory && <AutoBadge />}
             {pending && <PendingBadge />}
           </div>
           <div className={`${metaText} text-white/55`}>
-            {[tx.card].filter(Boolean).join(' · ') || '—'} · {fmtDate(tx.created_at)}
+            {labelOf(tx) || '—'} · {fmtDate(tx.created_at)}
+            {transferMeta && <span className="ml-1.5 text-[#8AB4FF] font-semibold">{transferMeta}</span>}
             {noteSnippet && (
               <span
                 className="ml-2 text-brand inline-block align-bottom max-w-[220px] truncate"
@@ -319,17 +369,21 @@ export default function Row({
         {amountOverride ? (
           <div className="flex flex-col items-end leading-tight">
             <div className={`font-semibold ${titleText} ${Number(amountOverride.primaryAmount) < 0 ? '' : 'text-green-400'}`}>
-              {Number(amountOverride.primaryAmount) > 0 ? '+' : ''}{fmtAmount(amountOverride.primaryAmount, amountOverride.currency || currency)}
+              {hideAllBalances ? '***' : `${Number(amountOverride.primaryAmount) > 0 ? '+' : ''}${fmtAmount(amountOverride.primaryAmount, amountOverride.currency || currency)}`}
             </div>
             {amountOverride.secondaryAmount != null && (
               <div className={`${metaText} text-white/55`}>
-                {Number(amountOverride.secondaryAmount) > 0 ? '+' : ''}{fmtAmount(amountOverride.secondaryAmount, amountOverride.currency || currency)}
+                {hideAllBalances ? '***' : `${Number(amountOverride.secondaryAmount) > 0 ? '+' : ''}${fmtAmount(amountOverride.secondaryAmount, amountOverride.currency || currency)}`}
               </div>
             )}
+            {pickPill && <div className="mt-1">{pickPill}</div>}
           </div>
         ) : (
-          <div className={`font-semibold ${titleText} ${amountColor}`}>
-            {!isExp ? '+' : ''}{fmtAmount(tx.amount, currency)}
+          <div className="flex flex-col items-end gap-1">
+            <div className={`font-semibold ${titleText} ${amountColor}`}>
+              {hideAllBalances ? '***' : `${!isExp ? '+' : ''}${fmtAmount(tx.amount, currency)}`}
+            </div>
+            {pickPill}
           </div>
         )}
 
@@ -342,6 +396,19 @@ export default function Row({
             }}
             className={`${btn} rounded-full bg-white/[0.07] hover:bg-white/15 grid place-items-center text-white/85`}
             title="Скасувати повернення"
+          >
+            <Link2Off size={icon} />
+          </button>
+        )}
+
+        {onUnlinkTransfer && isTransfer && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onUnlinkTransfer(tx)
+            }}
+            className={`${btn} rounded-full bg-white/[0.07] hover:bg-white/15 grid place-items-center text-white/85`}
+            title="Скасувати переказ"
           >
             <Link2Off size={icon} />
           </button>
@@ -393,14 +460,14 @@ export default function Row({
 
   if (!swipeEnabled) {
     return (
-      <div className={`${round} ${selected ? 'ring-2 ring-brand' : ''} ${className}`}>
+      <div className={`${round} ${selected ? 'ring-2 ring-brand' : ''} ${pickBox} ${className}`} style={pickStyle}>
         {inner}
       </div>
     )
   }
 
   return (
-    <div ref={rowRef} className={`relative ${round} overflow-hidden ${selected ? 'ring-2 ring-brand' : ''} ${className}`}>
+    <div ref={rowRef} className={`relative ${round} overflow-hidden ${selected ? 'ring-2 ring-brand' : ''} ${pickBox} ${className}`} style={pickStyle}>
       <div className="absolute inset-y-0 right-0 flex items-stretch z-0">
         {onRefund && (
           <button

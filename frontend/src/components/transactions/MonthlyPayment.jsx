@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
-import { X, Trash2, AlertTriangle, Landmark, ChevronDown, ChevronUp , Pin, Search } from 'lucide-react'
+import { X, Trash2, AlertTriangle, Landmark, ChevronDown, ChevronUp , Pin, Search, ArrowLeftRight } from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
 import ConfirmModal from '../ConfirmModal'
 import DeleteTxModal from './DeleteTxModal'
@@ -9,6 +9,10 @@ import Row from './Row'
 import DetailsModal from './DetailsModal'
 import EditTxModal from './EditTxModal'
 import SplitTxModal from './SplitTxModal'
+import UnlinkTransferModal from './UnlinkTransferModal'
+import RefundPickBar from './RefundPickBar'
+import TransferFromTxModal from './TransferFromTxModal'
+import { canBeTransfer, groupTransferLegs, listTransferLegs, markExistingAsTransfer } from '../../api/transfers'
 import { apiFetch, getApiUrl } from '../../utils.jsx'
 import { listTransactions, searchTransactions, updateTransaction, deleteTransaction, archiveTransaction, deleteTransactions, getTransactionCategories } from '../../api/transactions'
 import { PERIODS, periodRange } from '../../utils/periods'
@@ -23,6 +27,7 @@ import { acceptSuggestions, autoCategorize } from '../../api/insights'
 import { listCards } from '../../api/cards'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { fmtAmount } from '../../utils/format'
+import { cardLabel } from '../../utils/cardLabel'
 import useMonoRates from '../../hooks/useMonoRates'
 
 const TYPE_FILTERS = [
@@ -132,6 +137,15 @@ export default function MonthlyPayment() {
 
   // Refund-linking mode: click refund on expense -> then click income tx to attach as refund
   const [refundPickExpenseId, setRefundPickExpenseId] = useState(null)
+  const refundPickTxRef = useRef(null) // the expense as it was when picking started (for the bar)
+  const [linkingRefund, setLinkingRefund] = useState(false)
+
+  // Transfers (same as the iPhone app): both legs of the loaded transfers by transfer_id — the list
+  // shows the first leg with the other nested under it, like a refund under its expense
+  const [transferLegs, setTransferLegs] = useState({})
+  const [unlinkTx, setUnlinkTx] = useState(null) // «Скасувати переказ»
+  const [transferFor, setTransferFor] = useState(null) // «Зробити переказом»
+  const [pairBusy, setPairBusy] = useState(false)
 
   const listRef = useRef(null)
   const saveFiltersTimeoutRef = useRef(null)
@@ -195,15 +209,49 @@ export default function MonthlyPayment() {
   // Hide refund transactions from the top-level list when their parent expense is already present,
   // so they appear only as nested items (no duplicates). If parent isn't loaded yet (pagination),
   // keep refund visible so user can still see it.
+  // A transfer shows once: its first leg in the list, the other nested under it.
   const rawVisibleRows = useMemo(() => {
     const all = rows || []
     const ids = new Set(all.map(t => t?.id).filter(Boolean))
+    const shownTransfers = new Set()
     return all.filter((t) => {
       const parentId = getRefundParentId(t)
-      if (!parentId) return true
-      return !ids.has(parentId)
+      if (parentId && ids.has(parentId)) return false
+      if (t?.is_transfer && t.transfer_id) {
+        if (shownTransfers.has(t.transfer_id)) return false
+        shownTransfers.add(t.transfer_id)
+      }
+      return true
     })
   }, [rows])
+
+  // transfer_id → its legs: the ones fetched with the page, refreshed by what the list holds now
+  const legsByTransfer = useMemo(() => {
+    const map = {}
+    const put = (l) => {
+      if (!l?.transfer_id) return
+      const list = (map[l.transfer_id] ||= [])
+      const i = list.findIndex(x => x.id === l.id)
+      if (i >= 0) list[i] = l
+      else list.push(l)
+    }
+    for (const id of Object.keys(transferLegs)) for (const l of transferLegs[id]) put(l)
+    for (const r of rows || []) if (r?.is_transfer) put(r)
+    // A leg the list now has as an ordinary transaction (unlinked) is no longer part of it
+    const unlinked = new Set((rows || []).filter(r => r && !r.is_transfer).map(r => r.id))
+    for (const id of Object.keys(map)) {
+      map[id] = map[id]
+        .filter(l => !unlinked.has(l.id))
+        .sort((a, b) => (a.transfer_role === 'from' ? -1 : 0) - (b.transfer_role === 'from' ? -1 : 0))
+    }
+    return map
+  }, [transferLegs, rows])
+
+  // The other legs of a transfer, and the account a leg's money went to / came from
+  const partnersOf = (tx) =>
+    tx?.is_transfer && tx.transfer_id ? (legsByTransfer[tx.transfer_id] || []).filter(l => l.id !== tx.id) : []
+  const accountName = (t) =>
+    !t ? undefined : t.card_id ? (cardLabel(cardList.find(c => c.id === t.card_id)) || t.card || 'рахунок') : 'Готівка'
 
   const pinnedCategories = Array.isArray(settings?.dashboard?.pinnedCategories) 
     ? settings.dashboard.pinnedCategories 
@@ -329,8 +377,10 @@ export default function MonthlyPayment() {
               categories: category ? [category] : [],
               transactionType: txType,
               excludeCardIds: usdtCardIds,
+              // A transfer is neither spending nor income: only «Всі» shows it (like the iPhone app)
+              includeTransfers: txType === 'all',
             })
-          : listTransactions({ from, to, transactionType: txType, category, excludeUsdt: !showUsdt }),
+          : listTransactions({ from, to, transactionType: txType, category, excludeUsdt: !showUsdt, excludeTransfers: txType !== 'all' }),
         user ? listCards() : []
       ])
     } catch (e) {
@@ -351,6 +401,18 @@ export default function MonthlyPayment() {
     cards.forEach(c => { map[c.id] = c.currency || 'EUR' })
     setCardMap(map)
     setCardList(cards)
+
+    // Both legs of the page's transfers, whatever card or page the other one is on
+    const legsPromise = (async () => {
+      const transferIds = (txs || []).filter(t => t?.is_transfer && t?.transfer_id).map(t => t.transfer_id)
+      if (transferIds.length === 0) return {}
+      try {
+        return groupTransferLegs(await listTransferLegs(transferIds))
+      } catch (e) {
+        console.error('Failed to load transfer legs:', e)
+        return {}
+      }
+    })()
 
     // Always fetch linked refund children for loaded expense parents so nested refunds survive refresh
     // even when filters are not strictly "expense".
@@ -400,11 +462,13 @@ export default function MonthlyPayment() {
       }
     }
 
+    const legsMap = await legsPromise
     if (stale()) {
       if (append) setLoadingMore(false)
       return
     }
     const mergedTxs = dedupeById([...(txs || []), ...(refundChildren || [])])
+    setTransferLegs(prev => (append ? { ...prev, ...legsMap } : legsMap))
 
     if (append) {
       setRows(prev => {
@@ -530,6 +594,7 @@ export default function MonthlyPayment() {
       const cur = cardMap?.[tx.card_id]
       if (String(cur || '').toUpperCase() === 'USDT') return false
     }
+    if (transactionType !== 'all' && tx.is_transfer) return false
     if (transactionType === 'expense' && !(Number(tx.amount || 0) < 0)) return false
     if (transactionType === 'income' && !(Number(tx.amount || 0) > 0)) return false
     if (selectedCategory && String(tx.category || '') !== String(selectedCategory)) return false
@@ -594,6 +659,17 @@ export default function MonthlyPayment() {
       if (type === 'DELETE' && tx) {
         setRows(prev => (prev || []).filter(r => r?.id !== tx.id))
         setPinnedRows(prev => (prev || []).filter(r => r?.id !== tx.id))
+        // A deleted or archived transfer leg is no longer the other leg of its pair
+        setTransferLegs(prev => {
+          let changed = false
+          const next = {}
+          for (const [k, ls] of Object.entries(prev)) {
+            const kept = ls.filter(l => l.id !== tx.id)
+            if (kept.length !== ls.length) changed = true
+            next[k] = kept
+          }
+          return changed ? next : prev
+        })
         return
       }
 
@@ -811,33 +887,61 @@ export default function MonthlyPayment() {
   const sortedDays = groupTransactionsByDay(regularTxs)
   const pinnedSortedDays = groupTransactionsByDay(pinnedTxs)
 
+  // ---- Refund picking (same as the iPhone app): swipe an expense → «Повернення» → the incomes that
+  // can be its refund jiggle with «Обрати», the expense says «Повертаємо», the rest fades ----
+  const canBeRefund = (t) => Number(t?.amount || 0) > 0 && !getRefundParentId(t) && !t?.is_transfer && !t?.archives
+  const modeFor = (t) => {
+    if (!refundPickExpenseId) return 'normal'
+    if (t?.id === refundPickExpenseId) return 'target'
+    return canBeRefund(t) ? 'pickable' : 'dimmed'
+  }
+  const refundPickExpense = refundPickExpenseId
+    ? (rows || []).find(t => t?.id === refundPickExpenseId) ||
+      (pinnedRows || []).find(t => t?.id === refundPickExpenseId) ||
+      refundPickTxRef.current
+    : null
+
   const startRefund = (tx) => {
     if (!tx) return
-    const amt = Number(tx.amount || 0)
-    if (amt >= 0) {
-      toast('Повернення можна прив’язати тільки до витрати (мінус)', { duration: 3500 })
+    if (tx.is_transfer) {
+      toast('Переказ не може мати повернення — оберіть звичайну витрату', { duration: 3500 })
       return
     }
-    setRefundPickExpenseId(tx.id)
-    toast('Режим повернення: клікни по ДОХІДНІЙ транзакції, яка є поверненням. Esc — скасувати.', { duration: 6000 })
+    const amt = Number(tx.amount || 0)
+    if (amt >= 0) {
+      toast('Повернення — тільки для витрат: потягніть уліво витрату (−), а потім оберіть дохід, яким її повернули', { duration: 4500 })
+      return
+    }
+    refundPickTxRef.current = tx
+    // The swipe closes first, then the incomes start to jiggle
+    setTimeout(() => setRefundPickExpenseId(tx.id), 180)
   }
 
   const pickRefundTx = async (refundTx) => {
     const expenseId = refundPickExpenseId
-    if (!expenseId || !refundTx) return
+    if (!expenseId || !refundTx || linkingRefund) return
+    if (refundTx.id === expenseId) return
 
-    const amt = Number(refundTx.amount || 0)
-    if (amt <= 0) {
-      toast('Вибери дохідну транзакцію (плюс), яка є поверненням', { duration: 3500 })
+    if (!canBeRefund(refundTx)) {
+      toast.error(
+        getRefundParentId(refundTx)
+          ? 'Це вже повернення іншої витрати — спершу скасуйте його'
+          : 'Оберіть дохід (+): повернення — це гроші, що прийшли назад від магазину, сервісу чи друга',
+        { duration: 4000 }
+      )
       return
     }
-
+    setLinkingRefund(true)
     try {
-      // 1) Mark refund tx as excluded from any stats
+      // 1) The income becomes the refund; the backend recomputes the expense's amount_stat itself
       await updateTransaction(refundTx.id, { refund_for: expenseId, exclude_from_stats: true, count_as_income: false, category: 'ПОВЕРНЕННЯ' })
 
-      // 2) Recompute and persist parent amount_stat = amount + sum(refunds)
-      const parent = (rowsRef.current || []).find(t => t?.id === expenseId) || null
+      // 2) The same sum here, for the list and the message. The expense may live only in the pinned
+      // block, or a search may have filtered it out while picking: then the one picking started with
+      const parent = (rowsRef.current || []).find(t => t?.id === expenseId)
+        || (pinnedRows || []).find(t => t?.id === expenseId)
+        || refundPickTxRef.current
+        || null
       const baseAmount = Number(parent?.amount || 0)
 
       const params = new URLSearchParams({
@@ -853,18 +957,28 @@ export default function MonthlyPayment() {
         return s + a
       }, 0)
       const newAmountStat = baseAmount + sumRefunds
-      await updateTransaction(expenseId, { amount_stat: newAmountStat, exclude_from_stats: false })
 
-      setRows(prev => (prev || []).map(r => {
+      const patchRow = r => {
         if (r.id === refundTx.id) return { ...r, refund_for: expenseId, exclude_from_stats: true, count_as_income: false, category: 'ПОВЕРНЕННЯ' }
-        if (r.id === expenseId) return { ...r, amount_stat: newAmountStat, exclude_from_stats: false }
+        if (r.id === expenseId) return { ...r, amount_stat: newAmountStat }
         return r
-      }))
-      toast.success('Повернення прив’язано')
+      }
+      setRows(prev => (prev || []).map(patchRow))
+      setPinnedRows(prev => (prev || []).map(patchRow))
+      const expenseCurrency = parent?.currency || cardMap[parent?.card_id] || undefined
+      // What's left of the expense after all its refunds (earlier ones too)
+      const left = -newAmountStat
+      toast.success(
+        left > 0.005
+          ? `Повернення прив’язано: «${parent?.category || 'витрата'}» у статистиці тепер −${fmtAmount(left, expenseCurrency)}`
+          : `Повернення прив’язано: «${parent?.category || 'витрата'}» повністю повернено`
+      )
       setRefundPickExpenseId(null)
     } catch (e) {
       console.error('Failed to link refund transaction:', e)
       toast.error('Не вдалося прив’язати повернення')
+    } finally {
+      setLinkingRefund(false)
     }
   }
 
@@ -879,9 +993,11 @@ export default function MonthlyPayment() {
 
       const updated = { ...refundTx, ...payload }
 
-      // Recompute parent amount_stat after unlink
+      // The backend recomputed the expense's amount_stat; the same sum here for the list
       if (parentId) {
-        const parent = (rowsRef.current || []).find(t => t?.id === parentId) || null
+        const parent = (rowsRef.current || []).find(t => t?.id === parentId)
+          || (pinnedRows || []).find(t => t?.id === parentId)
+          || null
         const baseAmount = Number(parent?.amount || 0)
         const params = new URLSearchParams({
           refund_for: parentId,
@@ -896,12 +1012,13 @@ export default function MonthlyPayment() {
           return s + a
         }, 0)
         const newAmountStat = baseAmount + sumRefunds
-        await updateTransaction(parentId, { amount_stat: newAmountStat, exclude_from_stats: false })
-        setRows(prev => (prev || []).map(r => {
+        const patchRow = r => {
           if (r.id === refundTx.id) return updated
-          if (r.id === parentId) return { ...r, amount_stat: newAmountStat, exclude_from_stats: false }
+          if (parent && r.id === parentId) return { ...r, amount_stat: newAmountStat }
           return r
-        }))
+        }
+        setRows(prev => (prev || []).map(patchRow))
+        setPinnedRows(prev => (prev || []).map(patchRow))
       } else {
         setRows(prev => (prev || []).map(r => r.id === refundTx.id ? updated : r))
       }
@@ -1042,6 +1159,50 @@ export default function MonthlyPayment() {
     }
   }
 
+  const transferPair = useMemo(() => {
+    if (selectedIds.size !== 2) return null
+    const pool = [...(rows || []), ...(pinnedRows || [])]
+    const [a, b] = [...selectedIds].map(id => pool.find(r => r?.id === id))
+    if (!canBeTransfer(a) || !canBeTransfer(b)) return null
+    const out = Number(a.amount) < 0 ? a : b
+    const into = out === a ? b : a
+    if (!(Number(out.amount) < 0 && Number(into.amount) > 0)) return null
+    if ((out.card_id || null) === (into.card_id || null)) return null
+    return { out, into }
+  }, [selectedIds, rows, pinnedRows])
+
+  const handlePairAsTransfer = async () => {
+    if (!transferPair || pairBusy) return
+    if (!window.confirm('Об’єднати в переказ? Ці дві транзакції стануть одним переказом між рахунками й вийдуть зі статистики.')) return
+    setPairBusy(true)
+    try {
+      await markExistingAsTransfer({ fromTxId: transferPair.out.id, toTxId: transferPair.into.id })
+      toast.success('Переказ готовий')
+      setSelectedIds(new Set())
+      lastSelectedIndexRef.current = null
+      // The list, balances and totals follow
+      txBus.emit({ type: 'UPDATE' })
+    } catch (e) {
+      toast.error(`Не вдалося: ${e?.message || e}`)
+    } finally {
+      setPairBusy(false)
+    }
+  }
+
+  // Selected ids → the transactions, with the other leg of every selected transfer (it's nested
+  // under its pair and can't be ticked; deleting one leg would leave half a transfer)
+  const expandTransfers = (ids) => {
+    const pool = [...(rows || []), ...(pinnedRows || []), ...Object.values(transferLegs).flat()]
+    const out = new Map()
+    for (const id of ids) {
+      const tx = pool.find(r => r?.id === id)
+      if (!tx) continue
+      out.set(tx.id, tx)
+      for (const p of partnersOf(tx)) out.set(p.id, p)
+    }
+    return out
+  }
+
   const handleBulkDeleteClick = () => {
     if (selectedIds.size === 0) return
     setBulkDeleteOpen(true)
@@ -1087,7 +1248,8 @@ export default function MonthlyPayment() {
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return
 
-    const idsArray = Array.from(selectedIds)
+    const txMap = expandTransfers(selectedIds)
+    const idsArray = [...txMap.keys()]
     setBulkDeleteOpen(false)
     setBulkDeleteLoading(true)
 
@@ -1095,10 +1257,11 @@ export default function MonthlyPayment() {
       const result = await deleteTransactions(idsArray)
 
       // Оновити список транзакцій
-      setRows(prev => prev.filter(r => !selectedIds.has(r.id)))
+      setRows(prev => prev.filter(r => !txMap.has(r.id)))
+      setPinnedRows(prev => (prev || []).filter(r => !txMap.has(r.id)))
 
       // Emit txBus events для кожної видаленої транзакції
-      const deletedTxs = rows.filter(tx => selectedIds.has(tx.id))
+      const deletedTxs = [...txMap.values()]
       deletedTxs.forEach(tx => {
         try {
           txBus.emit({
@@ -1125,7 +1288,8 @@ export default function MonthlyPayment() {
   const handleBulkArchive = async () => {
     if (selectedIds.size === 0) return
 
-    const idsArray = Array.from(selectedIds)
+    const txMap = expandTransfers(selectedIds)
+    const idsArray = [...txMap.keys()]
     setBulkDeleteOpen(false)
     setBulkDeleteLoading(true)
 
@@ -1135,10 +1299,11 @@ export default function MonthlyPayment() {
       await Promise.all(archivePromises)
 
       // Оновити список транзакцій
-      setRows(prev => prev.filter(r => !selectedIds.has(r.id)))
+      setRows(prev => prev.filter(r => !txMap.has(r.id)))
+      setPinnedRows(prev => (prev || []).filter(r => !txMap.has(r.id)))
 
       // Emit txBus events для кожної заархівованої транзакції
-      const archivedTxs = rows.filter(tx => selectedIds.has(tx.id))
+      const archivedTxs = [...txMap.values()]
       archivedTxs.forEach(tx => {
         try {
           txBus.emit({
@@ -1160,6 +1325,29 @@ export default function MonthlyPayment() {
     } finally {
       setBulkDeleteLoading(false)
     }
+  }
+
+  // A transfer's other leg, nested under the one in the list (like a refund under its expense)
+  const renderTransferPartners = (tx) => {
+    const partners = partnersOf(tx)
+    if (partners.length === 0) return null
+    return (
+      <div className="mt-1 ml-6 pl-3 border-l-2 border-[#8AB4FF]/25 space-y-1">
+        {partners.map((p) => (
+          <Row
+            key={p.id}
+            tx={p}
+            currency={p.currency || cardMap[p.card_id] || 'EUR'}
+            onDetails={openDetails}
+            onUnlinkTransfer={refundPickExpenseId ? undefined : setUnlinkTx}
+            transferWith={accountName(tx)}
+            compact
+            className="opacity-90"
+            mode={refundPickExpenseId ? 'dimmed' : 'normal'}
+          />
+        ))}
+      </div>
+    )
   }
 
   return (
@@ -1191,6 +1379,17 @@ export default function MonthlyPayment() {
           <div className="flex flex-wrap items-center gap-2 relative">
             {selectedIds.size > 0 && (
               <>
+                {transferPair && (
+                  <button
+                    className="btn btn-soft text-xs inline-flex items-center gap-1 border border-[#8AB4FF]/30 text-[#8AB4FF] hover:bg-[#8AB4FF]/10"
+                    onClick={handlePairAsTransfer}
+                    disabled={pairBusy}
+                    title="Списання й надходження на різних рахунках стануть одним переказом"
+                  >
+                    <ArrowLeftRight size={14} />
+                    Переказ
+                  </button>
+                )}
                 <button
                   className="btn btn-soft text-xs inline-flex items-center gap-1 border border-brand/25 text-brand-light hover:bg-brand/10"
                   onClick={() => { setBulkCategoryOpen(v => !v); setBulkCategoryValue('') }}
@@ -1398,7 +1597,8 @@ export default function MonthlyPayment() {
               </div>
             </div>
           )}
-          <div ref={listRef} className="space-y-6">
+          {/* While picking a refund, the last rows can scroll up from under the floating bar */}
+          <div ref={listRef} className={`space-y-6 ${refundPickExpenseId ? 'pb-28' : ''}`}>
             {/* Pinned Section */}
             {pinnedTxs.length > 0 && (
               <div className="rounded-3xl overflow-hidden mb-6 border border-brand/30 bg-gradient-to-b from-brand/[0.13] to-brand/[0.03]">
@@ -1488,14 +1688,18 @@ export default function MonthlyPayment() {
                                     tx={tx}
                                     currency={currency}
                                     onDetails={openDetails}
-                                    onAskDelete={askDelete}
-                                    onRefund={startRefund}
-                                    swipeActions
+                                    onAskDelete={refundPickExpenseId ? undefined : askDelete}
+                                    onRefund={tx.is_transfer || refundPickExpenseId ? undefined : startRefund}
+                                    swipeActions={!refundPickExpenseId}
                                     amountOverride={amountOverride}
                                     selected={selectedIds.has(tx.id)}
-                                    onSelect={(txId, checked, event) => handleSelect(txId, checked, originalIndex, event)}
-                                    onAcceptSuggestion={acceptOneSuggestion}
+                                    onSelect={refundPickExpenseId ? undefined : (txId, checked, event) => handleSelect(txId, checked, originalIndex, event)}
+                                    onAcceptSuggestion={refundPickExpenseId ? undefined : acceptOneSuggestion}
+                                    mode={modeFor(tx)}
+                                    wiggleDir={idx % 2 ? 1 : -1}
+                                    transferWith={tx.is_transfer ? accountName(partnersOf(tx)[0]) : undefined}
                                   />
+                                  {renderTransferPartners(tx)}
 
                                   {/* Nested refund transactions */}
                                   {Number(tx.amount || 0) < 0 && refundTxsSorted.length > 0 && (
@@ -1508,9 +1712,10 @@ export default function MonthlyPayment() {
                                             tx={rtx}
                                             currency={rCurrency}
                                             onDetails={openDetails}
-                                            onCancelRefund={cancelRefundLink}
+                                            onCancelRefund={refundPickExpenseId ? undefined : cancelRefundLink}
                                             compact
                                             className="opacity-90"
+                                            mode={refundPickExpenseId ? 'dimmed' : 'normal'}
                                           />
                                         )
                                       })}
@@ -1585,13 +1790,17 @@ export default function MonthlyPayment() {
                               tx={tx}
                               currency={currency}
                               onDetails={openDetails}
-                              onAskDelete={askDelete}
-                              onRefund={startRefund}
-                              swipeActions
+                              onAskDelete={refundPickExpenseId ? undefined : askDelete}
+                              onRefund={tx.is_transfer || refundPickExpenseId ? undefined : startRefund}
+                              swipeActions={!refundPickExpenseId}
                               amountOverride={amountOverride}
                               selected={selectedIds.has(tx.id)}
-                              onSelect={(txId, checked, event) => handleSelect(txId, checked, originalIndex, event)}
+                              onSelect={refundPickExpenseId ? undefined : (txId, checked, event) => handleSelect(txId, checked, originalIndex, event)}
+                              mode={modeFor(tx)}
+                              wiggleDir={idx % 2 ? 1 : -1}
+                              transferWith={tx.is_transfer ? accountName(partnersOf(tx)[0]) : undefined}
                             />
+                            {renderTransferPartners(tx)}
 
                             {/* Nested refund transactions (linked by refund_for / legacy [refund_for:<id>] tag) */}
                             {Number(tx.amount || 0) < 0 && refundTxsSorted.length > 0 && (
@@ -1604,9 +1813,10 @@ export default function MonthlyPayment() {
                                       tx={rtx}
                                       currency={rCurrency}
                                       onDetails={openDetails}
-                                      onCancelRefund={cancelRefundLink}
+                                      onCancelRefund={refundPickExpenseId ? undefined : cancelRefundLink}
                                       compact
                                       className="opacity-90"
+                                      mode={refundPickExpenseId ? 'dimmed' : 'normal'}
                                     />
                                   )
                                 })}
@@ -1654,7 +1864,20 @@ export default function MonthlyPayment() {
           setSplitTx(txToSplit)
           setSplitOpen(true)
         }}
+        cards={cardList}
+        onMakeTransfer={setTransferFor}
+        onUnlinkTransfer={setUnlinkTx}
       />
+
+      <RefundPickBar
+        expense={refundPickExpense}
+        currency={refundPickExpense ? refundPickExpense.currency || cardMap[refundPickExpense.card_id] : undefined}
+        hidden={settings?.hideAllBalances ?? false}
+        onCancel={() => setRefundPickExpenseId(null)}
+      />
+
+      <UnlinkTransferModal tx={unlinkTx} cards={cardList} onClose={() => setUnlinkTx(null)} />
+      <TransferFromTxModal tx={transferFor} cards={cardList} onClose={() => setTransferFor(null)} />
 
       <SplitTxModal
         open={splitOpen}
@@ -1671,7 +1894,20 @@ export default function MonthlyPayment() {
         tx={editTx}
         onClose={() => setEditOpen(false)}
         onSaved={(updated) => {
-          setRows(prev => prev.map(r => r.id === updated.id ? updated : r))
+          setRows(prev => prev.map(r => r.id === updated.id ? { ...r, ...updated } : r))
+          // An edited nested transfer leg lives only in transferLegs
+          setTransferLegs(prev => {
+            let changed = false
+            const next = {}
+            for (const [k, ls] of Object.entries(prev)) {
+              next[k] = ls.map(l => {
+                if (l.id !== updated.id) return l
+                changed = true
+                return { ...l, ...updated }
+              })
+            }
+            return changed ? next : prev
+          })
         }}
       />
 
@@ -1685,7 +1921,7 @@ export default function MonthlyPayment() {
 
       <DeleteTxModal
         open={bulkDeleteOpen}
-        transactions={rows.filter(tx => selectedIds.has(tx.id))}
+        transactions={bulkDeleteOpen ? [...expandTransfers(selectedIds).values()] : []}
         onDelete={handleBulkDelete}
         onArchive={handleBulkArchive}
         onCancel={() => { setBulkDeleteOpen(false) }}

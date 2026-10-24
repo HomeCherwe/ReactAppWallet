@@ -9,6 +9,7 @@ import { fetchBalanceHistory } from '../../api/totals'
 import { useScrollLock } from '../../hooks/useScrollLock'
 import useMonoRates from '../../hooks/useMonoRates'
 import { apiFetch } from '../../utils.jsx'
+import { cardLabel } from '../../utils/cardLabel'
 import { listCards } from '../../api/cards'
 
 // ─── constants ────────────────────────────────────────────────────────────────
@@ -860,7 +861,7 @@ export default function BalanceHistoryModal({
                     <div className="divide-y divide-white/[0.042]">
                       {periodTxs.map(tx => {
                         const card = cards.find(c => c.id === tx.card_id)
-                        const cardName = card ? `${card.bank} ${card.name}` : 'Готівка'
+                        const cardName = card ? cardLabel(card) : 'Готівка'
                         const isIncome = Number(tx.amount || 0) > 0
                         
                         return (

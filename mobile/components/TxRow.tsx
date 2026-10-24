@@ -6,6 +6,7 @@ import { Card } from '../api/cards'
 import { getCategoryIcon } from '../utils/categoryIcon'
 import { txDisplayTitle } from '../utils/pinned'
 import { isSyncCategory } from '../utils/cardExclusion'
+import { cardLabel } from '../utils/cardLabel'
 import { triggerLightHaptic, triggerMediumHaptic, triggerSelectionHaptic } from '../utils/haptics'
 import Icon from './Icon'
 import { menuDragHandlers, useMenuOverlay } from '../store/useMenuOverlay'
@@ -203,7 +204,7 @@ function TxRow({
       : tx.category && tx.category !== title
         ? tx.category
         : null
-  const metaRest = [card?.name, when].filter(Boolean).join(' · ')
+  const metaRest = [cardLabel(card), when].filter(Boolean).join(' · ')
   // The category came from the user's rules, not from the user
   const autoCategory = !isRefund && tx.category_source === 'auto' && !!metaCategory
   // Waiting for a category, and the rules have a guess: ✓ takes it

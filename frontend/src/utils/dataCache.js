@@ -88,6 +88,16 @@ export async function getCachedTransactions(fetchFunction) {
 export function invalidateCardsCache() {
   cachedCards = null
   cardsCacheTimestamp = 0
+  cardsInvalidatedListeners.forEach(fn => {
+    try { fn() } catch {}
+  })
+}
+
+// Who wants to know that the cards changed (e.g. the card names shown on transactions)
+const cardsInvalidatedListeners = new Set()
+export function onCardsInvalidated(fn) {
+  cardsInvalidatedListeners.add(fn)
+  return () => cardsInvalidatedListeners.delete(fn)
 }
 
 /**

@@ -11,6 +11,7 @@ import { triggerErrorHaptic, triggerLightHaptic, triggerSuccessHaptic } from '..
 import SheetModal from './SheetModal'
 import TxRow from './TxRow'
 import Icon from './Icon'
+import { cardLabel } from '../utils/cardLabel'
 
 const DAY = 864e5
 const MAX_CANDIDATES = 12
@@ -138,7 +139,7 @@ export default function TransferFromTxSheet({ tx, cards, hidden, onClose, onDone
       Toast.show({
         type: 'success',
         text1: 'Переказ готовий',
-        text2: `${isOutgoing ? 'На' : 'З'} «${target.name}» ${isOutgoing ? 'додано' : 'списано'} ${formatMoney(parsed, target.currency || 'UAH')}`,
+        text2: `${isOutgoing ? 'На' : 'З'} «${cardLabel(target)}» ${isOutgoing ? 'додано' : 'списано'} ${formatMoney(parsed, target.currency || 'UAH')}`,
       })
       onDone()
       onClose()
@@ -166,8 +167,8 @@ export default function TransferFromTxSheet({ tx, cards, hidden, onClose, onDone
         </View>
         <Text style={styles.lead}>
           {isOutgoing
-            ? `Гроші пішли ${ownCard ? `з «${ownCard.name}»` : 'з готівки'}. Куди вони прийшли?`
-            : `Гроші прийшли ${ownCard ? `на «${ownCard.name}»` : 'в готівку'}. Звідки?`}
+            ? `Гроші пішли ${ownCard ? `з «${cardLabel(ownCard)}»` : 'з готівки'}. Куди вони прийшли?`
+            : `Гроші прийшли ${ownCard ? `на «${cardLabel(ownCard)}»` : 'в готівку'}. Звідки?`}
         </Text>
 
         {/* The other side is already there */}

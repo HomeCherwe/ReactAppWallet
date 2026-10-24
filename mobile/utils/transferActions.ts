@@ -5,6 +5,7 @@ import { listTransferLegs, Transaction } from '../api/transactions'
 import { unlinkTransfer } from '../api/transfers'
 import { formatMoney } from './currency'
 import { triggerErrorHaptic, triggerSuccessHaptic } from './haptics'
+import { cardLabel } from './cardLabel'
 
 /**
  * «Скасувати переказ», from the long-press menu or the transaction sheet. Unlinking keeps both legs
@@ -25,7 +26,7 @@ export async function confirmUnlinkTransfer(tx: Transaction, cards: Card[], onDo
   const label = (l: Transaction) => {
     const amount = Number(l.amount)
     const card = cardOf(l)
-    return `${amount < 0 ? '−' : '+'}${formatMoney(Math.abs(amount), l.currency || card?.currency || 'UAH')} · ${card?.name ?? (l.card_id ? 'рахунок' : 'Готівка')}`
+    return `${amount < 0 ? '−' : '+'}${formatMoney(Math.abs(amount), l.currency || card?.currency || 'UAH')} · ${card ? cardLabel(card) : l.card_id ? 'рахунок' : 'Готівка'}`
   }
   // Not from a bank: made in the app (or typed in by hand) — the only legs that may be deleted
   const appMade = legs.filter(l => !(l as any).transaction_id_card)

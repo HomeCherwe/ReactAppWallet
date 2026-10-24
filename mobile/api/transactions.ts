@@ -273,6 +273,8 @@ export async function searchTransactions(p: SearchParams): Promise<Transaction[]
     p_tz: deviceTimeZone, // "12.09" means that day where the user is
     p_limit: p.limit,
     p_offset: p.offset,
+    // «Всі» shows transfers (as pairs), so its search finds them too
+    p_include_transfers: (p.transactionType ?? 'all') === 'all',
   })
   if (error) throw error
   return (data || []) as Transaction[]

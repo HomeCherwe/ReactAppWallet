@@ -7,6 +7,7 @@ import useMonoRates from '../../hooks/useMonoRates'
 import BaseModal from '../BaseModal'
 import { getApiUrl } from '../../utils.jsx'
 import { listCards } from '../../api/cards'
+import { cardLabel } from '../../utils/cardLabel'
 import toast from 'react-hot-toast'
 import { X } from 'lucide-react'
 
@@ -64,6 +65,9 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
     pinned: false,
     date: new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16),
   })
+
+  // Untouched, the transaction gets the moment it's saved (the form may have been opened long before)
+  const [dateTouched, setDateTouched] = useState(false)
 
   const [errors, setErrors] = useState({
     amount: '',
@@ -128,6 +132,11 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
   }, [showDebtPartyDropdown])
 
   useEffect(() => {
+    if (open) {
+      // A fresh "now" each time the window opens
+      setForm(f => ({ ...f, date: new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) }))
+      setDateTouched(false)
+    }
     if (!open) {
       setForm({ 
         kind: 'expense', amount: '', category: '', cardId: '', note: '', debtParty: '', debtIsLend: true, excludeFromStats: false, pinned: false,
@@ -376,7 +385,7 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
         ? raw
         : (form.debtIsLend ? -raw : raw)
     const sel = cards.find(c => c.id === form.cardId)
-    const cardLabel = sel ? `${sel.bank} ${sel.name}` : null
+    const cardText = sel ? cardLabel(sel) : null
 
     setSaving(true)
     try {
@@ -389,9 +398,9 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
         amount: signed,
         category: form.kind === 'debt' ? 'Борг' : (form.category || null),
         note: finalNote || null,
-        card: cardLabel,
+        card: cardText,
         card_id: form.cardId || null,
-        created_at: form.date ? new Date(form.date).toISOString() : new Date().toISOString(),
+        created_at: dateTouched && form.date ? new Date(form.date).toISOString() : new Date().toISOString(),
         archives: false,
         is_debt: form.kind === 'debt',
         debt_party: form.kind === 'debt' ? (form.debtParty || null) : null,
@@ -685,7 +694,10 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
                   type="datetime-local"
                   className="border rounded-xl px-3 py-2 w-full focus:ring-2 focus:ring-brand"
                   value={form.date}
-                  onChange={e => setForm({ ...form, date: e.target.value })}
+                  onChange={e => {
+                    setForm({ ...form, date: e.target.value })
+                    setDateTouched(true)
+                  }}
                 />
               </div>
 
