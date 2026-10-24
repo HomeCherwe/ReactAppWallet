@@ -2787,9 +2787,12 @@ function convertTimestampToISO(ts) {
 }
 
 async function postNewCheckMonoBank(amount, note, card, id, date, userId) {
-  // Find card_id by card name in `cards` table. Try exact match first, then ilike fallback.
+  if (!userId) {
+    throw new Error('Cannot create transaction: user_id is required')
+  }
+  // Find card_id by card name among this person's cards only: other users can have a card
+  // with the same bank and name, and the transaction must not land in their account.
   let card_id = null
-  let card_user_id = null
   try {
     // Split card string by space: first token -> bank, second token -> name
     const parts = String(card || '').split(' ')
@@ -2799,7 +2802,8 @@ async function postNewCheckMonoBank(amount, note, card, id, date, userId) {
     if (bankToken && nameToken) {
       const { data: matched, error: matchErr } = await supabase
         .from('cards')
-        .select('id, user_id')
+        .select('id')
+        .eq('user_id', userId)
         .eq('bank', bankToken)
         .eq('name', nameToken)
         .limit(1)
@@ -2809,44 +2813,39 @@ async function postNewCheckMonoBank(amount, note, card, id, date, userId) {
       }
       if (matched && matched.id) {
         card_id = matched.id
-        card_user_id = matched.user_id
       }
     } else if (nameToken) {
       // fallback: if only nameToken exists, try exact name match
       const { data: byName, error: byNameErr } = await supabase
         .from('cards')
-        .select('id, user_id')
+        .select('id')
+        .eq('user_id', userId)
         .eq('name', nameToken)
         .limit(1)
         .maybeSingle()
       if (byNameErr) console.warn('cards name lookup error', byNameErr)
       if (byName && byName.id) {
         card_id = byName.id
-        card_user_id = byName.user_id
       }
     } else if (bankToken) {
       // fallback: if only bankToken exists, try exact bank match
       const { data: byBank, error: byBankErr } = await supabase
         .from('cards')
-        .select('id, user_id')
+        .select('id')
+        .eq('user_id', userId)
         .eq('bank', bankToken)
         .limit(1)
         .maybeSingle()
       if (byBankErr) console.warn('cards bank lookup error', byBankErr)
       if (byBank && byBank.id) {
         card_id = byBank.id
-        card_user_id = byBank.user_id
       }
     }
   } catch (e) {
     console.warn('Failed to lookup card_id for', card, e?.message || e)
   }
 
-  // Використовувати user_id з картки або з параметра функції
-  const finalUserId = card_user_id || userId
-  if (!finalUserId) {
-    throw new Error('Cannot create transaction: user_id is required (from card or function parameter)')
-  }
+  const finalUserId = userId
 
   // Спроба витягнути merchant_name з note (description від Monobank)
   // Monobank зазвичай повертає назву магазину в description
