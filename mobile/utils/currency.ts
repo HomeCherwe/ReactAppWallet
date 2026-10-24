@@ -135,12 +135,24 @@ export function formatMoney(
   }
 }
 
-export function getBucket(card: { bank?: string | null; name?: string | null }): 'cards' | 'cash' | 'savings' {
-  const bank = (card.bank || '').toLowerCase()
-  const name = (card.name || '').toLowerCase()
-  const full = `${bank} ${name}`
+// The balance group of an account: by its kind (utils/accountKind)
+export { getBucket } from './accountKind'
 
-  if (full.includes('збер') || full.includes('savings')) return 'savings'
-  if (full.includes('гот') || full.includes('cash')) return 'cash'
-  return 'cards'
+/** { EUR: 7250, USD: 3800 } as one number in `to` */
+export function sumIn(byCurrency: Record<string, number> | undefined, to: string, rates?: RatesMap | null): number {
+  return Object.entries(byCurrency || {}).reduce(
+    (sum, [cur, amount]) => sum + convertCurrency(Number(amount) || 0, cur, to, rates),
+    0
+  )
+}
+
+const BREAKDOWN_ORDER = ['UAH', 'EUR', 'USD', 'USDT', 'PLN', 'GBP', 'CHF', 'CZK', 'HUF']
+
+/** «€7 250 · $3 800»: money in the currencies it is actually in (the web shows the same) */
+export function formatBreakdown(byCurrency: Record<string, number> | undefined): string {
+  return Object.entries(byCurrency || {})
+    .filter(([, v]) => Math.abs(v) >= 0.005)
+    .sort((a, b) => (BREAKDOWN_ORDER.indexOf(a[0]) + 1 || 99) - (BREAKDOWN_ORDER.indexOf(b[0]) + 1 || 99))
+    .map(([cur, v]) => (v < 0 ? '-' : '') + formatMoney(v, cur, { hideCents: true }))
+    .join(' · ')
 }

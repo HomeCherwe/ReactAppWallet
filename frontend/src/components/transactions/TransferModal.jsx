@@ -163,12 +163,12 @@ export default function TransferModal({ open, onClose, onDone }) {
       <form onSubmit={submit} className="grid gap-3">
               <select className="border rounded px-3 py-2" value={from} onChange={e=>setFrom(e.target.value)}>
                 <option value="">— Готівка —</option>
-                {cards.map(c => <option key={c.id} value={c.id}>{c.bank} — {c.name}</option>)}
+                {cards.filter(c => !c.archived || String(c.id) === String(from)).map(c => <option key={c.id} value={c.id}>{c.bank} — {c.name}</option>)}
               </select>
 
               <select className="border rounded px-3 py-2" value={to} onChange={e=>setTo(e.target.value)}>
                 <option value="">— Готівка —</option>
-                {cards.map(c => <option key={c.id} value={c.id}>{c.bank} — {c.name}</option>)}
+                {cards.filter(c => !c.archived || String(c.id) === String(to)).map(c => <option key={c.id} value={c.id}>{c.bank} — {c.name}</option>)}
               </select>
 
               <input type="number" step="0.01" className="border rounded px-3 py-2" placeholder={`Сума ${fromCard?.currency || ''}`.trim()} value={amount} onChange={e=>setAmount(e.target.value)} />

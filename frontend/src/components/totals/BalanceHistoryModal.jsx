@@ -11,6 +11,7 @@ import useMonoRates from '../../hooks/useMonoRates'
 import { apiFetch } from '../../utils.jsx'
 import { cardLabel } from '../../utils/cardLabel'
 import { listCards } from '../../api/cards'
+import { getBucket } from '../../utils/accountKind'
 
 // ─── constants ────────────────────────────────────────────────────────────────
 
@@ -24,8 +25,9 @@ const PERIODS = [
 const BUCKET_META = {
   all:     { label: 'Загалом',     icon: Globe,      gradFrom: '#FF6B00', gradTo: '#FF3D00', textCls: 'text-brand',  bgCls: 'bg-brand/10',  borderCls: 'border-brand/25' },
   cash:    { label: 'Готівка',     icon: Wallet,     gradFrom: '#10b981', gradTo: '#059669', textCls: 'text-emerald-400', bgCls: 'bg-emerald-500/10', borderCls: 'border-emerald-500/25' },
-  cards:   { label: 'Карти',       icon: CreditCard, gradFrom: '#3b82f6', gradTo: '#60a5fa', textCls: 'text-blue-400',   bgCls: 'bg-blue-500/10',    borderCls: 'border-blue-500/25' },
-  savings: { label: 'Заощадження', icon: PiggyBank,  gradFrom: '#FF8C3A', gradTo: '#FF6B00', textCls: 'text-brand', bgCls: 'bg-brand/10',  borderCls: 'border-brand/25' },
+  cards:   { label: 'Картки',      icon: CreditCard, gradFrom: '#3b82f6', gradTo: '#60a5fa', textCls: 'text-blue-400',   bgCls: 'bg-blue-500/10',    borderCls: 'border-blue-500/25' },
+  savings: { label: 'Скарбнички',  icon: PiggyBank,  gradFrom: '#34D399', gradTo: '#0E9F6E', textCls: 'text-emerald-400', bgCls: 'bg-emerald-500/10', borderCls: 'border-emerald-500/25' },
+  investments: { label: 'Інвестиції', icon: TrendingUp, gradFrom: '#A78BFA', gradTo: '#7C3AED', textCls: 'text-violet-300', bgCls: 'bg-violet-500/10', borderCls: 'border-violet-500/25' },
 }
 
 const CUR_SYM = { UAH: '₴', EUR: '€', USD: '$', GBP: '£', PLN: 'zł', CHF: 'Fr', CZK: 'Kč', HUF: 'Ft' }
@@ -514,12 +516,7 @@ export default function BalanceHistoryModal({
         
         // Filter by bucket
         if (bucket !== 'all') {
-          const bucketCards = Object.values(cards || []).filter(c => {
-            const full = `${(c.bank || '').toLowerCase()} ${(c.name || '').toLowerCase()}`
-            const b = (full.includes('збер') || full.includes('savings')) ? 'savings' :
-                      (full.includes('гот') || full.includes('cash')) ? 'cash' : 'cards'
-            return b === bucket
-          })
+          const bucketCards = Object.values(cards || []).filter(c => getBucket(c) === bucket)
           const bucketCardIds = new Set(bucketCards.map(c => c.id))
           
           txList = txList.filter(tx => {

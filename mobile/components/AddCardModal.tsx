@@ -12,28 +12,38 @@ import { Colors, Radius, Typography } from '../constants/theme'
 import { createCard } from '../api/cards'
 import { Bank, createBank, listBanks } from '../api/banks'
 import { SUPPORTED_CURRENCIES } from '../utils/settings'
+import { AccountKind, parseGoal } from '../utils/accountKind'
 import GlassButton from './GlassButton'
+import KindPicker from './KindPicker'
 import { GlassPressable } from './LiquidGlass'
 import SheetModal from './SheetModal'
 
-// Cash is a bank named "Готівка" (the app puts it in the cash bucket by that name)
+// Cash lives in a bank named "Готівка"
 const CASH_BANK_NAME = 'Готівка'
 const NEW_BANK = '__new__'
-const CASH = '__cash__'
 
 interface AddCardModalProps {
   visible: boolean
   onClose: () => void
   onSuccess: () => void
   defaultCurrency?: string
+  /** 'savings' = «Нова скарбничка» (the + menu's goal, Home's piggy banks) */
+  initialKind?: AccountKind
 }
 
+/**
+ * "Власний рахунок" (the web's OwnAccountModal): a card, a piggy bank with an optional goal, cash or
+ * investments, kept up to date by hand.
+ */
 export default function AddCardModal({
   visible,
   onClose,
   onSuccess,
   defaultCurrency = 'UAH',
+  initialKind = 'card',
 }: AddCardModalProps) {
+  const [kind, setKind] = useState<AccountKind>(initialKind)
+  const [goal, setGoal] = useState('')
   const [name, setName] = useState('')
   // The user's own banks; pick one, "Готівка", or create a new one
   const [banks, setBanks] = useState<Bank[] | null>(null)
@@ -48,31 +58,33 @@ export default function AddCardModal({
   useEffect(() => {
     if (!visible) return
     setErrorMsg('')
+    setKind(initialKind)
+    setGoal('')
     listBanks().then(list => {
       const own = list.filter(b => b.name !== CASH_BANK_NAME)
       setBanks(own)
       setSelectedBank(own[0]?.id ?? NEW_BANK)
     })
-  }, [visible])
+  }, [visible, initialKind])
 
-  // Bank id for the new card: existing one, the cash bank, or a bank created now
+  // Bank id for the new account: the cash bank for cash, an existing one, or a bank created now
   const resolveBankId = async (): Promise<string> => {
-    if (selectedBank === NEW_BANK) return (await createBank(newBankName)).id
-    if (selectedBank === CASH) {
+    if (kind === 'cash') {
       const all = await listBanks()
       const cash = all.find(b => b.name === CASH_BANK_NAME)
       return cash ? cash.id : (await createBank(CASH_BANK_NAME)).id
     }
+    if (selectedBank === NEW_BANK) return (await createBank(newBankName)).id
     return selectedBank
   }
 
   const handleSave = async () => {
-    if (selectedBank === NEW_BANK && !newBankName.trim()) {
+    if (kind !== 'cash' && selectedBank === NEW_BANK && !newBankName.trim()) {
       setErrorMsg('Вкажіть назву банку')
       return
     }
     if (!name.trim()) {
-      setErrorMsg('Вкажіть назву картки або рахунку')
+      setErrorMsg(kind === 'savings' ? 'Вкажіть назву скарбнички' : 'Вкажіть назву картки або рахунку')
       return
     }
 
@@ -88,13 +100,16 @@ export default function AddCardModal({
         name: name.trim(),
         currency: currency,
         initial_balance: balanceNum,
-        card_number: cardNumber.trim() || undefined,
+        card_number: (kind === 'card' && cardNumber.trim()) || undefined,
+        kind,
+        goal_amount: kind === 'savings' ? parseGoal(goal) ?? undefined : undefined,
       })
 
       setName('')
       setNewBankName('')
       setInitialBalance('')
       setCardNumber('')
+      setGoal('')
       setLoading(false)
       onSuccess()
       onClose()
@@ -109,7 +124,7 @@ export default function AddCardModal({
 
           {/* Header */}
           <View style={styles.header}>
-            <Text style={styles.title}>Власний рахунок</Text>
+            <Text style={styles.title}>{kind === 'savings' ? 'Нова скарбничка' : 'Власний рахунок'}</Text>
             <GlassPressable onPress={onClose} style={styles.closeBtn}>
               <Text style={styles.closeBtnText}>✕</Text>
             </GlassPressable>
@@ -120,9 +135,16 @@ export default function AddCardModal({
             contentContainerStyle={styles.scroll}
             keyboardShouldPersistTaps="handled"
           >
-            {/* 1. Bank: one of yours, cash, or a new one */}
+            {/* 1. What the account is for */}
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>Банк</Text>
+              <Text style={styles.sectionLabel}>Тип рахунку</Text>
+              <KindPicker value={kind} onChange={setKind} />
+            </View>
+
+            {/* 2. Bank: one of yours or a new one (cash goes to «Готівка» by itself) */}
+            {kind !== 'cash' && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>{kind === 'savings' ? 'Де лежать гроші' : 'Банк'}</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.bankScroll}>
                 {(banks ?? []).map(b => {
                   const isSelected = selectedBank === b.id
@@ -138,13 +160,6 @@ export default function AddCardModal({
                   )
                 })}
                 <GlassPressable
-                  style={[styles.bankPill, selectedBank === CASH && styles.bankPillActive]}
-                  onPress={() => setSelectedBank(CASH)}
-                >
-                  <Text style={styles.bankIcon}>💵</Text>
-                  <Text style={[styles.bankName, selectedBank === CASH && styles.bankNameActive]}>Готівка</Text>
-                </GlassPressable>
-                <GlassPressable
                   style={[styles.bankPill, styles.newBankPill, selectedBank === NEW_BANK && styles.bankPillActive]}
                   onPress={() => setSelectedBank(NEW_BANK)}
                 >
@@ -155,20 +170,28 @@ export default function AddCardModal({
               {selectedBank === NEW_BANK && (
                 <TextInput
                   style={[styles.input, { marginTop: 10 }]}
-                  placeholder="Назва банку, напр. ПриватБанк, Скарбничка…"
+                  placeholder={kind === 'savings' ? 'Банк або «Вдома», напр. Revolut' : 'Назва банку, напр. ПриватБанк'}
                   placeholderTextColor="rgba(255, 255, 255, 0.35)"
                   value={newBankName}
                   onChangeText={setNewBankName}
                 />
               )}
             </View>
+            )}
 
-            {/* 2. Card Name */}
+            {/* 3. Name */}
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>Назва картки</Text>
+              <Text style={styles.sectionLabel}>
+                {kind === 'savings' ? 'Назва скарбнички' : kind === 'cash' ? 'Назва' : 'Назва картки'}
+              </Text>
               <TextInput
                 style={styles.input}
-                placeholder="напр. Monobank Black, Зарплатна..."
+                placeholder={
+                  kind === 'savings' ? 'напр. Подушка безпеки, На відпустку…'
+                    : kind === 'cash' ? 'напр. Гаманець, Готівка EUR…'
+                    : kind === 'investment' ? 'напр. Binance, Акції…'
+                    : 'напр. Monobank Black, Зарплатна...'
+                }
                 placeholderTextColor="rgba(255, 255, 255, 0.35)"
                 value={name}
                 onChangeText={setName}
@@ -197,9 +220,24 @@ export default function AddCardModal({
               </View>
             </View>
 
-            {/* 4. Initial Balance */}
+            {/* 5. A piggy bank's goal */}
+            {kind === 'savings' && (
+              <View style={styles.section}>
+                <Text style={styles.sectionLabel}>Ціль (не обов'язково)</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder={`Скільки хочете зібрати, ${currency}`}
+                  placeholderTextColor="rgba(255, 255, 255, 0.35)"
+                  keyboardType="decimal-pad"
+                  value={goal}
+                  onChangeText={setGoal}
+                />
+              </View>
+            )}
+
+            {/* 6. Initial Balance */}
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>Початковий баланс</Text>
+              <Text style={styles.sectionLabel}>{kind === 'savings' ? 'Вже відкладено' : 'Початковий баланс'}</Text>
               <TextInput
                 style={styles.input}
                 placeholder="0.00"
@@ -210,7 +248,8 @@ export default function AddCardModal({
               />
             </View>
 
-            {/* 5. Last 4 Digits (Optional) */}
+            {/* 7. Last 4 Digits (Optional, cards only) */}
+            {kind === 'card' && (
             <View style={styles.section}>
               <Text style={styles.sectionLabel}>Останні 4 цифри (не обов'язково)</Text>
               <TextInput
@@ -223,11 +262,12 @@ export default function AddCardModal({
                 onChangeText={setCardNumber}
               />
             </View>
+            )}
 
             {errorMsg ? <Text style={styles.errorText}>{errorMsg}</Text> : null}
 
             <GlassButton
-              label={loading ? 'Збереження...' : 'Створити рахунок'}
+              label={loading ? 'Збереження...' : kind === 'savings' ? 'Створити скарбничку' : 'Створити рахунок'}
               variant="primary"
               size="lg"
               loading={loading}

@@ -151,10 +151,11 @@ export default function CardsManager() {
     return off
   }, [])
 
-  const uniqueBanks = useMemo(() => Array.from(new Set(cards.map(c => c.bank).filter(Boolean))).sort(), [cards])
+  const uniqueBanks = useMemo(() => Array.from(new Set(cards.filter(c => !c.archived).map(c => c.bank).filter(Boolean))).sort(), [cards])
 
   const visibleCards = useMemo(() => {
-    let filtered = cards
+    // Archived accounts stay on «Рахунки та картки» → Архів only
+    let filtered = cards.filter(c => !c.archived)
     if (selectedBanks.length > 0) {
       const s = new Set(selectedBanks)
       filtered = filtered.filter(c => s.has(c.bank))

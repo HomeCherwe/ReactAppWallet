@@ -93,7 +93,8 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
     }
     ;(async () => {
       const cards = await listCards()
-      setCards(cards || [])
+      // Archived accounts aren't offered for new transactions
+      setCards((cards || []).filter(c => !c.archived))
       
       // Fetch popular categories
       const categories = await getTransactionCategories()

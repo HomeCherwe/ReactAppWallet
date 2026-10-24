@@ -1,403 +1,189 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Eye, EyeOff, Wallet, CreditCard, PiggyBank, Globe, BarChart2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { motion } from 'framer-motion'
+import { BarChart2, Wallet } from 'lucide-react'
 import { fetchTotalsByBucket } from '../../api/totals'
 import { txBus } from '../../utils/txBus'
-import BalanceCard from './BalanceCard'
-import TotalsGrid from './TotalsGrid'
 import BalanceHistoryModal from './BalanceHistoryModal'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import useMonoRates from '../../hooks/useMonoRates'
+import { usePrimaryCurrency, sumIn, convertAmount, equivalentCurrencies } from '../../utils/primaryCurrency'
+import { formatMoney } from '../../utils/cardTheme'
+import { BUCKETS, KIND_META, KIND_OF_BUCKET } from '../../utils/accountKind'
 
-const ORDER = ['UAH','EUR','USD','PLN','GBP','CHF','CZK','HUF']
+const EMPTY = { cards: {}, savings: {}, cash: {}, investments: {} }
+const ORDER = ['UAH', 'EUR', 'USD', 'USDT', 'PLN', 'GBP', 'CHF', 'CZK', 'HUF']
 
-export default function TotalsCard({ title = 'Total balance' }) {
-  // Використовуємо новий store
-  const settings = useSettingsStore((state) => state.settings)
-  const updateNestedSetting = useSettingsStore((state) => state.updateNestedSetting)
-  const initialized = useSettingsStore((state) => state.initialized)
-  const hideAllBalances = useSettingsStore(state => state.settings.hideAllBalances ?? false)
-  const [loading, setLoading] = useState(true)
-  const [idx, setIdx] = useState(0) // За замовчуванням All (індекс 0)
-  const [isVisible, setIsVisible] = useState(true)
-  const [historyOpen, setHistoryOpen] = useState(false)
-  const [data, setData] = useState({ cash:{}, cards:{}, savings:{} })
-  const rootRef = useRef(null)
-  const tabsRef = useRef(null)
-  const tabButtonsRef = useRef([])
-  const [prefsLoaded, setPrefsLoaded] = useState(false)
+const signed = (v, cur, opts) => `${v < 0 ? '−' : ''}${formatMoney(v, cur, opts)}`
+
+/** «€7 250 · $3 800»: a group's money in the currencies it is actually in */
+export function currencyBreakdown(byCurrency, opts = { hideCents: true }) {
+  return Object.entries(byCurrency || {})
+    .filter(([, v]) => Math.abs(v) >= 0.005)
+    .sort((a, b) => (ORDER.indexOf(a[0]) + 1 || 99) - (ORDER.indexOf(b[0]) + 1 || 99))
+    .map(([cur, v]) => signed(v, cur, opts))
+    .join(' · ')
+}
+
+/**
+ * «Загальний баланс» — the same as the iPhone Home: everything in the main currency, the other two
+ * of UAH / EUR / USD under it, then what it is made of (cards, piggy banks, cash, investments), each
+ * in the main currency and in the currencies it is in. A tap opens that group's balance history.
+ */
+export default function TotalsCard({ title = 'Загальний баланс' }) {
+  const hidden = useSettingsStore(state => state.settings?.hideAllBalances ?? false)
+  const primary = usePrimaryCurrency()
   const rates = useMonoRates()
-  
-  // Touch swipe state
-  const touchStartX = useRef(0)
-  const touchStartY = useRef(0)
-  const didSwipeRef = useRef(false)
-
-  const initializedRef = useRef(false)
-  const lastSavedIdxRef = useRef(null)
-  const lastSavedIsVisibleRef = useRef(null)
-
-  // init from settings store (один запит на проєкт)
-  useEffect(() => {
-    if (!initialized || !settings) return
-    let loadedIdx = 0
-    const totals = settings?.totals || {}
-    if (typeof totals.section === 'number' && totals.section >= 0 && totals.section <= 3) {
-      loadedIdx = totals.section
-    }
-    if (typeof totals.isVisible === 'boolean') {
-      setIsVisible(totals.isVisible)
-    }
-    setIdx(loadedIdx)
-    // Зберігаємо початкові значення для порівняння
-    lastSavedIdxRef.current = loadedIdx
-    lastSavedIsVisibleRef.current = totals.isVisible !== undefined ? totals.isVisible : true
-    setPrefsLoaded(true)
-    initializedRef.current = true
-    // НЕ записуємо під час ініціалізації - тільки при зміні користувачем
-  }, [initialized, settings])
-
-  // persist section changes to DB (через store з debounce) - тільки якщо значення дійсно змінилося
-  useEffect(() => {
-    if (!prefsLoaded || !initializedRef.current) return
-    
-    // Перевіряємо, чи значення дійсно змінилося від збереженого
-    if (idx === lastSavedIdxRef.current && isVisible === lastSavedIsVisibleRef.current) {
-      return // Нічого не змінилося, не записуємо
-    }
-    
-    // Оновлюємо збережені значення
-    lastSavedIdxRef.current = idx
-    lastSavedIsVisibleRef.current = isVisible
-    
-    // Оновлюємо через store (автоматично зберігається через debounce)
-    updateNestedSetting('totals', {
-      section: idx,
-      isVisible
-    })
-  }, [idx, isVisible, prefsLoaded, updateNestedSetting])
-
-  // Перехоплюємо колесо лише всередині картки
-  useEffect(() => {
-    const el = rootRef.current
-    if (!el) return
-      const onWheel = (e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        const dir = e.deltaY > 0 ? 1 : -1
-        setIdx((i)=>Math.max(0, Math.min(3, i+dir)))
-      }
-    el.addEventListener('wheel', onWheel, { passive:false, capture:true })
-    return () => el.removeEventListener('wheel', onWheel, { passive:false, capture:true })
-  }, [])
-
-  // Touch swipe handlers for mobile
-  const handleTouchStart = (e) => {
-    touchStartX.current = e.touches[0].clientX
-    touchStartY.current = e.touches[0].clientY
-    didSwipeRef.current = false
-  }
-
-  const handleTouchEnd = (e) => {
-    const touchEndX = e.changedTouches[0].clientX
-    const touchEndY = e.changedTouches[0].clientY
-    const deltaX = touchStartX.current - touchEndX
-    const deltaY = touchStartY.current - touchEndY
-    
-    // Only swipe horizontally if horizontal movement is greater than vertical
-    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
-      didSwipeRef.current = true
-      if (deltaX > 0) {
-        // Swipe left - next section
-        setIdx((i) => Math.min(3, i + 1))
-      } else {
-        // Swipe right - previous section
-        setIdx((i) => Math.max(0, i - 1))
-      }
-    }
-  }
+  const ratesReady = !!rates && Object.keys(rates).length > 0
+  const [data, setData] = useState(EMPTY)
+  const [loading, setLoading] = useState(true)
+  const [history, setHistory] = useState(null)
 
   useEffect(() => {
     let mounted = true
-    let unsub = null
-
-    const doFetch = async () => {
-      setLoading(true)
+    let timer = null
+    const load = async () => {
       try {
-        const resp = await fetchTotalsByBucket() // { cash, cards, savings }
-        if (!mounted) return
-        setData(resp || { cash:{}, cards:{}, savings:{} })
+        const resp = await fetchTotalsByBucket()
+        if (mounted) setData({ ...EMPTY, ...(resp || {}) })
       } catch (e) {
         console.error('load totals failed', e)
       } finally {
         if (mounted) setLoading(false)
       }
     }
-
-    doFetch()
-
-    // subscribe to transaction events so totals update live
-    if (txBus && typeof txBus.subscribe === 'function') {
-      unsub = txBus.subscribe(async (evt) => {
-        // Невелика затримка, щоб дати серверу час обробити зміни
-        setTimeout(async () => {
-          try {
-            const resp = await fetchTotalsByBucket()
-            if (!mounted) return
-            setData(resp || { cash:{}, cards:{}, savings:{} })
-          } catch (e) {
-            console.error('refresh totals failed', e)
-          }
-        }, 500) // 500ms затримка для синхронізації з сервером
-      })
+    load()
+    // Transactions changed anywhere: follow a moment later, once the server has them
+    const off = txBus.subscribe(() => {
+      clearTimeout(timer)
+      timer = setTimeout(load, 500)
+    })
+    return () => {
+      mounted = false
+      clearTimeout(timer)
+      off?.()
     }
-
-    return () => { mounted = false; if (typeof unsub === 'function') unsub() }
   }, [])
 
-  // Функція конвертації валют через UAH
-  const convertCurrency = useMemo(() => {
-    return (amount, fromCurrency, toCurrency) => {
-      if (!fromCurrency || fromCurrency === toCurrency) return amount
-      
-      const codeMap = { UAH: 980, USD: 840, EUR: 978, GBP: 826, PLN: 985, CHF: 756, CZK: 203, HUF: 348, USDT: 840 }
-      const fromCode = codeMap[fromCurrency] || 980
-      const toCode = codeMap[toCurrency] || 980
-      
-      if (fromCode === toCode) return amount
-      
-      // Конвертуємо через UAH як проміжну валюту
-      let inUAH = amount
-      if (fromCode !== 980) {
-        const rateToUAH = rates?.[`${fromCode}->980`]
-        if (!rateToUAH) return amount // Якщо курс не знайдено, повертаємо оригінальну суму
-        inUAH = amount * rateToUAH
-      }
-      
-      // Потім конвертуємо з UAH в цільову валюту
-      if (toCode === 980) return inUAH
-      const rateFromUAH = rates?.[`${toCode}->980`]
-      if (!rateFromUAH) return inUAH // Якщо курс не знайдено, повертаємо суму в UAH
-      return inUAH / rateFromUAH
-    }
-  }, [rates])
+  const groups = useMemo(
+    () =>
+      BUCKETS.map(key => ({
+        key,
+        meta: KIND_META[KIND_OF_BUCKET[key]],
+        totals: data[key] || {},
+        value: sumIn(data[key], primary, rates),
+      })).filter(g => Object.values(g.totals).some(v => Math.abs(v) >= 0.005)),
+    [data, primary, rates]
+  )
+  const total = groups.reduce((s, g) => s + g.value, 0)
+  const positive = groups.reduce((s, g) => s + Math.max(0, g.value), 0)
 
-  // Обчислюємо загальний баланс (All) в EUR, UAH, USD
+  // Every currency of every group, for the «Всі» history
   const allTotals = useMemo(() => {
-    // Об'єднуємо всі баланси, спочатку сумуємо по валютах
-    const allBalances = {}
-    
-    // Сумуємо баланси по валютах з усіх секцій
-    Object.values([data.cash, data.cards, data.savings]).forEach(section => {
-      Object.entries(section || {}).forEach(([currency, amount]) => {
-        if (amount && Math.abs(amount) > 0.01) {
-          // USDT рахуємо як USD
-          const normalizedCurrency = currency === 'USDT' ? 'USD' : currency
-          
-          if (!allBalances[normalizedCurrency]) {
-            allBalances[normalizedCurrency] = 0
-          }
-          allBalances[normalizedCurrency] += amount
-        }
-      })
-    })
-    
-    // Конвертуємо все в UAH і сумуємо
-    let totalInUAH = 0
-    
-    Object.entries(allBalances).forEach(([currency, amount]) => {
-      const inUAH = convertCurrency(amount, currency, 'UAH')
-      totalInUAH += inUAH
-    })
-    
-    // Якщо загальна сума нульова, повертаємо порожній об'єкт
-    if (Math.abs(totalInUAH) < 0.01) {
-      return {}
+    const out = {}
+    for (const key of BUCKETS) {
+      for (const [cur, v] of Object.entries(data[key] || {})) out[cur] = (out[cur] || 0) + v
     }
-    
-    // Конвертуємо загальну суму в UAH в EUR та USD
-    const result = {
-      UAH: totalInUAH,
-      EUR: convertCurrency(totalInUAH, 'UAH', 'EUR'),
-      USD: convertCurrency(totalInUAH, 'UAH', 'USD')
-    }
-    
-    // Фільтруємо тільки ненульові значення
-    const filtered = {}
-    Object.entries(result).forEach(([currency, amount]) => {
-      if (Math.abs(amount) > 0.01) { // Враховуємо помилки округлення
-        filtered[currency] = amount
-      }
-    })
-    
-    return filtered
-  }, [data, convertCurrency])
+    return out
+  }, [data])
 
-  const sections = useMemo(() => ([
-    { key:'all',     title:'Всі',      icon:<Globe size={14} className="text-brand"/>, totals:allTotals },
-    { key:'cash',    title:'Готівка',     icon:<Wallet size={14} className="text-green-400"/>,  totals:data.cash },
-    { key:'cards',   title:'Картки',      icon:<CreditCard size={14} className="text-blue-400"/>, totals:data.cards },
-    { key:'savings', title:'Заощадження',  icon:<PiggyBank size={14} className="text-brand"/>, totals:data.savings },
-  ]), [data, allTotals])
+  const equivalents = equivalentCurrencies(primary)
+    .map(cur => convertAmount(total, primary, cur, rates))
+    .map((v, i) => (v == null ? null : signed(v, equivalentCurrencies(primary)[i], { hideCents: true })))
+    .filter(Boolean)
+    .join(' · ')
 
-  const current = sections[idx]
-
-  // Determine primary currency for the current section (first non-zero key in its totals)
-  const primaryCurrency = useMemo(() => {
-    const totals = current?.totals || {}
-    const ORDER = ['EUR', 'USD', 'UAH', 'PLN', 'GBP', 'CHF', 'CZK', 'HUF']
-    for (const cur of ORDER) {
-      if (totals[cur] && Math.abs(totals[cur]) > 0.01) return cur
-    }
-    const first = Object.keys(totals).find(k => Math.abs(totals[k] || 0) > 0.01)
-    return first || 'UAH'
-  }, [current])
-
-  // Автоматичний скрол вкладок до вибраної
-  useEffect(() => {
-    // Невелика затримка, щоб DOM встиг оновитися
-    const timeoutId = setTimeout(() => {
-      if (tabButtonsRef.current[idx] && tabsRef.current) {
-        const button = tabButtonsRef.current[idx]
-        const container = tabsRef.current
-        
-        // Використовуємо getBoundingClientRect для точного визначення позицій
-        const buttonRect = button.getBoundingClientRect()
-        const containerRect = container.getBoundingClientRect()
-        
-        // Визначаємо позицію кнопки відносно контейнера
-        const buttonLeftRelative = buttonRect.left - containerRect.left
-        const buttonRightRelative = buttonRect.right - containerRect.left
-        const containerWidth = containerRect.width
-        
-        // Перевіряємо, чи кнопка видима
-        const isVisible = buttonLeftRelative >= 0 && buttonRightRelative <= containerWidth
-        
-        if (!isVisible) {
-          // Обчислюємо необхідний скрол
-          const currentScroll = container.scrollLeft
-          
-          // Якщо кнопка ліворуч від видимої області
-          if (buttonLeftRelative < 0) {
-            // Скролимо так, щоб кнопка була видима зліва
-            const newScroll = currentScroll + buttonLeftRelative - 8
-            container.scrollTo({
-              left: Math.max(0, newScroll),
-              behavior: 'smooth'
-            })
-          } 
-          // Якщо кнопка праворуч від видимої області
-          else if (buttonRightRelative > containerWidth) {
-            // Скролимо так, щоб кнопка була видима справа
-            const scrollDelta = buttonRightRelative - containerWidth + 8
-            const newScroll = currentScroll + scrollDelta
-            const maxScroll = container.scrollWidth - containerWidth
-            container.scrollTo({
-              left: Math.min(maxScroll, newScroll),
-              behavior: 'smooth'
-            })
-          }
-        }
-      }
-    }, 100) // Затримка для оновлення DOM після зміни індексу
-    
-    return () => clearTimeout(timeoutId)
-  }, [idx])
+  const ready = !loading && ratesReady
+  const opened = history === 'all' ? { title: 'Загальний баланс', totals: allTotals } : groups.find(g => g.key === history)
 
   return (
     <motion.div
-      ref={rootRef}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
       className="rounded-3xl bg-gradient-to-b from-white/[0.075] to-white/[0.025] backdrop-blur-xl shadow-glass overflow-hidden border border-white/10"
     >
-      <div className="p-3 border-b border-white/[0.06]">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Wallet size={16} className="text-brand" />
-            <h3 className="text-sm font-semibold text-white">{title}</h3>
-          </div>
-        </div>
-      </div>
-
-      <div className="p-2 border-b border-white/[0.06]">
-        <div 
-          ref={tabsRef}
-          className="flex gap-0.5 overflow-x-auto scrollbar-hide rounded-full bg-white/[0.06] p-0.5"
-        >
-          {sections.map((s, i) => (
-            <button
-              key={s.key}
-              ref={(el) => { tabButtonsRef.current[i] = el }}
-              onClick={() => setIdx(i)}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-full transition-all text-xs font-semibold flex-shrink-0 justify-center whitespace-nowrap ${
-                i===idx ? 'bg-white/[0.14] text-white shadow-sm' : 'text-white/60 hover:text-white'
-              }`}
-            >
-              {s.icon}
-              <span>{s.title}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <motion.div 
-        className="p-3 select-none cursor-pointer group relative"
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-        onClick={() => { if (!didSwipeRef.current) setHistoryOpen(true) }}
-        whileHover={{ backgroundColor: 'rgba(255,107,0,0.04)' }}
-        transition={{ duration: 0.15 }}
+      <button
+        type="button"
+        onClick={() => setHistory('all')}
+        className="group w-full text-left px-4 pt-4 pb-3 hover:bg-white/[0.03] transition-colors"
         title="Переглянути графік балансу"
       >
-        {/* Chart hint icon */}
-        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-          <BarChart2 size={13} className="text-brand-light" />
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Wallet size={15} className="text-brand" />
+            <h3 className="text-[13px] font-semibold text-white/75">{title}</h3>
+          </div>
+          <BarChart2 size={14} className="text-brand-light opacity-0 group-hover:opacity-100 transition-opacity" />
         </div>
+        {ready ? (
+          <>
+            <div className="mt-2 text-[28px] leading-9 font-extrabold tracking-tight text-white tabular-nums">
+              {hidden ? '••••••' : signed(total, primary)}
+            </div>
+            <div className="h-5 text-xs font-medium text-white/50 tabular-nums">{hidden ? '' : equivalents && `≈ ${equivalents}`}</div>
+          </>
+        ) : (
+          <div className="mt-2">
+            <div className="h-9 w-2/3 rounded-xl bg-white/[0.07] animate-pulse" />
+            <div className="mt-1.5 h-3.5 w-1/2 rounded bg-white/[0.06] animate-pulse" />
+          </div>
+        )}
+      </button>
 
-        <div className="min-h-[120px]">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={current?.key || 'empty'}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.2 }}
-              className="flex flex-col"
-            >
-              {loading ? (
-                <div className="flex items-center justify-center py-4 flex-1">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-brand"></div>
-                </div>
-              ) : (
-                <div className="flex-1 flex flex-col justify-center">
-                  <TotalsGrid totals={current?.totals || {}} sectionType={current?.key} isVisible={!hideAllBalances} />
-                </div>
-              )}
-            </motion.div>
-          </AnimatePresence>
-        </div>
-      </motion.div>
+      {ready && groups.length > 0 && (
+        <div className="px-4 pb-4">
+          {/* What the total is made of */}
+          <div className="flex h-1.5 rounded-full overflow-hidden bg-white/[0.06] gap-[2px]">
+            {groups
+              .filter(g => g.value > 0)
+              .map(g => (
+                <span
+                  key={g.key}
+                  className="h-full rounded-full"
+                  style={{ width: `${(g.value / positive) * 100}%`, background: `linear-gradient(90deg, ${g.meta.accent[0]}, ${g.meta.accent[1]})` }}
+                />
+              ))}
+          </div>
 
-      <div className="px-3 pb-2">
-        <div className="flex items-center justify-between">
-          <div className="flex gap-1">
-            {sections.map((_, i) => (
-              <div key={i} className={`h-1 rounded-full transition-all ${i===idx ? 'w-4 bg-brand' : 'w-1 bg-white/15'}`} />
+          <div className="mt-3 grid gap-1">
+            {groups.map(g => (
+              <button
+                key={g.key}
+                type="button"
+                onClick={() => setHistory(g.key)}
+                className="flex items-center gap-2.5 -mx-2 px-2 py-1.5 rounded-xl hover:bg-white/[0.05] transition-colors text-left"
+              >
+                <span className="h-2 w-2 rounded-full shrink-0" style={{ background: g.meta.accent[0] }} />
+                <span className="flex-1 min-w-0">
+                  <span className="block text-[13px] font-semibold text-white/85">
+                    {g.meta.icon} {g.meta.many}
+                  </span>
+                  {/* In the currencies it is in, when that's not just the main one */}
+                  {!hidden && Object.keys(g.totals).some(c => c !== primary) && (
+                    <span className="block text-[11px] text-white/45 truncate tabular-nums">{currencyBreakdown(g.totals)}</span>
+                  )}
+                </span>
+                <span className="text-right shrink-0">
+                  <span className={`block text-[13px] font-bold tabular-nums ${g.value < 0 ? 'text-[#FF6B6B]' : 'text-white'}`}>
+                    {hidden ? '••••' : signed(g.value, primary, { hideCents: true })}
+                  </span>
+                  {positive > 0 && g.value > 0 && (
+                    <span className="block text-[10px] font-semibold text-white/35 tabular-nums">{Math.round((g.value / positive) * 100)}%</span>
+                  )}
+                </span>
+              </button>
             ))}
           </div>
-          <div className="text-xs text-white/55">{idx+1}/{sections.length}</div>
         </div>
-      </div>
+      )}
 
       <BalanceHistoryModal
-        open={historyOpen}
-        onClose={() => setHistoryOpen(false)}
-        bucket={current?.key || 'all'}
-        sectionTitle={current?.title}
-        initialCurrency={primaryCurrency}
-        totals={current?.totals || {}}
+        open={!!opened}
+        onClose={() => setHistory(null)}
+        bucket={history || 'all'}
+        sectionTitle={opened?.title || opened?.meta?.many}
+        initialCurrency={primary}
+        totals={opened?.totals || {}}
       />
     </motion.div>
   )

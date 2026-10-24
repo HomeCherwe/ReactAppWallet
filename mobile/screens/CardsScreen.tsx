@@ -9,7 +9,7 @@ import { BlurView } from 'expo-blur'
 import GlassContextMenu from '../components/GlassContextMenu'
 import { GlassSurface } from '../components/LiquidGlass'
 import { Colors, Typography, Radius } from '../constants/theme'
-import { listCards, deleteCard, setCardExcludedFromStats, Card } from '../api/cards'
+import { listCards, deleteCard, setCardExcludedFromStats, updateCard, Card } from '../api/cards'
 import { getSumByCard } from '../api/transactions'
 import { fmtAmount } from '../utils/format'
 import AddAccountFlow from '../components/AddAccountFlow'
@@ -22,8 +22,17 @@ import { useMenuOverlay } from '../store/useMenuOverlay'
 import { syncBanks } from '../store/useBankSyncStore'
 import { checkForAppUpdate } from '../utils/appUpdate'
 import GlassButton from '../components/GlassButton'
-import { getBucket } from '../utils/currency'
+import { cardLabel } from '../utils/cardLabel'
+import { ACCOUNT_KINDS, AccountKind, accountKind, goalProgress, isEmptyBalance, KIND_META } from '../utils/accountKind'
 import { GlassPressable } from '../components/LiquidGlass'
+
+function emptyAccountsText(n: number) {
+  const mod10 = n % 10
+  const mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return `${n} порожній рахунок`
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} порожні рахунки`
+  return `${n} порожніх рахунків`
+}
 
 export default function CardsScreen() {
   const [cards, setCards] = useState<Card[]>([])
@@ -42,6 +51,7 @@ export default function CardsScreen() {
   const [settingsCard, setSettingsCard] = useState<Card | null>(null)
   // Reconnecting a token bank (Monobank): the add sheet opens straight on its token form
   const [tokenReconnect, setTokenReconnect] = useState<BankProvider | null>(null)
+  const [archiveOpen, setArchiveOpen] = useState(false)
 
   const loadData = useCallback(async () => {
     try {
@@ -94,6 +104,26 @@ export default function CardsScreen() {
     }
   }, [])
 
+  // Name, kind, goal or archive changed in the account's settings
+  const handleCardUpdated = useCallback((card: Card) => {
+    setCards(cs => cs.map(c => (c.id === card.id ? { ...c, ...card } : c)))
+    setSettingsCard(c => (c?.id === card.id ? { ...c, ...card } : c))
+    txBus.emit({ type: 'SYNCED', source: 'card-settings', count: 0 })
+  }, [])
+
+  // Hide (or bring back) accounts in one go; only empty ones are offered for the archive
+  const setArchived = async (list: Card[], value: boolean) => {
+    const ids = new Set(list.map(c => c.id))
+    setCards(cs => cs.map(c => (ids.has(c.id) ? { ...c, archived: value } : c)))
+    try {
+      await Promise.all(list.map(c => updateCard(c.id, { archived: value })))
+      txBus.emit({ type: 'SYNCED', source: 'card-settings', count: 0 })
+    } catch (e: any) {
+      Alert.alert('Не вдалося змінити архів', e?.message || 'Спробуйте ще раз')
+      loadData()
+    }
+  }
+
   const openAddAccount = () => {
     setTokenReconnect(null)
     setAddAccountVisible(true)
@@ -121,32 +151,25 @@ export default function CardsScreen() {
     )
   }
 
+  // One group per account kind (the web's cards page has the same); archived ones on their own
+  const activeCards = useMemo(() => cards.filter(c => !c.archived), [cards])
+  const archivedCards = useMemo(() => cards.filter(c => c.archived), [cards])
   const groupedCards = useMemo(() => {
-    const groups: Record<string, Card[]> = {
-      cards: [],
-      savings: [],
-      cash: [],
-    }
-    cards.forEach(c => {
-      const b = getBucket(c)
-      if (groups[b]) groups[b].push(c)
-    })
+    const groups = Object.fromEntries(ACCOUNT_KINDS.map(k => [k, [] as Card[]])) as Record<AccountKind, Card[]>
+    activeCards.forEach(c => groups[accountKind(c)].push(c))
     return groups
-  }, [cards])
+  }, [activeCards])
+  const balanceOf = (card: Card) => balances[card.id] ?? Number(card.initial_balance || 0)
+  const emptyCards = useMemo(() => activeCards.filter(c => isEmptyBalance(balanceOf(c))), [activeCards, balances])
 
-  // Accent per group: cards orange, savings green, cash amber
-  const ACCENTS: Record<string, [string, string]> = {
-    cards: ['#FF8A2A', '#FF4D00'],
-    savings: ['#34D399', '#0E9F6E'],
-    cash: ['#FBBF24', '#D97706'],
-  }
-  const ICONS: Record<string, string> = { cards: '💳', savings: '🎯', cash: '💵' }
+  const ARCHIVE_ACCENT: [string, string] = ['#6B7280', '#4B5563']
 
   const renderCardItem = (card: Card) => {
-    const bal = balances[card.id] ?? Number(card.initial_balance || 0)
-    const bucket = getBucket(card)
-    const accent = ACCENTS[bucket] ?? ACCENTS.cards
+    const bal = balanceOf(card)
+    const kind = accountKind(card)
+    const accent = card.archived ? ARCHIVE_ACCENT : KIND_META[kind].accent
     const excluded = !!(card.exclude_from_stats || card.bank_exclude_from_stats)
+    const progress = kind === 'savings' ? goalProgress(card, bal) : null
     return (
       <GlassContextMenu
         key={card.id}
@@ -156,7 +179,12 @@ export default function CardsScreen() {
         onPress={() => setCardTxCard(card)}
         actions={[
           { label: 'Транзакції та статистика', icon: 'list', onPress: () => setCardTxCard(card) },
-          { label: 'Налаштування картки', icon: 'tag', onPress: () => setSettingsCard(card) },
+          { label: 'Налаштування рахунку', icon: 'tag', onPress: () => setSettingsCard(card) },
+          ...(card.archived
+            ? [{ label: 'Повернути з архіву', icon: 'archive' as const, onPress: () => setArchived([card], false) }]
+            : isEmptyBalance(bal)
+            ? [{ label: 'Сховати в архів', icon: 'archive' as const, onPress: () => setArchived([card], true) }]
+            : []),
           { label: 'Видалити', icon: 'trash', destructive: true, onPress: () => handleDelete(card) },
         ]}
       >
@@ -165,15 +193,29 @@ export default function CardsScreen() {
         <LinearGradient colors={accent} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={styles.cardAccent} />
         <View style={styles.cardItemLeft}>
           <LinearGradient colors={accent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.cardIconWrap}>
-            <Text style={styles.cardIcon}>{ICONS[bucket] ?? '💳'}</Text>
+            <Text style={styles.cardIcon}>{KIND_META[kind].icon}</Text>
           </LinearGradient>
           <View style={styles.cardTexts}>
             <Text style={styles.cardName} numberOfLines={1}>{card.name}</Text>
             <Text style={styles.cardBank} numberOfLines={1}>
               {card.bank || 'Рахунок'}
               {card.card_number ? ` · •• ${String(card.card_number).slice(-4)}` : ''}
+              {progress != null ? ` · ціль ${fmtAmount(Number(card.goal_amount), card.currency)}` : ''}
               {excluded ? ' · поза статистикою' : ''}
             </Text>
+            {progress != null && (
+              <View style={styles.goalRow}>
+                <View style={styles.goalTrack}>
+                  <LinearGradient
+                    colors={accent}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={[styles.goalFill, { width: `${progress * 100}%` }]}
+                  />
+                </View>
+                <Text style={styles.goalPct}>{progress >= 1 ? '✓' : `${Math.floor(progress * 100)}%`}</Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -212,7 +254,9 @@ export default function CardsScreen() {
       <View style={styles.header}>
         <View>
           <Text style={styles.headerTitle}>Рахунки та картки</Text>
-          <Text style={styles.headerSub}>{cards.length} активних рахунків</Text>
+          <Text style={styles.headerSub}>
+            {activeCards.length} активних рахунків{archivedCards.length > 0 ? ` · ${archivedCards.length} в архіві` : ''}
+          </Text>
         </View>
         <GlassPressable style={styles.addBtn} onPress={openAddAccount}>
           <Text style={styles.addBtnText}>+ Додати</Text>
@@ -262,22 +306,40 @@ export default function CardsScreen() {
               </View>
             ) : (
               <View>
-                {groupedCards.cards.length > 0 && (
-                  <View style={styles.groupSection}>
-                    <Text style={styles.groupTitle}>💳 Картки</Text>
-                    {groupedCards.cards.map(renderCardItem)}
+                {ACCOUNT_KINDS.map(kind =>
+                  groupedCards[kind].length > 0 ? (
+                    <View key={kind} style={styles.groupSection}>
+                      <Text style={styles.groupTitle}>
+                        {KIND_META[kind].icon} {KIND_META[kind].many}
+                      </Text>
+                      {groupedCards[kind].map(renderCardItem)}
+                    </View>
+                  ) : null
+                )}
+
+                {/* Accounts with nothing on them: one tap hides them all */}
+                {emptyCards.length >= 2 && (
+                  <View style={styles.emptyHint}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.emptyHintTitle}>🗄 {emptyAccountsText(emptyCards.length)}</Text>
+                      <Text style={styles.emptyHintSub} numberOfLines={2}>
+                        {emptyCards.map(c => cardLabel(c)).join(', ')}
+                      </Text>
+                    </View>
+                    <GlassPressable style={styles.emptyHintBtn} onPress={() => setArchived(emptyCards, true)}>
+                      <Text style={styles.emptyHintBtnText}>Сховати</Text>
+                    </GlassPressable>
                   </View>
                 )}
-                {groupedCards.savings.length > 0 && (
+
+                {archivedCards.length > 0 && (
                   <View style={styles.groupSection}>
-                    <Text style={styles.groupTitle}>🎯 Скарбнички</Text>
-                    {groupedCards.savings.map(renderCardItem)}
-                  </View>
-                )}
-                {groupedCards.cash.length > 0 && (
-                  <View style={styles.groupSection}>
-                    <Text style={styles.groupTitle}>💵 Готівка</Text>
-                    {groupedCards.cash.map(renderCardItem)}
+                    <TouchableOpacity activeOpacity={0.7} onPress={() => setArchiveOpen(o => !o)}>
+                      <Text style={[styles.groupTitle, styles.archiveTitle]}>
+                        🗄 Архів · {archivedCards.length} {archiveOpen ? '▴' : '▾'}
+                      </Text>
+                    </TouchableOpacity>
+                    {archiveOpen && <View style={styles.archiveList}>{archivedCards.map(renderCardItem)}</View>}
                   </View>
                 )}
               </View>
@@ -304,6 +366,7 @@ export default function CardsScreen() {
         balance={settingsCard ? balances[settingsCard.id] : undefined}
         excluded={!!settingsCard?.exclude_from_stats}
         onToggleExcluded={handleToggleExcluded}
+        onUpdated={handleCardUpdated}
         onClose={() => setSettingsCard(null)}
       />
 
@@ -408,4 +471,30 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     marginLeft: 4,
   },
+  archiveTitle: { color: Colors.textSub },
+  archiveList: { opacity: 0.7 },
+  goalRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
+  goalTrack: { flex: 1, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
+  goalFill: { height: '100%', borderRadius: 3 },
+  goalPct: { fontSize: 11, fontWeight: '700', color: Colors.textSub, fontVariant: ['tabular-nums'] },
+  emptyHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    marginBottom: 24,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+  },
+  emptyHintTitle: { fontSize: 14, fontWeight: '700', color: Colors.white },
+  emptyHintSub: { fontSize: 12, color: Colors.textSub, marginTop: 2 },
+  emptyHintBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: Radius.pill,
+    backgroundColor: 'rgba(255, 255, 255, 0.10)',
+  },
+  emptyHintBtnText: { fontSize: 13, fontWeight: '700', color: Colors.white },
 })

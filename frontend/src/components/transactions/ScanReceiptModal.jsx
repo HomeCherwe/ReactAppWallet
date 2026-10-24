@@ -84,7 +84,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
     }
     ;(async () => {
       const [c, cats] = await Promise.all([listCards(), getTransactionCategories()])
-      setCards(c || [])
+      setCards((c || []).filter(card => !card.archived))
       const merged = [...new Set([...CATEGORY_OPTIONS, ...(cats || [])])]
       setCategories(merged)
     })()

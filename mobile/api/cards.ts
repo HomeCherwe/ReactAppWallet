@@ -1,6 +1,7 @@
 ﻿import { apiFetch } from '../lib/apiFetch'
 import { supabase } from '../lib/supabase'
 import { getCachedCards, invalidateCardsCache } from '../utils/dataCache'
+import { AccountKind } from '../utils/accountKind'
 
 export interface Card {
   id: string
@@ -16,6 +17,12 @@ export interface Card {
   /** Card excluded from statistics (cards.exclude_from_stats) */
   exclude_from_stats?: boolean
   color?: string
+  /** What the account is for (cards.kind); missing before the database has it — see accountKind() */
+  kind?: AccountKind
+  /** A piggy bank's goal, in its currency */
+  goal_amount?: number | null
+  /** Hidden from lists and pickers (only an empty account), history kept */
+  archived?: boolean
 }
 
 /**
@@ -57,11 +64,15 @@ async function _listCardsBase(): Promise<Card[]> {
     console.warn('Backend /api/cards unreachable, fallback to Supabase:', err)
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return []
-    const { data, error } = await supabase
-      .from('cards')
-      .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, banks(name, iban, bic, beneficiary, exclude_from_stats)')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
+    const query = (extra: string) =>
+      supabase
+        .from('cards')
+        .select('id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, banks(name, iban, bic, beneficiary, exclude_from_stats)' + extra)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+    // kind / goal_amount / archived come with a database migration; without it, load the rest
+    let { data, error } = await query(', kind, goal_amount, archived')
+    if (error) ({ data, error } = await query(''))
     if (error) throw error
     return (data || []).map((card: any) => ({
       ...card,
@@ -86,6 +97,8 @@ export async function createCard(payload: {
   bg_url?: string | undefined
   bank_exclude_from_stats?: boolean
   color?: string
+  kind?: AccountKind
+  goal_amount?: number | null
 }): Promise<Card> {
   try {
     const data = await apiFetch<Card>('/api/cards', {
@@ -117,14 +130,15 @@ export async function updateCard(id: string, patch: Partial<Card>): Promise<Card
     })
     invalidateCardsCache()
     return data
-  } catch (err) {
+  } catch (err: any) {
     const { data, error } = await supabase
       .from('cards')
       .update(patch)
       .eq('id', id)
       .select()
       .single()
-    if (error) throw error
+    // The server's own message (e.g. «…after the database update») says more than the fallback's
+    if (error) throw err?.message ? err : error
     invalidateCardsCache()
     return data as Card
   }

@@ -1,4 +1,4 @@
-// Card look per bank — the same themes, buckets and number mask as the iPhone app
+// Card look per bank — the same themes and number mask as the iPhone app
 // (mobile/components/CardCarousel.tsx, mobile/utils/currency.ts)
 
 const ORANGE = '#FF6B00'
@@ -110,14 +110,6 @@ export function getCardTheme(bank, name) {
 export function cardBackground(theme) {
   const [from, to] = theme.gradient
   return `linear-gradient(135deg, ${from}, ${to})`
-}
-
-/** Which group the card goes to on the cards page: cards, savings or cash */
-export function getBucket(card) {
-  const full = `${card?.bank || ''} ${card?.name || ''}`.toLowerCase()
-  if (full.includes('збер') || full.includes('savings')) return 'savings'
-  if (full.includes('гот') || full.includes('cash')) return 'cash'
-  return 'cards'
 }
 
 export function formatMaskedNumber(num, bank, name) {

@@ -10,6 +10,7 @@ import DeleteTxModal from '../transactions/DeleteTxModal'
 import { apiFetch } from '../../utils.jsx'
 import { fmtAmount } from '../../utils/format'
 import { listCards } from '../../api/cards'
+import { accountKind } from '../../utils/accountKind'
 import { isCategoryExcluded, useExcludedCategories } from '../../utils/statsCategories'
 import { deleteTransaction, archiveTransaction } from '../../api/transactions'
 import useMonoRates from '../../hooks/useMonoRates'
@@ -166,14 +167,9 @@ export default function CategoryPieChart() {
   useEffect(() => {
     listCards().then(cards => {
       const map = {}
-      cards.forEach(c => { 
-        const bank = (c.bank || '').toLowerCase()
-        const name = (c.name || '').toLowerCase()
-        map[c.id] = {
-          currency: c.currency || 'UAH',
-          isBinance: bank.includes('binance') || name.includes('binance'),
-          isSavings: bank.includes('збер') || bank.includes('savings') || name.includes('збер') || name.includes('savings')
-        }
+      cards.forEach(c => {
+        const kind = accountKind(c)
+        map[c.id] = { currency: c.currency || 'UAH', isBinance: kind === 'investment', isSavings: kind === 'savings' }
       })
       setCardMap(map)
     }).catch(() => {})
@@ -303,7 +299,8 @@ export default function CategoryPieChart() {
           // Виключаємо Binance транзакції (перевіряємо по card_id або по card)
           if (tx.card_id && cardMap[tx.card_id]?.isBinance) return false
           
-          const card = (tx.card || '').toLowerCase()
+          // Without an account only the label is left to go by
+          const card = tx.card_id ? '' : (tx.card || '').toLowerCase()
           if (card.includes('binance')) return false
           
           // Виключаємо Savings транзакції (перевіряємо по card_id або по card)

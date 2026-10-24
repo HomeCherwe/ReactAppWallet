@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { getCachedSumByCard, invalidateSumByCardCache } from '../utils/dataCache'
 import { isSyncCategory } from '../utils/cardExclusion'
 import { isCategoryExcluded } from '../utils/statsCategories'
+import { kindOutOfStats } from '../utils/accountKind'
 
 export interface Transaction {
   id: string
@@ -754,13 +755,10 @@ export async function getRecentMonthsStats(
       excludeUsdt,
     })
 
-    const cardMap = new Map<string, { isSavings: boolean; isBinance: boolean; currency: string }>()
+    // Piggy banks and investments stay out of the month's income and spending (like the web)
+    const cardMap = new Map<string, { outOfStats: boolean; currency: string }>()
     ;(cards || []).forEach(c => {
-      const bank = String(c.bank || '').toLowerCase()
-      const name = String(c.name || '').toLowerCase()
-      const isSavings = bank.includes('накопич') || bank.includes('savings')
-      const isBinance = bank.includes('binance') || name.includes('binance')
-      cardMap.set(c.id, { isSavings, isBinance, currency: (c.currency || 'UAH').toUpperCase() })
+      cardMap.set(c.id, { outOfStats: kindOutOfStats(c), currency: (c.currency || 'UAH').toUpperCase() })
     })
 
     const isExcludedFromStats = (tx: any) => {
@@ -780,12 +778,8 @@ export async function getRecentMonthsStats(
       if (tx.archives || tx.is_transfer || isExcludedFromStats(tx)) continue
       if (tx.card_id && excludedCards.has(tx.card_id)) continue
 
-      const cardInfo = (tx.card_id ? cardMap.get(tx.card_id) : null) || {
-        isSavings: false,
-        isBinance: false,
-        currency: 'UAH',
-      }
-      if (cardInfo.isSavings) continue
+      const cardInfo = (tx.card_id ? cardMap.get(tx.card_id) : null) || { outOfStats: false, currency: 'UAH' }
+      if (cardInfo.outOfStats) continue
 
       const amt = Number(tx.amount_stat ?? tx.amount ?? 0)
       const txCur = cardInfo.currency

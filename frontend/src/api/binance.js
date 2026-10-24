@@ -39,7 +39,7 @@ export async function connectBinance(apiKey, apiSecret) {
     const banks = await listBanks()
     const bank = banks.find(b => String(b.name || '').toLowerCase().includes('binance')) ||
       await createBank({ name: 'Binance' })
-    await createCard({ bank_id: bank.id, name: 'Spot', currency: 'USDT' })
+    await createCard({ bank_id: bank.id, name: 'Spot', currency: 'USDT', kind: 'investment' })
   }
 
   return syncBinance()

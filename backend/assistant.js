@@ -3,6 +3,7 @@
 // Read-only for now: it can't add, change or delete anything.
 
 import { readPreferences, userCategories } from './insights.js'
+import { accountKind, kindOutOfStats, withCardV2 } from './accountKind.js'
 
 // An account as the user sees it in the apps: bank + card name («Готівка EUR», not just «EUR»)
 function accountLabel(card) {
@@ -85,15 +86,16 @@ async function loadContext(supabase, userId, offsetMin) {
   const [prefs, { data: cards }, categories, rates] = await Promise.all([
     readPreferences(supabase, userId),
     // Never card numbers, CVV or IBAN
-    supabase
-      .from('cards')
-      .select('id, name, bank, currency, initial_balance, exclude_from_stats, banks(exclude_from_stats)')
-      .eq('user_id', userId),
+    withCardV2(extra =>
+      supabase
+        .from('cards')
+        .select('id, name, bank, currency, initial_balance, exclude_from_stats, banks(exclude_from_stats)' + extra)
+        .eq('user_id', userId)
+    ),
     userCategories(supabase, userId).catch(() => []),
     eurRates(),
   ])
   const list = (cards || []).map(c => {
-    const label = `${c.bank || ''} ${c.name || ''}`.toLowerCase()
     return {
       id: c.id,
       name: c.name,
@@ -101,11 +103,12 @@ async function loadContext(supabase, userId, offsetMin) {
       currency: normCurrency(c.currency),
       initial: Number(c.initial_balance || 0),
       bankOff: !!c.banks?.exclude_from_stats,
-      // Left out of statistics: switched off, savings, crypto
-      notInStats:
-        !!c.exclude_from_stats ||
-        !!c.banks?.exclude_from_stats ||
-        ['збер', 'накопич', 'savings', 'binance'].some(w => label.includes(w)),
+      // card / cash / savings (a piggy bank) / investment, as the apps group them
+      kind: accountKind(c),
+      goal: c.goal_amount ? Number(c.goal_amount) : null,
+      archived: !!c.archived,
+      // Left out of statistics: switched off, savings, investments
+      notInStats: !!c.exclude_from_stats || !!c.banks?.exclude_from_stats || kindOutOfStats(c),
     }
   })
   return {
@@ -242,7 +245,8 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'get_balances',
-      description: 'Current balance of every card / account (as the app shows it) and the total in the main currency.',
+      description:
+        'Current balance of every account (as the app shows it) and the total in the main currency. Each account has a kind: card, cash, savings (a piggy bank, maybe with a goal in its currency) or investment.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -350,10 +354,18 @@ async function runTool(name, args, { supabase, userId, ctx, seen }) {
       .filter(c => !c.bankOff)
       .map(c => {
         const balance = c.initial + (sumBy.get(c.id) || 0)
-        return { name: c.name, bank: c.bank, currency: c.currency, balance: round2(balance), in_main: round2(ctx.convert(balance, c.currency, ctx.currency)) }
+        return {
+          name: c.name,
+          bank: c.bank,
+          kind: c.kind,
+          currency: c.currency,
+          balance: round2(balance),
+          in_main: round2(ctx.convert(balance, c.currency, ctx.currency)),
+          ...(c.goal && { goal: c.goal }),
+        }
       })
     const cashSum = (cash || []).reduce((s, t) => s + Number(t.amount || 0), 0)
-    if (Math.abs(cashSum) > 0.005) cards.push({ name: 'Готівка', bank: null, currency: 'UAH', balance: round2(cashSum), in_main: round2(ctx.convert(cashSum, 'UAH', ctx.currency)) })
+    if (Math.abs(cashSum) > 0.005) cards.push({ name: 'Готівка', bank: null, kind: 'cash', currency: 'UAH', balance: round2(cashSum), in_main: round2(ctx.convert(cashSum, 'UAH', ctx.currency)) })
     return { currency: ctx.currency, total: round2(cards.reduce((s, c) => s + c.in_main, 0)), accounts: cards }
   }
 
@@ -427,7 +439,10 @@ async function runTool(name, args, { supabase, userId, ctx, seen }) {
 // ---------------------------------------------------------------------------
 
 function systemPrompt(ctx, today, focus) {
-  const cards = ctx.cards.filter(c => !c.bankOff).map(c => `${c.name}${c.bank ? ` (${c.bank})` : ''}, ${c.currency}`)
+  const KIND = { card: 'картка', cash: 'готівка', savings: 'скарбничка', investment: 'інвестиції' }
+  const cards = ctx.cards
+    .filter(c => !c.bankOff && !c.archived)
+    .map(c => `${c.name}${c.bank ? ` (${c.bank})` : ''}, ${c.currency}, ${KIND[c.kind]}${c.goal ? `, ціль ${c.goal}` : ''}`)
   return `Ти — AI-асистент у застосунку MyWallet (облік особистих фінансів). Допомагаєш людині розібратися з її грошима.
 Сьогодні ${today}. Основна валюта: ${ctx.currency}.
 Рахунки: ${cards.join('; ') || 'немає'}.

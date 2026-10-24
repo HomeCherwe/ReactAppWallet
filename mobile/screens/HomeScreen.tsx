@@ -66,6 +66,10 @@ import SplitTxModal from '../components/SplitTxModal'
 import ScanReceiptModal from '../components/ScanReceiptModal'
 
 import BalanceHistoryModal from '../components/BalanceHistoryModal'
+import BalanceSplit from '../components/BalanceSplit'
+import SavingsCard from '../components/SavingsCard'
+import AddCardModal from '../components/AddCardModal'
+import { Bucket, BUCKETS, KIND_META, KIND_OF_BUCKET } from '../utils/accountKind'
 import { triggerErrorHaptic, triggerLightHaptic, triggerSuccessHaptic } from '../utils/haptics'
 import { acceptSuggestions, autoCategorize } from '../api/insights'
 import { supabase } from '../lib/supabase'
@@ -80,14 +84,14 @@ import {
   unlinkRefund,
   Transaction,
 } from '../api/transactions'
-import { fetchTotalsByBucket, TotalsData } from '../api/totals'
+import { emptyTotals, fetchTotalsByBucket, TotalsData } from '../api/totals'
 import { getPreferences } from '../api/preferences'
 import {
   fetchExchangeRates,
   convertCurrency,
   formatMoney,
-  getBucket,
   RatesMap,
+  sumIn,
 } from '../utils/currency'
 import {
   getStoredPrimaryCurrency,
@@ -96,7 +100,6 @@ import {
 } from '../utils/settings'
 import { GlassPressable } from '../components/LiquidGlass'
 
-type BucketTab = 'all' | 'cards' | 'savings' | 'cash'
 
 interface HomeScreenProps {
   onNavigateToCards?: () => void
@@ -134,6 +137,10 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
   // «Зробити переказом» from a transaction's long press
   const [transferFor, setTransferFor] = useState<Transaction | null>(null)
   const [historyVisible, setHistoryVisible] = useState(false)
+  // Which balance the history opens on: the whole one or a group's (a row under the total)
+  const [historyBucket, setHistoryBucket] = useState<'all' | Bucket>('all')
+  // «Нова скарбничка» (Home's piggy banks, the + menu's goal)
+  const [addPiggyVisible, setAddPiggyVisible] = useState(false)
 
   // Tx operations modals
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null)
@@ -167,23 +174,9 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
   }, [])
   const menuOpen = useMenuOverlay(s => !!s.menu)
   const [balances, setBalances] = useState<Record<string, number>>({})
-  const [totals, setTotals] = useState<TotalsData>({ cash: {}, cards: {}, savings: {} })
+  const [totals, setTotals] = useState<TotalsData>(emptyTotals)
   const [rates, setRates] = useState<RatesMap | null>(null)
   const [recentMonthsStats, setRecentMonthsStats] = useState<MonthStat[]>([])
-  const [bucketTab, setBucketTab] = useState<BucketTab>('all')
-  const bucketTabAnim = useRef(new Animated.Value(0)).current
-
-  const setBucketTabWithAnim = (tab: BucketTab) => {
-    triggerLightHaptic()
-    setBucketTab(tab)
-    const tabIndex = ['all', 'cards', 'savings', 'cash'].indexOf(tab)
-    Animated.spring(bucketTabAnim, {
-      toValue: tabIndex,
-      tension: 75,
-      friction: 9,
-      useNativeDriver: false,
-    }).start()
-  }
 
   const [loading, setLoading] = useState(true)
   const txFeed = useTransactionFeed({ excludeCardIds: excludedCardIds, enabled: !loading })
@@ -290,44 +283,14 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
     }
   }
 
-  const displayedBalance = useMemo(() => {
-    let totalInPrimary = 0
-    
-    const sectionsToInclude = []
-    if (bucketTab === 'all') {
-      sectionsToInclude.push(totals.cash, totals.cards, totals.savings)
-    } else if (bucketTab === 'cash') {
-      sectionsToInclude.push(totals.cash)
-    } else if (bucketTab === 'cards') {
-      sectionsToInclude.push(totals.cards)
-    } else if (bucketTab === 'savings') {
-      sectionsToInclude.push(totals.savings)
-    }
-
-    const allBalances: Record<string, number> = {}
-
-    sectionsToInclude.forEach(section => {
-      Object.entries(section || {}).forEach(([currency, amount]) => {
-        if (amount && Math.abs(amount) > 0.01) {
-          const normalizedCurrency = currency === 'USDT' ? 'USD' : currency
-          if (!allBalances[normalizedCurrency]) {
-            allBalances[normalizedCurrency] = 0
-          }
-          allBalances[normalizedCurrency] += amount
-        }
-      })
-    })
-
-    Object.entries(allBalances).forEach(([currency, amount]) => {
-      const inPrimary = convertCurrency(amount, currency, primaryCurrency, rates)
-      totalInPrimary += inPrimary
-    })
-
-    return totalInPrimary
-  }, [totals, bucketTab, primaryCurrency, rates])
+  // Everything (cards, piggy banks, cash, investments) in the main currency, like the web
+  const displayedBalance = useMemo(
+    () => BUCKETS.reduce((sum, b) => sum + sumIn(totals[b], primaryCurrency, rates), 0),
+    [totals, primaryCurrency, rates]
+  )
 
   const allEquivalents = useMemo(() => {
-    if (bucketTab !== 'all' || displayedBalance === 0) return null
+    if (displayedBalance === 0) return null
 
     if (primaryCurrency === 'UAH') {
       const eur = convertCurrency(displayedBalance, 'UAH', 'EUR', rates)
@@ -346,17 +309,20 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
       const eur = convertCurrency(displayedBalance, primaryCurrency, 'EUR', rates)
       return `≈ ${formatMoney(uah, 'UAH', { hideCents: true })} • ${formatMoney(eur, 'EUR', { hideCents: true })}`
     }
-  }, [displayedBalance, bucketTab, primaryCurrency, rates])
+  }, [displayedBalance, primaryCurrency, rates])
+
+  // Archived accounts keep their history (the feed, stats) but aren't offered or shown as cards
+  const activeCards = useMemo(() => cards.filter(c => !c.archived), [cards])
 
   // Stable props so the memoized carousel/list skip re-rendering when a modal opens
   const carouselCards = useMemo(
     () =>
       showFavoritesOnly && favoriteCardIds.length > 0
-        ? cards
+        ? activeCards
             .filter(c => favoriteCardIds.includes(c.id))
             .sort((a, b) => favoriteCardIds.indexOf(a.id) - favoriteCardIds.indexOf(b.id))
-        : cards,
-    [cards, showFavoritesOnly, favoriteCardIds]
+        : activeCards,
+    [activeCards, showFavoritesOnly, favoriteCardIds]
   )
 
   // Tap on a card: its transactions (settings are one tap away in that sheet)
@@ -456,14 +422,17 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
     [primaryCurrency]
   )
 
-  const getBucketLabel = () => {
-    switch (bucketTab) {
-      case 'all': return 'Загальний баланс'
-      case 'cards': return 'Баланс карток'
-      case 'savings': return 'Баланс заощаджень'
-      case 'cash': return 'Баланс готівки'
-    }
+  const openHistory = (bucket: 'all' | Bucket) => {
+    setHistoryBucket(bucket)
+    setHistoryVisible(true)
   }
+
+  // Name, kind, goal or archive changed in the account's settings
+  const handleCardUpdated = useCallback((card: Card) => {
+    setCards(cs => cs.map(c => (c.id === card.id ? { ...c, ...card } : c)))
+    setSettingsCard(c => (c?.id === card.id ? { ...c, ...card } : c))
+    loadData()
+  }, [loadData])
 
   const refreshAfterTxChange = () => {
     loadData()
@@ -616,9 +585,9 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         {/* Balance Card */}
         <View style={styles.balanceCardWrapper}>
           <GlassCard style={styles.balanceCard} padding={22}>
-            <TouchableOpacity activeOpacity={0.8} onPress={() => { triggerLightHaptic(); setHistoryVisible(true); }}>
+            <TouchableOpacity activeOpacity={0.8} onPress={() => { triggerLightHaptic(); openHistory('all'); }}>
               <View style={styles.balanceHeaderRow}>
-                <Text style={styles.balanceLabel}>{getBucketLabel()}</Text>
+                <Text style={styles.balanceLabel}>Загальний баланс</Text>
                 <View style={styles.balanceHeaderActions}>
                   <GlassPressable
                     style={styles.currencyPillBtn}
@@ -666,6 +635,19 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
                 </Animated.View>
               )}
             </TouchableOpacity>
+
+            {/* What the total is made of: cards, piggy banks, cash, investments */}
+            {!loading && (
+              <Animated.View style={{ opacity: contentOpacity }}>
+                <BalanceSplit
+                  totals={totals}
+                  rates={rates}
+                  primaryCurrency={primaryCurrency}
+                  hidden={hideBalances}
+                  onPressBucket={openHistory}
+                />
+              </Animated.View>
+            )}
 
             {loading ? (
               <View>
@@ -815,6 +797,20 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         </View>
 
 
+        {/* Piggy banks: what's put aside, by currency and goal (the web dashboard has the same) */}
+        <View style={styles.section}>
+          <SavingsCard
+            cards={cards}
+            balances={balances}
+            rates={rates}
+            primaryCurrency={primaryCurrency}
+            hidden={hideBalances}
+            loading={loading}
+            onPressAccount={handlePressCard}
+            onAdd={() => setAddPiggyVisible(true)}
+          />
+        </View>
+
         {/* Cards Carousel */}
         <View style={styles.section}>
           <CardCarousel
@@ -901,7 +897,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         onPress={() => setAddTxVisible(true)}
         onAddCard={() => setAddCardVisible(true)}
         onTransfer={() => setTransferVisible(true)}
-        onAddGoal={() => setAddCardVisible(true)}
+        onAddGoal={() => setAddPiggyVisible(true)}
         onScan={() => setScanVisible(true)}
         onAssistant={() => setAssistant({ tx: null })}
         onLongPress={() => setQuickActionPopupVisible(true)}
@@ -915,14 +911,14 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         onAddTransaction={() => setAddTxVisible(true)}
         onAddCard={() => setAddCardVisible(true)}
         onTransfer={() => setTransferVisible(true)}
-        onAddGoal={() => setAddCardVisible(true)}
+        onAddGoal={() => setAddPiggyVisible(true)}
         onScan={() => setScanVisible(true)}
         onAssistant={() => setAssistant({ tx: null })}
       />
 
       <TransferFromTxSheet
         tx={transferFor}
-        cards={cards}
+        cards={activeCards}
         hidden={hideBalances}
         onClose={() => setTransferFor(null)}
         onDone={refreshAfterTxChange}
@@ -942,15 +938,24 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         balance={settingsCard ? balances[settingsCard.id] : undefined}
         excluded={!!settingsCard && excludedCardIds.includes(settingsCard.id)}
         onToggleExcluded={handleToggleExcluded}
+        onUpdated={handleCardUpdated}
         onClose={() => setSettingsCard(null)}
       />
 
       <AddTransactionModal
         visible={addTxVisible}
         onClose={() => setAddTxVisible(false)}
-        cards={cards}
+        cards={activeCards}
         excludedCardIds={excludedCardIds}
         primaryCurrency={primaryCurrency}
+        onSuccess={onRefresh}
+      />
+
+      <AddCardModal
+        visible={addPiggyVisible}
+        onClose={() => setAddPiggyVisible(false)}
+        initialKind="savings"
+        defaultCurrency={primaryCurrency}
         onSuccess={onRefresh}
       />
 
@@ -1013,7 +1018,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
       {/* Transfers */}
       <TransferModal
         visible={transferVisible}
-        cards={cards}
+        cards={activeCards}
         onClose={() => setTransferVisible(false)}
         onDone={onRefresh}
       />
@@ -1021,7 +1026,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
       {/* Receipt scanning */}
       <ScanReceiptModal
         visible={scanVisible}
-        cards={cards}
+        cards={activeCards}
         onClose={() => setScanVisible(false)}
         onSaved={onRefresh}
       />
@@ -1029,7 +1034,8 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
       <BalanceHistoryModal
         visible={historyVisible}
         onClose={() => setHistoryVisible(false)}
-        bucket={bucketTab}
+        bucket={historyBucket}
+        sectionTitle={historyBucket === 'all' ? 'Загальний баланс' : KIND_META[KIND_OF_BUCKET[historyBucket]].many}
         initialCurrency={primaryCurrency}
         totals={totals}
       />
@@ -1083,22 +1089,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.green, bottom: 1, right: 1,
     borderWidth: 2, borderColor: Colors.bg,
   },
-  bucketTabsContainer: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 14, padding: 4, marginBottom: 14, gap: 4,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', overflow: 'hidden',
-  },
-  bucketTabPill: {
-    position: 'absolute', top: 4, bottom: 4, borderRadius: 10,
-    overflow: 'hidden', zIndex: 1,
-  },
-  bucketTab: {
-    flex: 1, paddingVertical: 7, alignItems: 'center', justifyContent: 'center',
-    borderRadius: 10, zIndex: 2,
-  },
-  bucketTabText: { fontSize: 12, fontWeight: '600', color: Colors.textSub },
-  bucketTabTextActive: { color: Colors.white, fontWeight: '700' },
   balanceCardWrapper: { marginBottom: 18 },
   balanceCard: { },
   balanceHeaderRow: {

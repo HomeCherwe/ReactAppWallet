@@ -15,6 +15,7 @@ import { apiFetch } from '../utils.jsx'
 import { txBus } from '../utils/txBus'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { listCards } from '../api/cards'
+import { accountKind } from '../utils/accountKind'
 import useMonoRates from '../hooks/useMonoRates'
 import { usePrimaryCurrency, convertAmount, currencySymbol } from '../utils/primaryCurrency'
 import { isCategoryExcluded, useExcludedCategories } from '../utils/statsCategories'
@@ -84,6 +85,11 @@ function fmtLabel(iso) {
 //   * If transfer is to savings -> count only the 'from' (expense) side and skip the 'to'
 //   * If transfer between non-savings cards -> ignore both sides
 // - Non-transfer transactions (normal income/expense) are counted unless they are savings
+// A piggy bank's transaction: its account's kind (is_savings, attached on load); a transaction
+// without an account only has its label to go by
+const isSavingsTx = (t) =>
+  !!t.is_savings || (!t.card_id && /збер|savings/.test(String(t.card || '').toLowerCase()))
+
 function getIncludedTxIds(txsArg = [], modeArg = 'earning', currencyArg) {
   const included = new Set()
 
@@ -129,8 +135,7 @@ function getIncludedTxIds(txsArg = [], modeArg = 'earning', currencyArg) {
     if (t.archives) continue
     if (t.is_transfer) continue
     if (isExcludedFromStats(t)) continue
-    // determine savings either from explicit flag or from card label
-    const tIsSavings = !!t.is_savings || String(t.card || '').toLowerCase().includes('збер') || String(t.card || '').toLowerCase().includes('savings')
+    const tIsSavings = isSavingsTx(t)
     if (tIsSavings) continue
     if (!curMatch(t)) continue
     const amt = Number(amountForStats(t) || 0)
@@ -150,9 +155,8 @@ function getIncludedTxIds(txsArg = [], modeArg = 'earning', currencyArg) {
 
     // if we have both sides
     if (src && tgt) {
-      // derive savings flags from explicit or card label
-      const srcSavings = !!src.is_savings || String(src.card || '').toLowerCase().includes('збер') || String(src.card || '').toLowerCase().includes('savings')
-      const tgtSavings = !!tgt.is_savings || String(tgt.card || '').toLowerCase().includes('збер') || String(tgt.card || '').toLowerCase().includes('savings')
+      const srcSavings = isSavingsTx(src)
+      const tgtSavings = isSavingsTx(tgt)
 
       // both non-savings -> ignore
       if (!srcSavings && !tgtSavings) continue
@@ -188,7 +192,7 @@ function getIncludedTxIds(txsArg = [], modeArg = 'earning', currencyArg) {
       continue
     }
     // if 'from' and is_savings -> skip expense from savings
-    const singleSavings = !!single.is_savings || String(single.card || '').toLowerCase().includes('збер') || String(single.card || '').toLowerCase().includes('savings')
+    const singleSavings = isSavingsTx(single)
     if (single.transfer_role === 'from' && singleSavings) {
       continue
     }
@@ -474,9 +478,7 @@ setPrefsLoaded(true)
         
         const cards = allCards.filter(c => cardIds.includes(c.id)) // Filter to needed IDs
         for (const c of cards || []) {
-          const bank = (c?.bank || '') + ' ' + (c?.name || '')
-          const isSavings = String(bank).toLowerCase().includes('збер') || String(bank).toLowerCase().includes('savings')
-          cardsMap.set(c.id, { currency: (c.currency || 'UAH').toUpperCase(), isSavings })
+          cardsMap.set(c.id, { currency: (c.currency || 'UAH').toUpperCase(), isSavings: accountKind(c) === 'savings' })
         }
       }
 
