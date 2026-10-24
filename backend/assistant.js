@@ -374,7 +374,7 @@ async function runTool(name, args, { supabase, userId, ctx, seen }) {
       .from('subscriptions')
       .select('name, amount, currency, frequency, charges_per_period, is_active, next_execution_at, last_executed_at, category')
       .eq('user_id', userId)
-      .eq('source', 'detected')
+      .in('source', ['detected', 'linked'])
       .eq('hidden', false)
     const monthly = s => {
       const per = Number(s.amount) * Math.max(1, s.charges_per_period || 1)

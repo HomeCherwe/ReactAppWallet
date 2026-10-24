@@ -12,6 +12,7 @@ import BankSyncIndicator from './BankSyncIndicator'
 import TxSearchBar from './TxSearchBar'
 import PossibleDuplicates from './PossibleDuplicates'
 import TxRow, { RowMode, closeSwipedRow, fmtMoney } from './TxRow'
+import AddToSubscriptionSheet from './AddToSubscriptionSheet'
 import { MenuAction, MenuFrame, openMenu as openMenuOverlay } from '../store/useMenuOverlay'
 import { pinStateOf, txDisplayTitle } from '../utils/pinned'
 import { isSyncCategory } from '../utils/cardExclusion'
@@ -159,6 +160,8 @@ function TransactionList({
 }: TransactionListProps) {
   // Selection mode: rows show a check circle and a tap selects instead of opening
   const sel = (t: Transaction) => (selectedIds ? selectedIds.has(t.id) : undefined)
+  // «Додати в підписку» from the long press
+  const [subscriptionTx, setSubscriptionTx] = useState<Transaction | null>(null)
   // Searching: every match is in the list (pinned ones too), the pinned block steps aside
   const searching = !!search?.active
   // ---- Pinned section: collapsible, remembered between launches ----
@@ -347,6 +350,10 @@ function TransactionList({
       out.push({ label: pin === 'tag' ? 'Відкріпити' : 'Закріпити', icon: pin === 'tag' ? 'pinOff' : 'pin', onPress: () => onTogglePin(tx) })
     }
     if (onSplitTx && !tx.refund_for) out.push({ label: 'Розділити', icon: 'split', onPress: () => onSplitTx(tx) })
+    // A charge the bank named differently than its subscription (the web's right click has the same)
+    if (Number(tx.amount) < 0 && !tx.is_transfer && tx.status !== 'pending') {
+      out.push({ label: tx.subscription_id ? 'Підписка…' : 'Додати в підписку', icon: 'repeat', onPress: () => setSubscriptionTx(tx) })
+    }
     if (tx.is_transfer && tx.transfer_id) {
       if (onUnlinkTransfer) out.push({ label: 'Скасувати переказ', icon: 'transfer', onPress: () => onUnlinkTransfer(tx) })
     } else if (onMakeTransfer && !tx.refund_for && !tx.is_debt && tx.status !== 'pending') {
@@ -660,6 +667,8 @@ function TransactionList({
           </View>
         </>
       )}
+
+      <AddToSubscriptionSheet tx={subscriptionTx} cards={cards} onClose={() => setSubscriptionTx(null)} />
     </View>
   )
 }

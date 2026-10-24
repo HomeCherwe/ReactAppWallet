@@ -92,7 +92,8 @@ export interface DetectedSubscription {
   charges_per_period?: number
   is_active: boolean
   hidden?: boolean
-  source: 'detected' | 'manual'
+  /** detected — found in the bank's charges; linked — started by hand from a charge; manual — the old kind */
+  source: 'detected' | 'linked' | 'manual'
   category?: string | null
   card_id?: string | null
   last_executed_at?: string | null
@@ -111,6 +112,32 @@ export async function detectSubscriptions(force = false): Promise<{ ran: boolean
 
 export async function updateSubscription(id: string, patch: Partial<Pick<DetectedSubscription, 'name' | 'hidden'>>): Promise<void> {
   await apiFetch(`/api/subscriptions/${id}`, { method: 'PUT', body: JSON.stringify(patch) })
+}
+
+export async function deleteSubscription(id: string): Promise<void> {
+  await apiFetch(`/api/subscriptions/${id}`, { method: 'DELETE' })
+}
+
+/** Made of bank charges: found in them, or started by hand from one (not the old hand-made kind) */
+export const isBankSubscription = (s: Pick<DetectedSubscription, 'source'> | null | undefined) =>
+  s?.source === 'detected' || s?.source === 'linked'
+
+/** A charge the bank named differently goes into that subscription (null takes it out); same as the web */
+export async function linkToSubscription(transactionId: string, subscriptionId: string | null): Promise<void> {
+  await slowPost('/api/subscriptions/link', { transaction_id: transactionId, subscription_id: subscriptionId })
+}
+
+/** A new subscription from one charge */
+export async function subscriptionFromTransaction(
+  transactionId: string,
+  { name, frequency }: { name: string; frequency: DetectedSubscription['frequency'] }
+): Promise<DetectedSubscription> {
+  const res = await slowPost<{ subscription: DetectedSubscription }>('/api/subscriptions/from-transaction', {
+    transaction_id: transactionId,
+    name,
+    frequency,
+  })
+  return res.subscription
 }
 
 /** Every charge of a subscription, newest first */
