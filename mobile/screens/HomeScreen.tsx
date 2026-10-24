@@ -67,7 +67,6 @@ import ScanReceiptModal from '../components/ScanReceiptModal'
 
 import BalanceHistoryModal from '../components/BalanceHistoryModal'
 import BalanceSplit from '../components/BalanceSplit'
-import SavingsCard from '../components/SavingsCard'
 import AddCardModal from '../components/AddCardModal'
 import { Bucket, BUCKETS, KIND_META, KIND_OF_BUCKET } from '../utils/accountKind'
 import { triggerErrorHaptic, triggerLightHaptic, triggerSuccessHaptic } from '../utils/haptics'
@@ -425,6 +424,12 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
   const openHistory = (bucket: 'all' | Bucket) => {
     setHistoryBucket(bucket)
     setHistoryVisible(true)
+  }
+
+  // From the balance window to another sheet: one sheet at a time, so the window slides away first
+  const afterHistoryClosed = (open: () => void) => {
+    setHistoryVisible(false)
+    setTimeout(open, 350)
   }
 
   // Name, kind, goal or archive changed in the account's settings
@@ -797,20 +802,6 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         </View>
 
 
-        {/* Piggy banks: what's put aside, by currency and goal (the web dashboard has the same) */}
-        <View style={styles.section}>
-          <SavingsCard
-            cards={cards}
-            balances={balances}
-            rates={rates}
-            primaryCurrency={primaryCurrency}
-            hidden={hideBalances}
-            loading={loading}
-            onPressAccount={handlePressCard}
-            onAdd={() => setAddPiggyVisible(true)}
-          />
-        </View>
-
         {/* Cards Carousel */}
         <View style={styles.section}>
           <CardCarousel
@@ -1038,6 +1029,12 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
         sectionTitle={historyBucket === 'all' ? 'Загальний баланс' : KIND_META[KIND_OF_BUCKET[historyBucket]].many}
         initialCurrency={primaryCurrency}
         totals={totals}
+        cards={cards}
+        balances={balances}
+        hidden={hideBalances}
+        onPressBucket={setHistoryBucket}
+        onPressAccount={card => afterHistoryClosed(() => handlePressCard(card))}
+        onAddPiggy={() => afterHistoryClosed(() => setAddPiggyVisible(true))}
       />
     </View>
   )

@@ -8,19 +8,22 @@ function emptyOut() { return { cards: {}, savings: {}, cash: {}, investments: {}
 /**
  * Balance per group (cards, savings, cash, investments) and currency — the same numbers as the
  * iPhone app (mobile/api/totals.ts): every account except those of a bank switched off, plus
- * transactions without an account as cash in UAH.
+ * transactions without an account as cash in UAH. `accounts` are those accounts with their balance
+ * (`_balance`), for the group's list in the balance window.
  */
-export async function fetchTotalsByBucket() {
+export async function fetchBalances() {
+  const out = emptyOut()
+  const accounts = []
   try {
     const cards = await listCards()
     const sumsByCard = await sumTransactionsByCard()
-    const out = emptyOut()
 
     for (const card of cards) {
       if (card.bank_exclude_from_stats) continue
       const bucket = getBucket(card)
       const currency = (card.currency || 'UAH').toUpperCase()
       const total = Number(card.initial_balance || 0) + Number(sumsByCard[card.id] || 0)
+      accounts.push({ ...card, _balance: total, _bucket: bucket })
       if (Math.abs(total) > 0.001) out[bucket][currency] = (out[bucket][currency] || 0) + total
     }
 
@@ -31,12 +34,14 @@ export async function fetchTotalsByBucket() {
     } catch (cashErr) {
       console.error('Failed to fetch cash transactions:', cashErr)
     }
-
-    return out
   } catch (e) {
-    console.error('fetchTotalsByBucket error', e)
-    return emptyOut()
+    console.error('fetchBalances error', e)
   }
+  return { totals: out, accounts }
+}
+
+export async function fetchTotalsByBucket() {
+  return (await fetchBalances()).totals
 }
 
 /**

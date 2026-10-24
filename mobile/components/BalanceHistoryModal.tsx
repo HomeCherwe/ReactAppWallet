@@ -1,8 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react'
-import { View, Text, StyleSheet, ActivityIndicator, Pressable } from 'react-native'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
+import { View, Text, StyleSheet, ActivityIndicator, Pressable, ScrollView, TouchableOpacity } from 'react-native'
+import { LinearGradient } from 'expo-linear-gradient'
 import { Colors } from '../constants/theme'
-import { fetchBalanceHistory } from '../api/totals'
-import { fetchExchangeRates, convertCurrency, formatMoney, RatesMap } from '../utils/currency'
+import { fetchBalanceHistory, TotalsData } from '../api/totals'
+import { Card } from '../api/cards'
+import { Bucket, BUCKETS, getBucket, goalProgress, KIND_META, KIND_OF_BUCKET } from '../utils/accountKind'
+import { fetchExchangeRates, convertCurrency, formatBreakdown, formatMoney, RatesMap, sumIn } from '../utils/currency'
 import { LineChart } from 'react-native-gifted-charts'
 import { triggerLightHaptic } from '../utils/haptics'
 import { GlassPressable } from './LiquidGlass'
@@ -59,9 +62,44 @@ function fullLabel(d: Date, period: Period): string {
   return d.toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })
 }
 
+// A bank name that says nothing about where the money is
+const NO_BANK = new Set(['', 'інші'])
+const ALL_ACCENT: [string, string] = ['#FF6B00', '#FF3D00']
+
+// '#34D399' → 'rgba(52, 211, 153, 0.3)' for the chart's fill
+function rgba(hex: string, alpha: number) {
+  const n = parseInt(hex.slice(1), 16)
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
+}
+
+const signed = (v: number, cur: string, hideCents = false) => (v < 0 ? '-' : '') + formatMoney(v, cur, { hideCents })
+
+interface BalanceHistoryModalProps {
+  visible: boolean
+  onClose: () => void
+  bucket?: 'all' | Bucket
+  sectionTitle?: string
+  initialCurrency?: string
+  totals?: Partial<TotalsData>
+  /** For the group's accounts */
+  cards?: Card[]
+  balances?: Record<string, number>
+  hidden?: boolean
+  /** Another group, or 'all' (the back arrow) */
+  onPressBucket?: (bucket: 'all' | Bucket) => void
+  onPressAccount?: (card: Card) => void
+  onAddPiggy?: () => void
+}
+
+/**
+ * A group's window (or the whole balance's), the same as the web: what the money is in — the
+ * groups, or the group's accounts — then its balance chart.
+ */
 export default function BalanceHistoryModal({
-  visible, onClose, bucket = 'all', sectionTitle, initialCurrency = 'UAH', totals = {}
-}: any) {
+  visible, onClose, bucket = 'all', sectionTitle, initialCurrency = 'UAH', totals = {},
+  cards = [], balances = {}, hidden = false, onPressBucket, onPressAccount, onAddPiggy,
+}: BalanceHistoryModalProps) {
+  const scrollRef = useRef<ScrollView>(null)
   const [period, setPeriod] = useState<Period>('month')
   const [activeCurrency, setActiveCurrency] = useState(initialCurrency)
   const [changes, setChanges] = useState<any[]>([])
@@ -104,6 +142,38 @@ export default function BalanceHistoryModal({
       cancelled = true
     }
   }, [visible, bucket, period, activeCurrency, dateRange])
+
+  // Another group opened from this one: start at the top again
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ y: 0, animated: false })
+  }, [bucket])
+
+  const accent = bucket === 'all' ? ALL_ACCENT : KIND_META[KIND_OF_BUCKET[bucket]].accent
+
+  // The whole balance's groups, in the main currency
+  const groups = useMemo(
+    () =>
+      BUCKETS.map(key => ({
+        key,
+        meta: KIND_META[KIND_OF_BUCKET[key]],
+        totals: totals[key] || {},
+        value: sumIn(totals[key], initialCurrency, rates),
+      })).filter(g => Object.values(g.totals).some(v => Math.abs(v) >= 0.005)),
+    [totals, initialCurrency, rates]
+  )
+
+  // The group's accounts, biggest first; an empty one only when it's a piggy bank with a goal
+  const accounts = useMemo(() => {
+    if (bucket === 'all') return []
+    return cards
+      .filter(c => getBucket(c) === bucket && !c.archived && !c.bank_exclude_from_stats)
+      .map(c => {
+        const balance = balances[c.id] ?? Number(c.initial_balance || 0)
+        return { card: c, balance, inMain: convertCurrency(balance, normCurrency(c.currency), initialCurrency, rates) }
+      })
+      .filter(a => Math.abs(a.balance) >= 0.005 || Number(a.card.goal_amount) > 0)
+      .sort((a, b) => b.inMain - a.inMain)
+  }, [cards, balances, bucket, initialCurrency, rates])
 
   // The balance Home shows for this section: every currency in it, in the chosen one.
   // (totals is { cards, savings, cash, investments } → currency → amount)
@@ -207,9 +277,23 @@ export default function BalanceHistoryModal({
 
   return (
     <SheetModal visible={visible} onClose={onClose} sheetStyle={styles.sheet}>
-      <View style={styles.container}>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.header}>
-          <Text style={styles.title}>{sectionTitle || 'Історія балансу'}</Text>
+          <View style={styles.headerLeft}>
+            {bucket !== 'all' && onPressBucket && (
+              <GlassPressable
+                onPress={() => { triggerLightHaptic(); onPressBucket('all') }}
+                style={styles.closeBtn}
+              >
+                <Text style={styles.backText}>‹</Text>
+              </GlassPressable>
+            )}
+            <Text style={styles.title} numberOfLines={1}>{sectionTitle || 'Історія балансу'}</Text>
+          </View>
           <GlassPressable onPress={() => { triggerLightHaptic(); onClose() }} style={styles.closeBtn}>
             <Text style={styles.closeText}>✕</Text>
           </GlassPressable>
@@ -217,9 +301,9 @@ export default function BalanceHistoryModal({
 
         <View style={styles.summary}>
           <Text style={styles.balance} numberOfLines={1} adjustsFontSizeToFit>
-            {formatMoney(currentBalance, activeCurrency)}
+            {hidden ? '••••••' : formatMoney(currentBalance, activeCurrency)}
           </Text>
-          {stats && (
+          {stats && !hidden && (
             <View style={styles.changeRow}>
               <View style={[styles.badge, { backgroundColor: trend === 'flat' ? 'rgba(255,255,255,0.08)' : `${trendColor}22` }]}>
                 <Text style={[styles.badgeText, { color: trendColor }]}>
@@ -232,6 +316,100 @@ export default function BalanceHistoryModal({
             </View>
           )}
         </View>
+
+        {/* What the money is in: the groups, or this group's accounts */}
+        {bucket === 'all' ? (
+          groups.length > 0 && (
+            <View style={styles.list}>
+              {groups.map(g => (
+                <TouchableOpacity
+                  key={g.key}
+                  activeOpacity={0.6}
+                  style={styles.row}
+                  onPress={() => { triggerLightHaptic(); onPressBucket?.(g.key) }}
+                >
+                  <LinearGradient colors={g.meta.accent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.icon}>
+                    <Text style={styles.iconText}>{g.meta.icon}</Text>
+                  </LinearGradient>
+                  <View style={styles.rowBody}>
+                    <Text style={styles.name} numberOfLines={1}>{g.meta.many}</Text>
+                    {!hidden && Object.keys(g.totals).some(c => c !== initialCurrency) && (
+                      <Text style={styles.sub} numberOfLines={1}>{formatBreakdown(g.totals)}</Text>
+                    )}
+                  </View>
+                  <Text style={[styles.amount, g.value < 0 && styles.negative]} numberOfLines={1}>
+                    {hidden ? '••••' : signed(g.value, initialCurrency, true)}
+                  </Text>
+                  <Text style={styles.chevron}>›</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )
+        ) : (
+          <View style={styles.list}>
+            {accounts.length === 0 ? (
+              <Text style={styles.emptyList}>
+                {bucket === 'savings' ? 'Поки що жодної скарбнички' : 'Тут поки немає рахунків з грошима'}
+              </Text>
+            ) : (
+              accounts.map(({ card, balance }) => {
+                const progress = goalProgress(card, balance)
+                const bank = String(card.bank || '').trim()
+                const where = NO_BANK.has(bank.toLowerCase()) ? '' : bank
+                return (
+                  <TouchableOpacity
+                    key={card.id}
+                    activeOpacity={0.6}
+                    style={styles.row}
+                    onPress={() => { triggerLightHaptic(); onPressAccount?.(card) }}
+                  >
+                    <LinearGradient colors={accent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.icon}>
+                      <Text style={styles.iconText}>{KIND_META[KIND_OF_BUCKET[bucket]].icon}</Text>
+                    </LinearGradient>
+                    <View style={styles.rowBody}>
+                      <View style={styles.rowTop}>
+                        <Text style={styles.name} numberOfLines={1}>{card.name || where || 'Рахунок'}</Text>
+                        <Text style={[styles.amount, balance < 0 && styles.negative]} numberOfLines={1}>
+                          {hidden ? '••••' : signed(balance, card.currency)}
+                        </Text>
+                      </View>
+                      {progress != null ? (
+                        <>
+                          <View style={styles.track}>
+                            <LinearGradient
+                              colors={accent}
+                              start={{ x: 0, y: 0 }}
+                              end={{ x: 1, y: 0 }}
+                              style={[styles.fill, { width: `${progress * 100}%` }]}
+                            />
+                          </View>
+                          <View style={styles.rowTop}>
+                            <Text style={styles.sub} numberOfLines={1}>
+                              {where ? `${where} · ` : ''}ціль {hidden ? '••••' : formatMoney(Number(card.goal_amount), card.currency, { hideCents: true })}
+                            </Text>
+                            <Text style={[styles.sub, progress >= 1 && styles.reached]}>
+                              {progress >= 1 ? '✓ зібрано' : `${Math.floor(progress * 100)}%`}
+                            </Text>
+                          </View>
+                        </>
+                      ) : (
+                        !!where && !!card.name && <Text style={styles.sub} numberOfLines={1}>{where}</Text>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                )
+              })
+            )}
+            {bucket === 'savings' && onAddPiggy && (
+              <GlassPressable
+                style={styles.addBtn}
+                onPress={() => { triggerLightHaptic(); onAddPiggy() }}
+              >
+                <Text style={styles.addBtnText}>+ Нова скарбничка</Text>
+              </GlassPressable>
+            )}
+          </View>
+        )}
 
         <View style={styles.tabs}>
           {PERIODS.map(p => {
@@ -273,12 +451,12 @@ export default function BalanceHistoryModal({
               yAxisTextStyle={styles.axisText}
               xAxisLabelTextStyle={[styles.axisText, styles.xLabel]}
               xAxisLabelsHeight={18}
-              color={Colors.orange}
+              color={accent[0]}
               thickness={2.5}
               curved
               areaChart
-              startFillColor="rgba(255, 107, 0, 0.32)"
-              endFillColor="rgba(255, 107, 0, 0.02)"
+              startFillColor={rgba(accent[0], 0.32)}
+              endFillColor={rgba(accent[0], 0.02)}
               startOpacity={0.9}
               endOpacity={0.1}
               hideDataPoints
@@ -314,7 +492,7 @@ export default function BalanceHistoryModal({
           )}
         </View>
         <Text style={styles.hint}>Утримуйте палець на графіку, щоб побачити баланс на дату</Text>
-      </View>
+      </ScrollView>
     </SheetModal>
   )
 }
@@ -326,6 +504,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 32,
     overflow: 'hidden',
     paddingTop: 8,
+    maxHeight: '92%',
   },
   container: {
     paddingHorizontal: 16,
@@ -339,11 +518,48 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     marginBottom: 12,
   },
+  headerLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, marginRight: 8 },
   title: {
+    flexShrink: 1,
     fontSize: 22,
     fontWeight: '700',
     color: Colors.white,
   },
+  backText: { color: Colors.white80, fontSize: 24, lineHeight: 26, marginTop: -2 },
+  list: {
+    marginBottom: 16,
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 },
+  icon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  iconText: { fontSize: 16 },
+  rowBody: { flex: 1, minWidth: 0 },
+  rowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 },
+  name: { flexShrink: 1, fontSize: 15, fontWeight: '600', color: Colors.white },
+  amount: { fontSize: 15, fontWeight: '700', color: Colors.white, fontVariant: ['tabular-nums'] },
+  negative: { color: '#FF6B6B' },
+  sub: { flexShrink: 1, fontSize: 12, color: Colors.white40, marginTop: 2, fontVariant: ['tabular-nums'] },
+  reached: { color: '#6EE7B7', fontWeight: '700' },
+  chevron: { fontSize: 20, color: Colors.white40, marginLeft: -4 },
+  track: { height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden', marginTop: 6 },
+  fill: { height: '100%', borderRadius: 3 },
+  emptyList: { fontSize: 14, color: Colors.white40, paddingVertical: 10 },
+  addBtn: {
+    alignSelf: 'flex-start',
+    marginVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(52, 211, 153, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(52, 211, 153, 0.30)',
+  },
+  addBtnText: { fontSize: 13, fontWeight: '800', color: '#6EE7B7' },
   closeBtn: {
     width: 34,
     height: 34,
