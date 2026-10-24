@@ -18,6 +18,9 @@ on:
     paths:
       - 'mobile/package.json'
       - 'mobile/app.json'
+      # Native code of the app: local Expo modules and app extensions (the signing live activity)
+      - 'mobile/modules/**'
+      - 'mobile/targets/**'
       - '.github/workflows/build-mobile-ios.yml'
 
 concurrency:
