@@ -2787,9 +2787,12 @@ function convertTimestampToISO(ts) {
 }
 
 async function postNewCheckMonoBank(amount, note, card, id, date, userId) {
-  // Find card_id by card name in `cards` table. Try exact match first, then ilike fallback.
+  if (!userId) {
+    throw new Error('Cannot create transaction: user_id is required')
+  }
+  // Find card_id by card name among this person's cards only: other users can have a card
+  // with the same bank and name, and the transaction must not land in their account.
   let card_id = null
-  let card_user_id = null
   try {
     // Split card string by space: first token -> bank, second token -> name
     const parts = String(card || '').split(' ')
@@ -2799,7 +2802,8 @@ async function postNewCheckMonoBank(amount, note, card, id, date, userId) {
     if (bankToken && nameToken) {
       const { data: matched, error: matchErr } = await supabase
         .from('cards')
-        .select('id, user_id')
+        .select('id')
+        .eq('user_id', userId)
         .eq('bank', bankToken)
         .eq('name', nameToken)
         .limit(1)
@@ -2809,44 +2813,39 @@ async function postNewCheckMonoBank(amount, note, card, id, date, userId) {
       }
       if (matched && matched.id) {
         card_id = matched.id
-        card_user_id = matched.user_id
       }
     } else if (nameToken) {
       // fallback: if only nameToken exists, try exact name match
       const { data: byName, error: byNameErr } = await supabase
         .from('cards')
-        .select('id, user_id')
+        .select('id')
+        .eq('user_id', userId)
         .eq('name', nameToken)
         .limit(1)
         .maybeSingle()
       if (byNameErr) console.warn('cards name lookup error', byNameErr)
       if (byName && byName.id) {
         card_id = byName.id
-        card_user_id = byName.user_id
       }
     } else if (bankToken) {
       // fallback: if only bankToken exists, try exact bank match
       const { data: byBank, error: byBankErr } = await supabase
         .from('cards')
-        .select('id, user_id')
+        .select('id')
+        .eq('user_id', userId)
         .eq('bank', bankToken)
         .limit(1)
         .maybeSingle()
       if (byBankErr) console.warn('cards bank lookup error', byBankErr)
       if (byBank && byBank.id) {
         card_id = byBank.id
-        card_user_id = byBank.user_id
       }
     }
   } catch (e) {
     console.warn('Failed to lookup card_id for', card, e?.message || e)
   }
 
-  // Використовувати user_id з картки або з параметра функції
-  const finalUserId = card_user_id || userId
-  if (!finalUserId) {
-    throw new Error('Cannot create transaction: user_id is required (from card or function parameter)')
-  }
+  const finalUserId = userId
 
   // Спроба витягнути merchant_name з note (description від Monobank)
   // Monobank зазвичай повертає назву магазину в description
@@ -3022,12 +3021,13 @@ app.post('/api/syncMonoBank', getUserFromTokenOrApiKey, async function (req, res
 
   const monobankAPIs = prefs?.monobank_api || {}
 
-  // Allow token to be passed in body/header or fall back to database or server env MONO_TOKEN
-  const xToken = req.body.api || req.headers['x-token'] || monobankAPIs.token || process.env.MONO_TOKEN || req.body['x-token']
-  if (!xToken) return res.status(400).json({ success: false, error: 'Bad request: api token required in body.api, database, or set MONO_TOKEN in server env' })
+  // Each person's own token: passed in body/header or saved in their settings. Never a server-wide
+  // one — that would sync the owner's Monobank into whoever asks.
+  const xToken = req.body.api || req.headers['x-token'] || monobankAPIs.token || req.body['x-token']
+  if (!xToken) return res.status(400).json({ success: false, error: 'Monobank token is not set: add your own token in settings' })
 
-  const id_black = monobankAPIs.black_card_id || process.env.MONO_CARD_ID_BLACK
-  const id_white = monobankAPIs.white_card_id || process.env.MONO_CARD_ID_WHITE
+  const id_black = monobankAPIs.black_card_id
+  const id_white = monobankAPIs.white_card_id
 
   const id_cards = [id_black, id_white].filter(Boolean) // Filter out null/undefined
 
@@ -3198,8 +3198,9 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
         }
 
         const binanceAPIs = prefs?.binance_api || {}
-        const apiKey = binanceAPIs.api_key || process.env.BINANCE_API_KEY // Fallback to .env
-        const apiSecret = binanceAPIs.api_secret || process.env.BINANCE_API_SECRET // Fallback to .env
+        // Only this person's own keys — a server-wide pair would show the owner's Binance to anyone
+        const apiKey = binanceAPIs.api_key
+        const apiSecret = binanceAPIs.api_secret
 
         if (!apiKey || !apiSecret) {
           // finally блок видалить userId з Map
