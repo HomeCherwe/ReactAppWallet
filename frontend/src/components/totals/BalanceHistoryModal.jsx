@@ -11,7 +11,8 @@ import useMonoRates from '../../hooks/useMonoRates'
 import { apiFetch } from '../../utils.jsx'
 import { cardLabel } from '../../utils/cardLabel'
 import { listCards } from '../../api/cards'
-import { getBucket } from '../../utils/accountKind'
+import { getBucket, goalProgress, KIND_META, KIND_OF_BUCKET } from '../../utils/accountKind'
+import { formatMoney, formatBreakdown } from '../../utils/cardTheme'
 
 // ─── constants ────────────────────────────────────────────────────────────────
 
@@ -24,8 +25,8 @@ const PERIODS = [
 
 const BUCKET_META = {
   all:     { label: 'Загалом',     icon: Globe,      gradFrom: '#FF6B00', gradTo: '#FF3D00', textCls: 'text-brand',  bgCls: 'bg-brand/10',  borderCls: 'border-brand/25' },
-  cash:    { label: 'Готівка',     icon: Wallet,     gradFrom: '#10b981', gradTo: '#059669', textCls: 'text-emerald-400', bgCls: 'bg-emerald-500/10', borderCls: 'border-emerald-500/25' },
-  cards:   { label: 'Картки',      icon: CreditCard, gradFrom: '#3b82f6', gradTo: '#60a5fa', textCls: 'text-blue-400',   bgCls: 'bg-blue-500/10',    borderCls: 'border-blue-500/25' },
+  cash:    { label: 'Готівка',     icon: Wallet,     gradFrom: '#FBBF24', gradTo: '#D97706', textCls: 'text-amber-300',  bgCls: 'bg-amber-500/10',   borderCls: 'border-amber-500/25' },
+  cards:   { label: 'Картки',      icon: CreditCard, gradFrom: '#FF8A2A', gradTo: '#FF4D00', textCls: 'text-orange-300', bgCls: 'bg-orange-500/10',  borderCls: 'border-orange-500/25' },
   savings: { label: 'Скарбнички',  icon: PiggyBank,  gradFrom: '#34D399', gradTo: '#0E9F6E', textCls: 'text-emerald-400', bgCls: 'bg-emerald-500/10', borderCls: 'border-emerald-500/25' },
   investments: { label: 'Інвестиції', icon: TrendingUp, gradFrom: '#A78BFA', gradTo: '#7C3AED', textCls: 'text-violet-300', bgCls: 'bg-violet-500/10', borderCls: 'border-violet-500/25' },
 }
@@ -146,15 +147,28 @@ function StatMini({ label, value, currency, borderCls }) {
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
 
+// A bank name that says nothing about where the money is
+const NO_BANK = new Set(['', 'інші'])
+const signedMoney = (v, cur, opts) => `${v < 0 ? '−' : ''}${formatMoney(v, cur, opts)}`
+
 /**
- * @param {{ open, onClose, bucket, sectionTitle, initialCurrency, totals }} props
+ * A group's window (or the whole balance's): what the money is in — the groups, or the group's
+ * accounts — then its balance chart.
+ * @param {{ open, onClose, bucket, sectionTitle, initialCurrency, totals, groups, accounts, hidden,
+ *   onOpenBucket, onOpenAccount, onAddPiggy }} props
  */
 export default function BalanceHistoryModal({
   open, onClose,
   bucket = 'all',
   sectionTitle,
   initialCurrency = 'UAH',
-  totals = {}
+  totals = {},
+  groups = [],
+  accounts = [],
+  hidden = false,
+  onOpenBucket,
+  onOpenAccount,
+  onAddPiggy,
 }) {
   const [period, setPeriod] = useState('month')
   const [activeCurrency, setActiveCurrency] = useState(initialCurrency)
@@ -303,6 +317,16 @@ export default function BalanceHistoryModal({
   const currentBalance = useMemo(() => {
     return Object.entries(totals || {}).reduce((sum, [cur, amount]) => sum + convertCurrency(Number(amount) || 0, cur, activeCurrency), 0)
   }, [totals, activeCurrency, rates])
+
+  // The group's accounts, biggest first (in the main currency); an empty one only with a goal
+  const bucketAccounts = useMemo(() => {
+    if (bucket === 'all') return []
+    return accounts
+      .filter(c => c._bucket === bucket && !c.archived)
+      .filter(c => Math.abs(c._balance) >= 0.005 || Number(c.goal_amount) > 0)
+      .map(c => ({ card: c, inMain: convertCurrency(c._balance, (c.currency || 'UAH').toUpperCase(), initialCurrency) }))
+      .sort((a, b) => b.inMain - a.inMain)
+  }, [accounts, bucket, initialCurrency, rates])
 
   // Reconstruct running balance starting backwards from known currentBalance adjusting for future changes
   const chartData = useMemo(() => {
@@ -576,9 +600,10 @@ export default function BalanceHistoryModal({
             transition={{ type: 'spring', stiffness: 380, damping: 34 }}
           >
             <div
-              className="pointer-events-auto w-full bg-surface/90 rounded-2xl overflow-hidden"
+              className="pointer-events-auto w-full bg-surface/90 rounded-2xl overflow-y-auto overscroll-contain"
               style={{
                 maxWidth: 600,
+                maxHeight: 'calc(100dvh - 2rem)',
                 boxShadow: '0 24px 48px -8px rgba(0,0,0,0.16), 0 0 0 1px rgba(0,0,0,0.05)',
               }}
             >
@@ -592,6 +617,15 @@ export default function BalanceHistoryModal({
               <div className="px-5 pt-4 pb-3 border-b border-white/[0.06]">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2.5">
+                    {bucket !== 'all' && onOpenBucket && (
+                      <button
+                        onClick={() => onOpenBucket('all')}
+                        className="-ml-1.5 p-1.5 rounded-lg text-white/45 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
+                        title="Загальний баланс"
+                      >
+                        <ChevronLeft size={16} />
+                      </button>
+                    )}
                     <div className={`p-2 rounded-xl ${meta.bgCls}`}>
                       <BucketIcon size={15} className={meta.textCls} />
                     </div>
@@ -676,6 +710,108 @@ export default function BalanceHistoryModal({
                   </motion.div>
                 )}
               </div>
+
+              {/* What the money is in: the groups, or this group's accounts */}
+              {bucket === 'all' ? (
+                groups.length > 0 && (
+                  <div className="px-3 py-2 border-b border-white/[0.06] grid gap-0.5">
+                    {groups.map(g => (
+                      <button
+                        key={g.key}
+                        type="button"
+                        onClick={() => onOpenBucket?.(g.key)}
+                        className="flex items-center gap-3 px-2 py-1.5 rounded-xl hover:bg-white/[0.05] transition-colors text-left"
+                      >
+                        <span
+                          className="h-8 w-8 shrink-0 rounded-[10px] grid place-items-center text-sm"
+                          style={{ background: `linear-gradient(135deg, ${g.meta.accent[0]}, ${g.meta.accent[1]})` }}
+                        >
+                          {g.meta.icon}
+                        </span>
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-[13px] font-semibold text-white">{g.meta.many}</span>
+                          {!hidden && Object.keys(g.totals).some(c => c !== initialCurrency) && (
+                            <span className="block text-[11px] text-white/45 truncate tabular-nums">{formatBreakdown(g.totals)}</span>
+                          )}
+                        </span>
+                        <span className={`text-[13px] font-bold tabular-nums ${g.value < 0 ? 'text-[#FF6B6B]' : 'text-white'}`}>
+                          {hidden ? '••••' : signedMoney(g.value, initialCurrency, { hideCents: true })}
+                        </span>
+                        <ChevronRight size={14} className="text-white/30 shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                )
+              ) : (
+                <div className="px-3 py-2 border-b border-white/[0.06]">
+                  {bucketAccounts.length === 0 ? (
+                    <div className="px-2 py-2 text-xs text-white/45">
+                      {bucket === 'savings' ? 'Поки що жодної скарбнички' : 'Тут поки немає рахунків з грошима'}
+                    </div>
+                  ) : (
+                    <div className="grid gap-0.5">
+                      {bucketAccounts.map(({ card }) => {
+                        const kindMeta = KIND_META[KIND_OF_BUCKET[bucket]]
+                        const progress = goalProgress(card, card._balance)
+                        const bank = String(card.bank || '').trim()
+                        const where = NO_BANK.has(bank.toLowerCase()) ? '' : bank
+                        return (
+                          <button
+                            key={card.id}
+                            type="button"
+                            onClick={() => onOpenAccount?.(card)}
+                            className="flex items-center gap-3 px-2 py-1.5 rounded-xl hover:bg-white/[0.05] transition-colors text-left"
+                          >
+                            <span
+                              className="h-8 w-8 shrink-0 rounded-[10px] grid place-items-center text-sm"
+                              style={{ background: `linear-gradient(135deg, ${kindMeta.accent[0]}, ${kindMeta.accent[1]})` }}
+                            >
+                              {kindMeta.icon}
+                            </span>
+                            <span className="flex-1 min-w-0">
+                              <span className="flex items-baseline justify-between gap-2">
+                                <span className="text-[13px] font-semibold text-white truncate">{card.name || where || 'Рахунок'}</span>
+                                <span className={`text-[13px] font-bold tabular-nums shrink-0 ${card._balance < 0 ? 'text-[#FF6B6B]' : 'text-white'}`}>
+                                  {hidden ? '••••' : signedMoney(card._balance, card.currency)}
+                                </span>
+                              </span>
+                              {progress != null ? (
+                                <>
+                                  <span className="mt-1 block h-1 rounded-full bg-white/[0.08] overflow-hidden">
+                                    <span
+                                      className="block h-full rounded-full"
+                                      style={{ width: `${progress * 100}%`, background: `linear-gradient(90deg, ${kindMeta.accent[0]}, ${kindMeta.accent[1]})` }}
+                                    />
+                                  </span>
+                                  <span className="mt-0.5 flex justify-between gap-2 text-[11px] text-white/45 tabular-nums">
+                                    <span className="truncate">
+                                      {where ? `${where} · ` : ''}ціль {hidden ? '••••' : formatMoney(card.goal_amount, card.currency, { hideCents: true })}
+                                    </span>
+                                    <span className={progress >= 1 ? 'text-emerald-300 font-semibold' : ''}>
+                                      {progress >= 1 ? '✓ зібрано' : `${Math.floor(progress * 100)}%`}
+                                    </span>
+                                  </span>
+                                </>
+                              ) : (
+                                where && card.name && <span className="block text-[11px] text-white/45 truncate">{where}</span>
+                              )}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {bucket === 'savings' && onAddPiggy && (
+                    <button
+                      type="button"
+                      onClick={onAddPiggy}
+                      className="mt-1 mx-2 mb-1 px-3 py-1.5 rounded-full text-xs font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/25 hover:bg-emerald-500/15 transition-colors"
+                    >
+                      + Нова скарбничка
+                    </button>
+                  )}
+                </div>
+              )}
 
               {/* Currency switcher (only if multiple currencies exist in bucket) */}
               {currencies.length > 1 && (

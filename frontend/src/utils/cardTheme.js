@@ -135,3 +135,14 @@ export function formatMoney(amount, currency = 'UAH', { hideCents = false } = {}
   if (cur === 'PLN') return `${num} zł`
   return `${num} ${cur}`
 }
+
+const BREAKDOWN_ORDER = ['UAH', 'EUR', 'USD', 'USDT', 'PLN', 'GBP', 'CHF', 'CZK', 'HUF']
+
+/** «€7 250 · $3 800»: money in the currencies it is actually in (the iPhone's formatBreakdown) */
+export function formatBreakdown(byCurrency) {
+  return Object.entries(byCurrency || {})
+    .filter(([, v]) => Math.abs(v) >= 0.005)
+    .sort((a, b) => (BREAKDOWN_ORDER.indexOf(a[0]) + 1 || 99) - (BREAKDOWN_ORDER.indexOf(b[0]) + 1 || 99))
+    .map(([cur, v]) => `${v < 0 ? '−' : ''}${formatMoney(v, cur, { hideCents: true })}`)
+    .join(' · ')
+}
