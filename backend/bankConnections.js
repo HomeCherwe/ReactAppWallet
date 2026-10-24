@@ -16,6 +16,7 @@ import {
   setWebhook,
 } from './monobank.js'
 import { afterBankSync, autoCategorize } from './insights.js'
+import { cardLabelOf, makeTransferFromExisting } from './transfers.js'
 
 // Bank connections through TrueLayer for any supported provider (Revolut, Wise, BNP, Monzo, …),
 // plus Monobank (Ukraine) through its personal-token API — same table, same sync, same UI.
@@ -825,16 +826,19 @@ async function syncMonobankConnection(supabase, conn) {
     (await supabase.from('bank_connection_accounts').select('*').eq('connection_id', conn.id)).data || []
 
   let links = await loadLinks()
-  if (links.length === 0) {
+  // The bank's own accounts (not the user's added by hand, which the bank knows nothing about)
+  let own = links.filter(l => !isManualLink(l))
+  if (own.length === 0) {
     await saveMonoAccounts(supabase, conn, accountsFromClientInfo(await fetchClientInfo(token)))
     links = await loadLinks()
-    if (links.length === 0) return 0
+    own = links.filter(l => !isManualLink(l))
+    if (own.length === 0) return 0
   }
 
   const now = new Date()
-  if (now.getTime() - Math.max(...links.map(syncedAtMs)) < MONO_REQUEST_GAP_MS) return 0 // not our minute yet
+  if (now.getTime() - Math.max(...own.map(syncedAtMs)) < MONO_REQUEST_GAP_MS) return 0 // not our minute yet
 
-  const link = [...links].sort((a, b) => syncedAtMs(a) - syncedAtMs(b))[0]
+  const link = [...own].sort((a, b) => syncedAtMs(a) - syncedAtMs(b))[0]
   const firstImport = !link.card_id || (await countCardTransactions(supabase, link.card_id)) === 0
   const days = firstImport ? MONO_MAX_DAYS : Math.min(MONO_MAX_DAYS, regularSyncDays(link.last_sync_at, now))
   const toSec = Math.floor(now.getTime() / 1000)
@@ -1037,11 +1041,87 @@ async function migrateLegacyRevolut(supabase, userId) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The user's own accounts added to a connected bank
+// ---------------------------------------------------------------------------
+/*
+  A bank doesn't share every account through the connection (Revolut keeps its savings out), but the
+  money moving there shows in the accounts it does share: «To / From Заощадження з миттєвим
+  доступом». The user adds such an account — one of their cards — to the bank, with the name the
+  bank's transfers use for it. On every sync each of those transfers gets its other side on that
+  card, as if the user made it a transfer by hand. Kept in bank_connection_accounts as
+  account_id 'manual:<card id>', meta { manual: true, match }.
+*/
+const MANUAL_PREFIX = 'manual:'
+export const isManualLink = l => String(l?.account_id || '').startsWith(MANUAL_PREFIX)
+
+const likeEscape = s => String(s).replace(/[\\%_]/g, c => `\\${c}`)
+
+// «To Заощадження…», «From Заощадження…», «Переказ на …», «Virement vers …» → «Заощадження…»
+const TRANSFER_PREFIX = /^(?:(?:transfer|переказ|virement|überweisung)\s+)?(?:to|from|на|з|із|від|до|vers|de|an|von)\s+/i
+
+/** The other account a bank transfer names, or null when it isn't a transfer like that */
+export function transferCounterpart(note) {
+  const label = String(note || '').split('|')[0].trim()
+  if (!TRANSFER_PREFIX.test(label)) return null
+  const name = label.replace(TRANSFER_PREFIX, '').trim()
+  return name.length >= 3 ? name.slice(0, 80) : null
+}
+
+/** The connection's own cards (the accounts the bank shares) and the accounts added by hand */
+async function connectionLinks(supabase, connId) {
+  const { data, error } = await supabase.from('bank_connection_accounts').select('*').eq('connection_id', connId)
+  if (error) throw error
+  const links = data || []
+  return {
+    sources: links.filter(l => !isManualLink(l) && l.card_id).map(l => l.card_id),
+    manual: links.filter(l => isManualLink(l) && l.card_id && l.meta?.match),
+  }
+}
+
+/** The bank's transfers to / from the accounts added by hand, not yet transfers: made transfers. */
+async function mirrorManualAccounts(supabase, conn) {
+  const { sources, manual } = await connectionLinks(supabase, conn.id)
+  if (!sources.length || !manual.length) return 0
+  let added = 0
+  for (const m of manual) {
+    const { data: txs, error } = await supabase
+      .from('transactions')
+      .select('id, amount, card_id, created_at, is_transfer, transfer_id, refund_for, status, is_debt')
+      .eq('user_id', conn.user_id)
+      .in('card_id', sources)
+      .is('transfer_id', null)
+      .eq('status', 'booked')
+      .not('archives', 'is', true)
+      .ilike('note', `%${likeEscape(m.meta.match)}%`)
+      .order('created_at')
+      .limit(300)
+    if (error) throw error
+    for (const tx of txs || []) {
+      if (tx.is_transfer || tx.refund_for || tx.is_debt || !Number(tx.amount) || tx.card_id === m.card_id) continue
+      await makeTransferFromExisting(supabase, conn.user_id, tx, m.card_id)
+      added++
+    }
+  }
+  return added
+}
+
 /**
  * Syncs one connection of any kind (TrueLayer or Monobank). Returns { added, changed }: new rows,
- * and existing pending ones that settled, changed or were removed.
+ * and existing pending ones that settled, changed or were removed. Then the transfers to the
+ * user's own accounts added to this bank get their other side.
  */
 async function syncAnyConnection(supabase, conn, psuHeaders) {
+  const result = await syncProvider(supabase, conn, psuHeaders)
+  try {
+    result.added += await mirrorManualAccounts(supabase, conn)
+  } catch (e) {
+    console.warn(`[Banks] Transfers to the accounts added to ${conn.provider_name} failed:`, e.message)
+  }
+  return result
+}
+
+async function syncProvider(supabase, conn, psuHeaders) {
   try {
     return conn.provider_id === MONOBANK_ID
       ? { added: await syncMonobankConnection(supabase, conn), changed: 0 }
@@ -1106,8 +1186,15 @@ function publicConnection(c, accounts = []) {
     last_error: c.last_error,
     created_at: c.created_at,
     accounts: accounts
-      .filter(a => a.connection_id === c.id)
-      .map(a => ({ account_id: a.account_id, kind: a.kind, display_name: a.display_name, currency: a.currency, card_id: a.card_id })),
+      .filter(a => a.connection_id === c.id && !(isManualLink(a) && !a.card_id))
+      .map(a => ({
+        account_id: a.account_id,
+        kind: a.kind,
+        display_name: a.display_name,
+        currency: a.currency,
+        card_id: a.card_id,
+        ...(isManualLink(a) && { manual: true, match: a.meta?.match || null }),
+      })),
   }
 }
 
@@ -1353,6 +1440,130 @@ export function registerBankConnections(app, { supabase, getUserFromToken, getUs
       res.json({ success: true })
     } catch (e) {
       console.error('[Banks] link account error:', e.message)
+      res.status(500).json({ error: e.message })
+    }
+  })
+
+  const ownConnection = async (userId, id) => {
+    const { data } = await supabase.from('bank_connections').select('*').eq('id', id).eq('user_id', userId).maybeSingle()
+    return data
+  }
+
+  // GET /api/bank-connections/:id/transfer-names — the other accounts this bank's transfers name
+  // («To Заощадження з миттєвим доступом»), how often, and the card they were made transfers to
+  // by hand most: what to add to the bank, and the name to match its transfers by
+  app.get('/api/bank-connections/:id/transfer-names', getUserFromToken, async (req, res) => {
+    try {
+      const conn = await ownConnection(req.user_id, req.params.id)
+      if (!conn) return res.status(404).json({ error: 'Банк не знайдено' })
+      const { sources } = await connectionLinks(supabase, conn.id)
+      if (!sources.length) return res.json([])
+      const since = new Date(Date.now() - 400 * 864e5).toISOString()
+      const { data: txs, error } = await supabase
+        .from('transactions')
+        .select('id, note, transfer_id')
+        .eq('user_id', req.user_id)
+        .in('card_id', sources)
+        .gte('created_at', since)
+        .not('archives', 'is', true)
+        .order('created_at', { ascending: false })
+        .limit(3000)
+      if (error) throw error
+      const named = (txs || []).map(t => ({ ...t, name: transferCounterpart(t.note) })).filter(t => t.name)
+
+      // Where the ones already made transfers went
+      const partnerOf = new Map()
+      const transferIds = [...new Set(named.map(t => t.transfer_id).filter(Boolean))]
+      for (let i = 0; i < transferIds.length; i += 100) {
+        const { data: legs } = await supabase
+          .from('transactions')
+          .select('transfer_id, card_id')
+          .eq('user_id', req.user_id)
+          .in('transfer_id', transferIds.slice(i, i + 100))
+        for (const l of legs || []) if (l.card_id && !sources.includes(l.card_id)) partnerOf.set(l.transfer_id, l.card_id)
+      }
+
+      const byName = new Map()
+      for (const t of named) {
+        const key = t.name.toLowerCase()
+        const e = byName.get(key) || { name: t.name, count: 0, cards: new Map() }
+        e.count++
+        const card = t.transfer_id && partnerOf.get(t.transfer_id)
+        if (card) e.cards.set(card, (e.cards.get(card) || 0) + 1)
+        byName.set(key, e)
+      }
+      res.json(
+        [...byName.values()]
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 12)
+          .map(e => ({ name: e.name, count: e.count, card_id: [...e.cards.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null }))
+      )
+    } catch (e) {
+      console.error('[Banks] transfer names error:', e.message)
+      res.status(500).json({ error: e.message })
+    }
+  })
+
+  // POST /api/bank-connections/:id/manual-accounts { card_id, match } — one of the user's cards
+  // becomes an account of this bank: its transfers naming `match` get their other side there (now
+  // for the ones before, then on every sync)
+  app.post('/api/bank-connections/:id/manual-accounts', getUserFromToken, async (req, res) => {
+    try {
+      const conn = await ownConnection(req.user_id, req.params.id)
+      if (!conn) return res.status(404).json({ error: 'Банк не знайдено' })
+      const match = String(req.body?.match || '').trim().slice(0, 80)
+      if (match.length < 3) return res.status(400).json({ error: 'Вкажіть, як банк називає цей рахунок у переказах' })
+      const { data: card } = await supabase
+        .from('cards')
+        .select('id, name, bank, currency, banks(name)')
+        .eq('id', String(req.body?.card_id || ''))
+        .eq('user_id', req.user_id)
+        .maybeSingle()
+      if (!card) return res.status(404).json({ error: 'Рахунок не знайдено' })
+      const { data: taken } = await supabase
+        .from('bank_connection_accounts')
+        .select('account_id')
+        .eq('connection_id', conn.id)
+        .eq('card_id', card.id)
+        .neq('account_id', MANUAL_PREFIX + card.id)
+        .limit(1)
+      if (taken?.length) return res.status(409).json({ error: 'Цей рахунок і так синхронізується з банком' })
+
+      const { error } = await supabase.from('bank_connection_accounts').upsert(
+        {
+          connection_id: conn.id,
+          user_id: req.user_id,
+          account_id: MANUAL_PREFIX + card.id,
+          kind: 'account',
+          display_name: cardLabelOf(card),
+          currency: String(card.currency || 'EUR').toUpperCase(),
+          card_id: card.id,
+          meta: { manual: true, match },
+        },
+        { onConflict: 'connection_id,account_id' }
+      )
+      if (error) throw error
+      const added = await mirrorManualAccounts(supabase, conn)
+      res.json({ success: true, added })
+    } catch (e) {
+      console.error('[Banks] add manual account error:', e.message)
+      res.status(500).json({ error: e.message })
+    }
+  })
+
+  // DELETE /api/bank-connections/:id/manual-accounts/:cardId — not an account of this bank any
+  // more (the transfers made so far stay)
+  app.delete('/api/bank-connections/:id/manual-accounts/:cardId', getUserFromToken, async (req, res) => {
+    try {
+      const { error } = await supabase
+        .from('bank_connection_accounts')
+        .delete()
+        .eq('connection_id', req.params.id)
+        .eq('user_id', req.user_id)
+        .eq('account_id', MANUAL_PREFIX + req.params.cardId)
+      if (error) throw error
+      res.json({ success: true })
+    } catch (e) {
       res.status(500).json({ error: e.message })
     }
   })

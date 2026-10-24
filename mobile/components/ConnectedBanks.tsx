@@ -3,11 +3,13 @@ import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native'
 import Toast from 'react-native-toast-message'
 import { Colors } from '../constants/theme'
 import {
+  addManualAccount,
   BankConnection,
   connectBank,
   disconnectBank,
   linkBankAccountToCard,
   listBankConnections,
+  removeManualAccount,
   syncConnectedBanks,
 } from '../api/bankConnections'
 import { syncBanks } from '../store/useBankSyncStore'
@@ -159,6 +161,39 @@ export default function ConnectedBanks({
     }
   }
 
+  // One of the user's cards into a bank (an account the bank doesn't share): its transfers go there
+  const attachCard = async (c: BankConnection, card: Card, match: string) => {
+    try {
+      const { added } = await addManualAccount(c.id, card.id, match)
+      triggerSuccessHaptic()
+      Toast.show({
+        type: 'success',
+        text1: `«${card.name}» тепер у ${c.provider_name}`,
+        text2: added ? `Перенесено переказів: ${added}` : 'Нові перекази з’являтимуться на ньому самі',
+      })
+      await load()
+      if (added) {
+        onChanged?.()
+        txBus.emit({ type: 'SYNCED', source: 'banks', count: added })
+      }
+    } catch (e: any) {
+      triggerErrorHaptic()
+      Toast.show({ type: 'error', text1: 'Не вдалося додати', text2: e?.message })
+      throw e
+    }
+  }
+
+  const detachCard = async (c: BankConnection, card: Card) => {
+    try {
+      await removeManualAccount(c.id, card.id)
+      Toast.show({ type: 'success', text1: `«${card.name}» прибрано з ${c.provider_name}` })
+      await load()
+    } catch (e: any) {
+      Toast.show({ type: 'error', text1: 'Не вдалося прибрати', text2: e?.message })
+      throw e
+    }
+  }
+
   const disconnect = (c: BankConnection) => {
     Alert.alert(
       `Відключити ${c.provider_name}?`,
@@ -252,6 +287,8 @@ export default function ConnectedBanks({
         onDisconnect={disconnect}
         cards={cards}
         onLinkCard={linkCard}
+        onAttachCard={attachCard}
+        onDetachCard={detachCard}
         onOpenCard={
           onOpenCard
             ? card => {
