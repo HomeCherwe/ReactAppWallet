@@ -45,6 +45,30 @@ export async function connectBankWithToken(providerId, token) {
   })
 }
 
+/**
+ * The other accounts this bank's transfers name («To Заощадження з миттєвим доступом»):
+ * [{ name, count, card_id }] — card_id: where they were made transfers to by hand most.
+ */
+export async function listTransferNames(connectionId) {
+  return apiFetch(`/api/bank-connections/${connectionId}/transfer-names`)
+}
+
+/**
+ * One of the user's cards becomes an account of this bank (one the bank doesn't share, like Revolut's
+ * savings): the bank's transfers naming `match` get their other side on it. Returns { added }.
+ */
+export async function addManualAccount(connectionId, cardId, match) {
+  return apiFetch(`/api/bank-connections/${connectionId}/manual-accounts`, {
+    method: 'POST',
+    body: JSON.stringify({ card_id: cardId, match }),
+  })
+}
+
+/** Not an account of this bank any more; the transfers made so far stay */
+export async function removeManualAccount(connectionId, cardId) {
+  return apiFetch(`/api/bank-connections/${connectionId}/manual-accounts/${cardId}`, { method: 'DELETE' })
+}
+
 /** Links a bank account without a card to one of the user's cards; its transactions go there. */
 export async function linkBankAccountToCard(connectionId, accountId, cardId) {
   return apiFetch(`/api/bank-connections/${connectionId}/accounts/${encodeURIComponent(accountId)}`, {

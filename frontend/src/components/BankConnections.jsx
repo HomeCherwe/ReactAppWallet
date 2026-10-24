@@ -7,14 +7,19 @@ import { txBus } from '../utils/txBus'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { formatMoney } from '../utils/cardTheme'
 import {
+  addManualAccount,
   connectBankWithToken,
   disconnectBankConnection,
   linkBankAccountToCard,
   listBankConnections,
   listBankProviders,
+  listTransferNames,
+  removeManualAccount,
   startBankConnection,
   syncBankConnections,
 } from '../api/bankConnections'
+import { accountKind, KIND_META } from '../utils/accountKind'
+import { cardLabel } from '../utils/cardLabel'
 import { connectBinance, disconnectBinance, isBinanceConnected, syncBinance } from '../api/binance'
 
 const COUNTRIES = {
@@ -563,14 +568,30 @@ function statusLine(c) {
 const fmtBalance = (v, currency) => `${v < 0 ? '−' : ''}${formatMoney(v, currency)}`
 
 /** Tap on a connected bank: which accounts it brings in, their cards and balances (iPhone BankAccountsSheet). */
-function BankAccountsModal({ connection, cards, balances, busy, onClose, onSync, onReconnect, onDisconnect, onOpenCard, onLinkCard }) {
+function BankAccountsModal({ connection, cards, balances, busy, onClose, onSync, onReconnect, onDisconnect, onOpenCard, onLinkCard, onAttachCard, onDetachCard }) {
   const [linking, setLinking] = useState(null) // account being linked to one of the cards
   const [confirmLink, setConfirmLink] = useState(null) // card picked for it
   const [linkBusy, setLinkBusy] = useState(false)
+  // Adding one of the user's cards to the bank: null, { card: null } (picking), { card } (its name)
+  const [attach, setAttach] = useState(null)
+  const [names, setNames] = useState(null) // the accounts the bank's transfers name
+  const [match, setMatch] = useState('')
+  const [toDetach, setToDetach] = useState(null)
   useEffect(() => {
     setLinking(null)
     setConfirmLink(null)
+    setAttach(null)
+    setNames(null)
   }, [connection?.id])
+
+  const startAttach = () => {
+    setAttach({ card: null })
+    if (!names) listTransferNames(connection.id).then(setNames).catch(() => setNames([]))
+  }
+  const pickAttachCard = card => {
+    setAttach({ card })
+    setMatch((names || []).find(n => n.card_id === card.id)?.name || '')
+  }
 
   // Keep showing the last bank while the modal closes
   const last = useRef(null)
@@ -594,7 +615,118 @@ function BankAccountsModal({ connection, cards, balances, busy, onClose, onSync,
   const logo = c.auth === 'binance' ? <BinanceMark size={48} /> : <BankLogo src={c.provider_logo} name={c.provider_name} size={48} />
 
   let body
-  if (linking) {
+  if (attach && !attach.card) {
+    // Which of the user's cards: piggy banks first, then the ones the bank's transfers already went to
+    const taken = new Set((c.accounts || []).map(a => a.card_id).filter(Boolean))
+    const suggested = new Set((names || []).map(n => n.card_id).filter(Boolean))
+    const options = cards
+      .filter(card => !taken.has(card.id) && !card.archived)
+      .sort(
+        (x, y) =>
+          Number(suggested.has(y.id)) - Number(suggested.has(x.id)) ||
+          Number(accountKind(y) === 'savings') - Number(accountKind(x) === 'savings') ||
+          String(x.name).localeCompare(String(y.name))
+      )
+    body = (
+      <>
+        <button type="button" onClick={() => setAttach(null)} className="text-[15px] font-semibold text-brand mb-1">
+          ‹ Назад
+        </button>
+        <div className="mb-3">
+          <div className="text-[17px] font-extrabold text-white">Додати існуючий рахунок</div>
+          <div className="text-xs text-white/45 mt-0.5 leading-relaxed">
+            Для рахунку, який {c.provider_name} не віддає через підключення (наприклад, заощадження): перекази на нього й з нього
+            з’являтимуться на ньому самі.
+          </div>
+        </div>
+        {options.length === 0 ? (
+          <div className="py-6 text-center text-sm text-white/55">Немає вільних рахунків. Створіть його через «+ Додати».</div>
+        ) : (
+          <div className={`${group} max-h-[50vh] overflow-y-auto`}>
+            {options.map(card => (
+              <button key={card.id} type="button" onClick={() => pickAttachCard(card)} className={row}>
+                <span className={iconTile(true)}>{KIND_META[accountKind(card)].icon}</span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-[15px] font-bold text-white truncate">{card.name}</span>
+                  <span className="block text-xs text-white/45 truncate mt-0.5">
+                    {[card.bank, card.currency, suggested.has(card.id) ? 'перекази вже йшли сюди' : null].filter(Boolean).join(' · ')}
+                  </span>
+                </span>
+                <span className="text-[15px] font-bold tabular-nums text-white">{fmtBalance(balanceOf(card), card.currency)}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </>
+    )
+  } else if (attach) {
+    const card = attach.card
+    const clean = match.trim()
+    body = (
+      <>
+        <button type="button" onClick={() => setAttach({ card: null })} className="text-[15px] font-semibold text-brand mb-1">
+          ‹ Назад
+        </button>
+        <div className="mb-3">
+          <div className="text-[17px] font-extrabold text-white">Як {c.provider_name} називає «{cardLabel(card)}»</div>
+          <div className="text-xs text-white/45 mt-0.5 leading-relaxed">
+            Як у переказах основного рахунку, наприклад «To Заощадження…» — без «To» / «From». Кожен такий переказ, і минулі теж,
+            стане переказом на «{cardLabel(card)}» або з нього.
+          </div>
+        </div>
+        <input
+          value={match}
+          onChange={e => setMatch(e.target.value)}
+          maxLength={80}
+          placeholder="Наприклад, Заощадження з миттєвим доступом"
+          className="w-full px-3.5 py-3 border border-white/[0.14] rounded-xl text-[15px] bg-white/[0.04] focus:ring-2 focus:ring-brand focus:border-brand outline-none transition"
+        />
+        {names == null ? (
+          <div className="mt-3 h-8 w-2/3 rounded-full bg-white/[0.05] animate-pulse" />
+        ) : (
+          names.length > 0 && (
+            <div className="mt-3">
+              <div className="text-[11px] font-semibold text-white/45 mb-1.5">Перекази в {c.provider_name}:</div>
+              <div className="flex flex-wrap gap-1.5">
+                {names.map(n => (
+                  <button
+                    key={n.name}
+                    type="button"
+                    onClick={() => setMatch(n.name)}
+                    className={`px-2.5 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                      clean.toLowerCase() === n.name.toLowerCase()
+                        ? 'bg-brand/15 border-brand/50 text-white'
+                        : 'bg-white/[0.04] border-white/[0.1] text-white/70 hover:bg-white/[0.08]'
+                    }`}
+                  >
+                    {n.name} <span className="text-white/40">· {n.count}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        )}
+        <button
+          type="button"
+          disabled={linkBusy || clean.length < 3}
+          onClick={async () => {
+            setLinkBusy(true)
+            try {
+              await onAttachCard(c, card, clean)
+              setAttach(null)
+            } catch {
+              // the toast explains it
+            } finally {
+              setLinkBusy(false)
+            }
+          }}
+          className="mt-4 w-full h-[50px] rounded-2xl bg-brand text-white text-base font-extrabold hover:brightness-110 disabled:opacity-50"
+        >
+          {linkBusy ? 'Додаю…' : `Додати до ${c.provider_name}`}
+        </button>
+      </>
+    )
+  } else if (linking) {
     // Cards already filled by this bank's other accounts can't take a second one; same currency first
     const taken = new Set((c.accounts || []).map(a => a.card_id).filter(Boolean))
     const options = cards
@@ -651,15 +783,31 @@ function BankAccountsModal({ connection, cards, balances, busy, onClose, onSync,
                   onClick={() => (card ? onOpenCard(card) : setLinking(a))}
                   className={row}
                 >
-                  <span className={iconTile(!!card)}>{a.kind === 'card' ? '💳' : '🏦'}</span>
+                  <span className={iconTile(!!card)}>{a.manual && card ? KIND_META[accountKind(card)].icon : a.kind === 'card' ? '💳' : '🏦'}</span>
                   <span className="flex-1 min-w-0">
-                    <span className="block text-[15px] font-bold text-white truncate">{card?.name || accountLabel(a)}</span>
+                    <span className="block text-[15px] font-bold text-white truncate">{(a.manual && card ? cardLabel(card) : card?.name) || accountLabel(a)}</span>
                     <span className="block text-xs text-white/45 truncate mt-0.5">
-                      {card
-                        ? [a.display_name && a.display_name !== card.name ? a.display_name : null, a.currency].filter(Boolean).join(' · ')
-                        : `${a.currency ?? ''} · картку ще не створено`}
+                      {a.manual
+                        ? `через перекази «${a.match}»`
+                        : card
+                          ? [a.display_name && a.display_name !== card.name ? a.display_name : null, a.currency].filter(Boolean).join(' · ')
+                          : `${a.currency ?? ''} · картку ще не створено`}
                     </span>
                   </span>
+                  {a.manual && card && onDetachCard && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      title="Прибрати з банку"
+                      onClick={e => {
+                        e.stopPropagation()
+                        setToDetach({ account: a, card })
+                      }}
+                      className="h-7 w-7 grid place-items-center rounded-full text-white/40 hover:text-white/80 hover:bg-white/[0.08]"
+                    >
+                      ✕
+                    </span>
+                  )}
                   {!card && onLinkCard && c.auth !== 'binance' && (
                     <span className="px-2.5 py-1 rounded-full bg-brand/[0.16] text-xs font-bold text-brand">Прив’язати</span>
                   )}
@@ -675,6 +823,17 @@ function BankAccountsModal({ connection, cards, balances, busy, onClose, onSync,
               )
             })}
           </div>
+        )}
+
+        {onAttachCard && c.auth !== 'binance' && (
+          <button
+            type="button"
+            onClick={startAttach}
+            className="mt-2.5 w-full px-3.5 py-2.5 rounded-2xl border border-dashed border-white/[0.16] text-left hover:bg-white/[0.04] transition-colors"
+          >
+            <span className="block text-sm font-bold text-brand">+ Додати існуючий рахунок</span>
+            <span className="block text-[11px] text-white/45 mt-0.5">Якщо банк не віддає якийсь рахунок, наприклад заощадження</span>
+          </button>
         )}
 
         <div className="grid gap-2.5 mt-4">
@@ -737,6 +896,22 @@ function BankAccountsModal({ connection, cards, balances, busy, onClose, onSync,
             // the toast explains it; stay on the picker
           } finally {
             setLinkBusy(false)
+          }
+        }}
+      />
+      <ConfirmModal
+        open={!!toDetach}
+        title={toDetach ? `Прибрати «${toDetach.card.name}» з ${c.provider_name}?` : ''}
+        message="Нові перекази більше не з’являтимуться на ньому самі. Рахунок і перекази, що вже є, залишаться."
+        confirmLabel="Прибрати"
+        onCancel={() => setToDetach(null)}
+        onConfirm={async () => {
+          const { card } = toDetach
+          setToDetach(null)
+          try {
+            await onDetachCard(c, card)
+          } catch {
+            // the toast explains it
           }
         }}
       />
@@ -900,6 +1075,33 @@ export default function BankConnections({ onChanged, reloadKey = 0, cards = [], 
     }
   }
 
+  // One of the user's cards into a bank (an account the bank doesn't share): its transfers go there
+  const attachCard = async (c, card, match) => {
+    try {
+      const { added } = await addManualAccount(c.id, card.id, match)
+      toast.success(added ? `«${card.name}» тепер у ${c.provider_name}. Перенесено переказів: ${added}` : `«${card.name}» тепер у ${c.provider_name}`)
+      await load()
+      if (added) {
+        onChanged?.()
+        txBus.emit({ type: 'SYNC' })
+      }
+    } catch (e) {
+      toast.error(`Не вдалося додати: ${e.message}`)
+      throw e
+    }
+  }
+
+  const detachCard = async (c, card) => {
+    try {
+      await removeManualAccount(c.id, card.id)
+      toast.success(`«${card.name}» прибрано з ${c.provider_name}`)
+      await load()
+    } catch (e) {
+      toast.error(`Не вдалося прибрати: ${e.message}`)
+      throw e
+    }
+  }
+
   const confirmDisconnect = async () => {
     const c = toDisconnect
     setToDisconnect(null)
@@ -983,6 +1185,8 @@ export default function BankConnections({ onChanged, reloadKey = 0, cards = [], 
         onReconnect={reconnect}
         onDisconnect={setToDisconnect}
         onLinkCard={linkCard}
+        onAttachCard={attachCard}
+        onDetachCard={detachCard}
         onOpenCard={
           onOpenCard
             ? (card) => {

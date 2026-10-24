@@ -26,7 +26,24 @@ export interface BankConnection {
   consent_expires_at: string | null
   last_sync_at: string | null
   last_error: string | null
-  accounts: { account_id: string; kind: 'account' | 'card'; display_name: string | null; currency: string | null; card_id: string | null }[]
+  accounts: {
+    account_id: string
+    kind: 'account' | 'card'
+    display_name: string | null
+    currency: string | null
+    card_id: string | null
+    /** One of the user's cards added to the bank by hand (one it doesn't share): kept up to date by its transfers */
+    manual?: boolean
+    /** How the bank's transfers name it */
+    match?: string | null
+  }[]
+}
+
+/** An account this bank's transfers name («To Заощадження…»), and where they went by hand most */
+export interface TransferName {
+  name: string
+  count: number
+  card_id: string | null
 }
 
 export interface BankSyncResult {
@@ -139,6 +156,27 @@ export async function syncConnectedBanks(connectionId?: string): Promise<BankSyn
   } finally {
     clearTimeout(timer)
   }
+}
+
+/** The other accounts this bank's transfers name (same as the web) */
+export async function listTransferNames(connectionId: string): Promise<TransferName[]> {
+  return apiFetch<TransferName[]>(`/api/bank-connections/${connectionId}/transfer-names`)
+}
+
+/**
+ * One of the user's cards becomes an account of this bank (one the bank doesn't share, like Revolut's
+ * savings): the bank's transfers naming `match` get their other side on it. Returns how many so far.
+ */
+export async function addManualAccount(connectionId: string, cardId: string, match: string): Promise<{ added: number }> {
+  return apiFetch<{ added: number }>(`/api/bank-connections/${connectionId}/manual-accounts`, {
+    method: 'POST',
+    body: JSON.stringify({ card_id: cardId, match }),
+  })
+}
+
+/** Not an account of this bank any more; the transfers made so far stay */
+export async function removeManualAccount(connectionId: string, cardId: string): Promise<void> {
+  await apiFetch(`/api/bank-connections/${connectionId}/manual-accounts/${cardId}`, { method: 'DELETE' })
 }
 
 /** Links a bank account to one of the user's existing cards (its transactions go there from the next sync). */

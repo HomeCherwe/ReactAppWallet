@@ -12,6 +12,7 @@ import { registerBankConnections, syncAllBankConnections, psuHeadersFrom, pinSyn
 import { registerInsights } from './insights.js'
 import { registerAssistant } from './assistant.js'
 import { ACCOUNT_KINDS, cardBucket, withCardV2 } from './accountKind.js'
+import { cardLabelOf, makeTransferFromExisting } from './transfers.js'
 dotenv.config();
 
 const app = express();
@@ -291,10 +292,13 @@ app.delete('/api/banks/:id', getUserFromToken, async (req, res) => {
       // Bank connections syncing into these cards would recreate them — disconnect those
       const { data: links } = await supabase
         .from('bank_connection_accounts')
-        .select('connection_id')
+        .select('id, connection_id, account_id')
         .eq('user_id', req.user_id)
         .in('card_id', cardIds)
-      const connIds = [...new Set((links || []).map(l => l.connection_id))]
+      // Added to a connected bank by hand (its savings): only that link goes
+      const manual = (links || []).filter(l => String(l.account_id).startsWith('manual:'))
+      if (manual.length > 0) await supabase.from('bank_connection_accounts').delete().in('id', manual.map(l => l.id))
+      const connIds = [...new Set((links || []).filter(l => !manual.includes(l)).map(l => l.connection_id))]
       if (connIds.length > 0) {
         const { error: connError } = await supabase
           .from('bank_connections')
@@ -1270,18 +1274,7 @@ app.get('/api/transactions/:id', getUserFromToken, async (req, res) => {
   }
 })
 
-// How an account is named on its transactions (same as the web and iPhone apps): bank + card name,
-// without doubling the bank when the name already starts with it («Commerzbank EUR»)
-function cardLabelOf(card) {
-  if (!card) return null
-  const bank = String(card.banks?.name || card.bank || '').trim()
-  const name = String(card.name || '').trim()
-  if (!bank) return name || null
-  if (!name) return bank
-  if (name.toLowerCase().startsWith(bank.toLowerCase())) return name
-  return `${bank} ${name}`
-}
-
+// How an account is named on its transactions (cardLabelOf in transfers.js), by the card's id
 async function cardLabelFor(userId, cardId) {
   if (!cardId) return null
   const { data } = await supabase
@@ -1782,68 +1775,9 @@ app.post('/api/transfers/from-existing', getUserFromToken, async (req, res) => {
     if (!Number(tx.amount)) return res.status(400).json({ error: 'Транзакція з нульовою сумою' })
     if (tx.card_id === cardId) return res.status(400).json({ error: 'Оберіть інший рахунок' })
 
-    const ids = [...new Set([tx.card_id, cardId].filter(Boolean))]
-    const { data: cards, error: cardsErr } = await withCardV2(extra =>
-      supabase
-        .from('cards')
-        .select('id, bank, name, currency' + extra)
-        .eq('user_id', req.user_id)
-        .in('id', ids)
-    )
-    if (cardsErr) throw cardsErr
-    const other = (cards || []).find(c => c.id === cardId)
-    if (!other) return res.status(404).json({ error: 'Рахунок не знайдено' })
-    const own = (cards || []).find(c => c.id === tx.card_id) || null
-
-    // Money left this transaction's account → it is the "from" leg; arrived → the "to" leg
-    const isOutgoing = Number(tx.amount) < 0
-    const fromCard = isOutgoing ? own : other
-    const toCard = isOutgoing ? other : own
-    const countAsIncome = transferBucket(fromCard) === 'savings' && transferBucket(toCard) !== 'savings'
-    const transferId = crypto.randomUUID()
-
-    const { data: created, error: insErr } = await supabase
-      .from('transactions')
-      .insert([{
-        amount: isOutgoing ? amountAbs : -amountAbs,
-        card_id: other.id,
-        card: cardLabelOf(other),
-        created_at: tx.created_at,
-        is_transfer: true,
-        transfer_role: isOutgoing ? 'to' : 'from',
-        transfer_id: transferId,
-        count_as_income: isOutgoing ? countAsIncome : false,
-        archives: false,
-        category: 'ТРАНСФЕР',
-        note: note || null,
-        user_id: req.user_id,
-        exclude_from_stats: true,
-      }])
-      .select()
-      .single()
-    if (insErr) throw insErr
-
-    const { data: updated, error: updErr } = await supabase
-      .from('transactions')
-      .update({
-        is_transfer: true,
-        transfer_role: isOutgoing ? 'from' : 'to',
-        transfer_id: transferId,
-        category: 'ТРАНСФЕР',
-        exclude_from_stats: true,
-        ...(isOutgoing ? {} : { count_as_income: countAsIncome }),
-      })
-      .eq('id', tx.id)
-      .eq('user_id', req.user_id)
-      .select()
-      .single()
-    if (updErr) {
-      // Don't leave half a transfer behind
-      await supabase.from('transactions').delete().eq('id', created.id).eq('user_id', req.user_id)
-      throw updErr
-    }
-    res.json(isOutgoing ? [updated, created] : [created, updated])
+    res.json(await makeTransferFromExisting(supabase, req.user_id, tx, cardId, { amountAbs, note }))
   } catch (error) {
+    if (error.status === 404) return res.status(404).json({ error: error.message })
     console.error('POST /api/transfers/from-existing error:', error)
     res.status(500).json({ error: error.message })
   }
