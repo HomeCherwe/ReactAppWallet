@@ -15,15 +15,15 @@ Notifications.setNotificationHandler({
 
 export type ReminderKind = 'signing' | 'new-version' | 'subscription'
 
-// Before the signature runs out: 2 days, 1 day, 12 hours and 1 hour ahead
-const SIGNING_REMINDERS = [
-  { id: 'signing-48h', hoursBefore: 48 },
-  { id: 'signing-24h', hoursBefore: 24 },
-  { id: 'signing-12h', hoursBefore: 12 },
-  { id: 'signing-1h', hoursBefore: 1 },
-]
-// Older schedules, removed when rescheduling
-const OLD_SIGNING_IDS = ['signing-day6', 'signing-day7']
+// Before the signature runs out: 2 days and a day and a half ahead, then every few hours up to 1 hour
+// ahead, so the newest notification is about it until it's refreshed
+const SIGNING_HOURS_BEFORE = [48, 36, 24, 18, 12, 9, 6, 3, 1]
+const SIGNING_PREFIX = 'signing-'
+const SIGNING_CATEGORY = 'signing'
+/** The «Я вже оновив» button on a signing reminder */
+const SIGNING_REFRESHED_ACTION = 'refreshed'
+/** How long before the end the signature counts as running out (reminders, badge, Home banner) */
+export const SIGNING_WARN_HOURS = SIGNING_HOURS_BEFORE[0]
 const NOTIFIED_VERSION_KEY = 'notified_app_version'
 
 async function ensurePermission(): Promise<boolean> {
@@ -44,41 +44,73 @@ function outsideNight(date: Date): Date {
   return d
 }
 
-function signingTitle(expiresAt: Date, at: Date): string {
+const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+
+/** Without a time when the date is only known to the day (worked out from what SideStore shows) */
+function signingTitle(expiresAt: Date, at: Date, estimated: boolean): string {
   const hours = (expiresAt.getTime() - at.getTime()) / 36e5
-  const time = expiresAt.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
-  if (hours <= 2) return `⏰ Через ${hours <= 1.2 ? 'годину' : `${Math.round(hours)} год`} MyWallet перестане відкриватися`
-  if (expiresAt.toDateString() === at.toDateString()) return `Сьогодні о ${time} закінчується підпис MyWallet`
-  if (hours <= 36) return `Завтра о ${time} закінчується підпис MyWallet`
-  return `Через ${Math.round(hours / 24)} дні закінчується підпис MyWallet`
+  const days = Math.round((startOfDay(expiresAt) - startOfDay(at)) / 864e5)
+  const time = estimated ? '' : ` о ${expiresAt.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}`
+  if (hours <= 2 && !estimated) return `⏰ Через ${hours <= 1.2 ? 'годину' : `${Math.round(hours)} год`} MyWallet перестане відкриватися`
+  if (days <= 0) return `Сьогодні${time} закінчується підпис MyWallet`
+  if (days === 1) return `Завтра${time} закінчується підпис MyWallet`
+  if (days === 2) return `Післязавтра${time} закінчується підпис MyWallet`
+  return `Через ${days} дні закінчується підпис MyWallet`
+}
+
+/** The signing notifications already on screen and the badge: out of date once it's refreshed */
+export async function dismissSigningReminders(): Promise<void> {
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync()
+    await Promise.all(
+      presented
+        .filter(n => n.request.content.data?.kind === 'signing')
+        .map(n => Notifications.dismissNotificationAsync(n.request.identifier).catch(() => {}))
+    )
+    await Notifications.setBadgeCountAsync(0)
+  } catch (e) {
+    console.warn('[Reminders] dismissing signing reminders failed:', e)
+  }
 }
 
 /**
- * Signing reminders, marked time-sensitive (iOS shows them as urgent where it allows it).
- * Rescheduled on every launch from the current signature, so after a refresh in SideStore they
- * move on by themselves; two that would land within 90 minutes of each other become one.
+ * Signing reminders, marked time-sensitive (iOS shows them as urgent where it allows it), with
+ * a «Я вже оновив» button and the badge on the app icon. Rescheduled on every launch and after
+ * the person says they refreshed it; two that would land within 90 minutes of each other become one.
  */
-export async function scheduleSigningReminders(expiresAt: Date): Promise<void> {
+export async function scheduleSigningReminders(expiresAt: Date, estimated = false): Promise<void> {
   try {
-    const ids = [...SIGNING_REMINDERS.map(r => r.id), ...OLD_SIGNING_IDS]
-    await Promise.all(ids.map(id => Notifications.cancelScheduledNotificationAsync(id).catch(() => {})))
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync()
+    await Promise.all(
+      scheduled
+        .filter(n => n.identifier.startsWith(SIGNING_PREFIX))
+        .map(n => Notifications.cancelScheduledNotificationAsync(n.identifier).catch(() => {}))
+    )
+    const running = (expiresAt.getTime() - Date.now()) / 36e5 <= SIGNING_WARN_HOURS
+    if (!running) await dismissSigningReminders()
 
-    const planned = SIGNING_REMINDERS.map(r => ({
-      id: r.id,
-      at: outsideNight(new Date(expiresAt.getTime() - r.hoursBefore * 36e5)),
+    const planned = SIGNING_HOURS_BEFORE.map(h => ({
+      id: `${SIGNING_PREFIX}${h}h`,
+      at: outsideNight(new Date(expiresAt.getTime() - h * 36e5)),
     }))
       .filter(r => r.at.getTime() > Date.now() + 60 * 1000 && r.at < expiresAt)
       .sort((a, b) => a.at.getTime() - b.at.getTime())
       .filter((r, i, all) => !all[i + 1] || all[i + 1].at.getTime() - r.at.getTime() >= 90 * 60 * 1000)
-    if (planned.length === 0 || !(await ensurePermission())) return
+    if ((planned.length === 0 && !running) || !(await ensurePermission())) return
 
+    if (running) await Notifications.setBadgeCountAsync(1).catch(() => false)
+    await Notifications.setNotificationCategoryAsync(SIGNING_CATEGORY, [
+      { identifier: SIGNING_REFRESHED_ACTION, buttonTitle: 'Я вже оновив', options: { opensAppToForeground: true } },
+    ])
     for (const r of planned) {
       await Notifications.scheduleNotificationAsync({
         identifier: r.id,
         content: {
-          title: signingTitle(expiresAt, r.at),
-          body: 'Увімкніть LocalDevVPN, відкрийте SideStore → My Apps і натисніть «7 DAYS» (або Refresh All). Дані не зникнуть.',
+          title: signingTitle(expiresAt, r.at, estimated),
+          body: 'Увімкніть LocalDevVPN, у SideStore → My Apps натисніть кнопку з днями біля MyWallet. Уже оновили — затисніть сповіщення → «Я вже оновив».',
           sound: 'default',
+          badge: 1,
+          categoryIdentifier: SIGNING_CATEGORY,
           interruptionLevel: 'timeSensitive',
           data: { kind: 'signing' satisfies ReminderKind },
         },
@@ -109,11 +141,14 @@ export async function notifyNewVersion(version: string): Promise<void> {
   }
 }
 
-/** Taps on our notifications (also the one that launched the app) */
-export function onReminderTap(listener: (kind: ReminderKind) => void): () => void {
+/**
+ * Taps on our notifications (also the one that launched the app); `refreshed` — the «Я вже оновив»
+ * button of a signing reminder
+ */
+export function onReminderTap(listener: (kind: ReminderKind, refreshed: boolean) => void): () => void {
   const handle = (response: Notifications.NotificationResponse | null) => {
     const kind = response?.notification.request.content.data?.kind
-    if (kind === 'signing' || kind === 'new-version') listener(kind)
+    if (kind === 'signing' || kind === 'new-version') listener(kind, response?.actionIdentifier === SIGNING_REFRESHED_ACTION)
   }
   // The tap that launched the app — cleared, so it doesn't reopen the sheet on the next mount
   Notifications.getLastNotificationResponseAsync()
@@ -129,7 +164,7 @@ export function onReminderTap(listener: (kind: ReminderKind) => void): () => voi
 // Subscriptions: a reminder the day before the bank charges, at 10:00
 const SUB_PREFIX = 'sub-'
 const SUB_REMIND_HOUR = 10
-// iOS keeps at most 64 scheduled notifications per app; the signing ones need room too
+// iOS keeps at most 64 scheduled notifications per app; the signing ones need room too (up to 9)
 const SUB_MAX = 20
 
 /** Settings: preferences.subscriptions.remind (on unless turned off) */
