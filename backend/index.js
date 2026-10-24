@@ -3021,12 +3021,13 @@ app.post('/api/syncMonoBank', getUserFromTokenOrApiKey, async function (req, res
 
   const monobankAPIs = prefs?.monobank_api || {}
 
-  // Allow token to be passed in body/header or fall back to database or server env MONO_TOKEN
-  const xToken = req.body.api || req.headers['x-token'] || monobankAPIs.token || process.env.MONO_TOKEN || req.body['x-token']
-  if (!xToken) return res.status(400).json({ success: false, error: 'Bad request: api token required in body.api, database, or set MONO_TOKEN in server env' })
+  // Each person's own token: passed in body/header or saved in their settings. Never a server-wide
+  // one — that would sync the owner's Monobank into whoever asks.
+  const xToken = req.body.api || req.headers['x-token'] || monobankAPIs.token || req.body['x-token']
+  if (!xToken) return res.status(400).json({ success: false, error: 'Monobank token is not set: add your own token in settings' })
 
-  const id_black = monobankAPIs.black_card_id || process.env.MONO_CARD_ID_BLACK
-  const id_white = monobankAPIs.white_card_id || process.env.MONO_CARD_ID_WHITE
+  const id_black = monobankAPIs.black_card_id
+  const id_white = monobankAPIs.white_card_id
 
   const id_cards = [id_black, id_white].filter(Boolean) // Filter out null/undefined
 
@@ -3197,8 +3198,9 @@ app.post('/api/syncBinance', getUserFromToken, async function (req, res) {
         }
 
         const binanceAPIs = prefs?.binance_api || {}
-        const apiKey = binanceAPIs.api_key || process.env.BINANCE_API_KEY // Fallback to .env
-        const apiSecret = binanceAPIs.api_secret || process.env.BINANCE_API_SECRET // Fallback to .env
+        // Only this person's own keys — a server-wide pair would show the owner's Binance to anyone
+        const apiKey = binanceAPIs.api_key
+        const apiSecret = binanceAPIs.api_secret
 
         if (!apiKey || !apiSecret) {
           // finally блок видалить userId з Map

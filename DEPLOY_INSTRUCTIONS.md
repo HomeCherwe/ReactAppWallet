@@ -45,7 +45,6 @@ Settings → Secrets and variables → Actions → New repository secret
 
 **Додайте:**
 - `VITE_API_URL` - залиште пустим поки (додасте після деплою бекенду)
-- `VITE_MONO_TOKEN` - ваш Monobank токен
 - `VITE_EXCHANGE_RATE_API` - `https://open.er-api.com/v6/latest/USD`
 - `VITE_SUPABASE_URL` - URL вашого Supabase проекту
 - `VITE_SUPABASE_ANON_KEY` - Anon key з Supabase
@@ -92,14 +91,9 @@ cd backend
 vercel
 
 # Додати змінні середовища (після першого деплою)
-vercel env add MONO_TOKEN
-vercel env add MONO_CARD_ID_BLACK
-vercel env add MONO_CARD_ID_WHITE
 vercel env add SUPABASE_URL
 vercel env add SUPABASE_SERVICE_ROLE_KEY
 vercel env add OPENAI_API_KEY
-vercel env add BINANCE_API_KEY
-vercel env add BINANCE_API_SECRET
 ```
 
 ### 3.2 Налаштувати змінні середовища в Vercel
@@ -108,15 +102,12 @@ Dashboard → Your Project → Settings → Environment Variables
 
 **Додайте всі з `backend/.env`:**
 
+Ключі Monobank і Binance сюди не додаються: кожен користувач вводить свої у застосунку, вони зберігаються в його налаштуваннях у базі.
+
 ```
-MONO_TOKEN=your_token
-MONO_CARD_ID_BLACK=your_id
-MONO_CARD_ID_WHITE=your_id
 SUPABASE_URL=your_url
 SUPABASE_SERVICE_ROLE_KEY=your_key
 OPENAI_API_KEY=your_key
-BINANCE_API_KEY=your_key
-BINANCE_API_SECRET=your_secret
 ```
 
 ### 3.3 Передеплоїти з новими змінними
