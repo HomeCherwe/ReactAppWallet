@@ -300,6 +300,42 @@ export function prettyName(label, key) {
   return s.slice(0, 40) || 'Підписка'
 }
 
+// Subscriptions made of bank charges: found by the finder ('detected'), or started by hand from a
+// charge whose name the finder didn't group ('linked'). Older ones ('manual') added their own.
+const BANK_SOURCES = ['detected', 'linked']
+export const isBankSubscription = s => BANK_SOURCES.includes(s?.source)
+
+/** A charge of about the subscription's price (the price may have changed a little) */
+const aboutPrice = (row, sub) => {
+  const abs = Math.abs(Number(row.amount))
+  const price = Number(sub.amount)
+  return price > 0 && abs >= price * 0.7 && abs <= price * 1.3
+}
+
+/**
+ * Charges the user put into a subscription by hand because the bank named them differently
+ * («NETFLIX.COM» and «Netflix International»): they count as the subscription's own (its
+ * merchant_key), and from then on so does every charge of that other name at about its price —
+ * next month's one joins by itself. A name that is another subscription's own stays its own.
+ * (pure: easy to test)
+ */
+export function applyAliases(rows, subs) {
+  const byId = new Map(subs.filter(s => s.merchant_key && isBankSubscription(s) && !s.hidden).map(s => [s.id, s]))
+  if (!byId.size) return rows
+  const ownKeys = new Set(subs.filter(s => s.merchant_key).map(s => s.merchant_key))
+  const aliases = new Map()
+  for (const r of rows) {
+    const sub = r.subscription_id && byId.get(r.subscription_id)
+    if (sub && r.mkey && r.mkey !== sub.merchant_key && !ownKeys.has(r.mkey) && !aliases.has(r.mkey)) aliases.set(r.mkey, sub)
+  }
+  return rows.map(r => {
+    const linked = r.subscription_id && byId.get(r.subscription_id)
+    if (linked) return r.mkey === linked.merchant_key ? r : { ...r, mkey: linked.merchant_key }
+    const sub = !r.subscription_id && aliases.get(r.mkey)
+    return sub && aboutPrice(r, sub) ? { ...r, mkey: sub.merchant_key } : r
+  })
+}
+
 /** The groups of charges that look like subscriptions (pure: easy to test) */
 export function findSubscriptions(rows, now = new Date()) {
   const byKey = new Map()
@@ -366,16 +402,18 @@ export async function detectSubscriptions(supabase, userId) {
     rows.push(...(data || []))
     if (!data || data.length < 1000) break
   }
-  const found = findSubscriptions(rows)
-
   const [{ data: subs, error: subsError }, { data: cards }] = await Promise.all([
-    supabase.from('subscriptions').select('id, name, amount, category, merchant_key, frequency, source, hidden, is_active').eq('user_id', userId),
+    supabase.from('subscriptions').select('id, name, amount, category, merchant_key, frequency, source, hidden, is_active, last_executed_at').eq('user_id', userId),
     supabase.from('cards').select('id, currency').eq('user_id', userId),
   ])
   if (subsError) throw subsError
-  const existing = (subs || []).filter(s => s.source === 'detected')
+  // Charges put into a subscription by hand bring their other name along
+  const mapped = applyAliases(rows, subs || [])
+  const found = findSubscriptions(mapped)
+
+  const existing = (subs || []).filter(isBankSubscription)
   // Bank charges that hand-made subscriptions from before took: they belong to what the bank shows now
-  const oldManual = new Set((subs || []).filter(s => s.source !== 'detected' && !s.is_active).map(s => s.id))
+  const oldManual = new Set((subs || []).filter(s => !isBankSubscription(s) && !s.is_active).map(s => s.id))
   const currencyOf = id => (cards || []).find(c => c.id === id)?.currency || null
   const seen = new Set()
   let active = 0
@@ -403,7 +441,8 @@ export async function detectSubscriptions(supabase, userId) {
       currency: currencyOf(f.cardId),
       category: match?.category || f.category,
       merchant_key: f.key,
-      source: 'detected',
+      // One started by hand stays the user's (the finder never puts it away)
+      source: match?.source === 'linked' ? 'linked' : 'detected',
       updated_at: new Date().toISOString(),
     }
     let id = match?.id
@@ -424,8 +463,32 @@ export async function detectSubscriptions(supabase, userId) {
   }
 
   // Found before but not any more (no charges in ~13 months): not active
-  const gone = existing.filter(s => !seen.has(s.id) && s.is_active).map(s => s.id)
+  const gone = existing.filter(s => s.source === 'detected' && !seen.has(s.id) && s.is_active).map(s => s.id)
   if (gone.length > 0) await supabase.from('subscriptions').update({ is_active: false }).in('id', gone)
+
+  // Started by hand and not yet a run the finder sees (too few charges): its charges of the same
+  // name and price join it, and they date it
+  for (const s of existing) {
+    if (s.source !== 'linked' || seen.has(s.id) || s.hidden || !PERIODS[s.frequency]) continue
+    const charges = mapped.filter(r =>
+      r.subscription_id === s.id || (!r.subscription_id && s.merchant_key && r.mkey === s.merchant_key && aboutPrice(r, s)))
+    const toLink = charges.filter(r => !r.subscription_id).map(r => r.id)
+    if (toLink.length > 0) {
+      const { error } = await supabase.from('transactions').update({ subscription_id: s.id }).in('id', toLink)
+      if (error) throw error
+    }
+    if (!charges.length) continue
+    const last = new Date(charges[charges.length - 1].created_at)
+    const next = nextCharge(last, s.frequency)
+    const isActive = Date.now() <= next.getTime() + PERIODS[s.frequency].grace * DAY
+    if (s.last_executed_at && Date.parse(s.last_executed_at) === last.getTime() && s.is_active === isActive && !toLink.length) continue
+    const { error } = await supabase
+      .from('subscriptions')
+      .update({ last_executed_at: last.toISOString(), next_execution_at: next.toISOString(), is_active: isActive, updated_at: new Date().toISOString() })
+      .eq('id', s.id)
+    if (error) throw error
+    if (isActive) active++
+  }
 
   await patchPreferences(supabase, userId, 'insights', { subscriptionsDetectedAt: new Date().toISOString() })
   return { found: found.length, active }
@@ -541,6 +604,100 @@ export function registerInsights(app, { supabase, getUserFromToken }) {
     } catch (e) {
       console.error('[Subscriptions] detect route error:', e.message)
       res.status(500).json({ success: false, error: e.message })
+    }
+  })
+
+  // The user's own expense, or null
+  const ownCharge = async (userId, id) => {
+    if (!id) return null
+    const { data } = await supabase
+      .from('transactions')
+      .select('id, amount, created_at, note, merchant_name, category, card_id, subscription_id')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .maybeSingle()
+    return data
+  }
+  // The subscriptions follow right away (dates, the charges of that name); a failure here
+  // doesn't undo what the user did
+  const refreshSubscriptions = async userId => {
+    try {
+      await detectSubscriptions(supabase, userId)
+    } catch (e) {
+      console.warn('[Subscriptions] refresh after a hand link failed:', e.message)
+    }
+  }
+
+  // POST /api/subscriptions/link { transaction_id, subscription_id } — a charge the bank named
+  // differently goes into that subscription (its later charges of that name follow);
+  // subscription_id null takes it out
+  app.post('/api/subscriptions/link', getUserFromToken, async (req, res) => {
+    try {
+      const tx = await ownCharge(req.user_id, req.body?.transaction_id)
+      if (!tx) return res.status(404).json({ error: 'Транзакцію не знайдено' })
+      const subId = req.body?.subscription_id || null
+      if (subId) {
+        const { data: sub } = await supabase.from('subscriptions').select('id').eq('id', subId).eq('user_id', req.user_id).maybeSingle()
+        if (!sub) return res.status(404).json({ error: 'Підписку не знайдено' })
+      }
+      const { error } = await supabase.from('transactions').update({ subscription_id: subId }).eq('id', tx.id).eq('user_id', req.user_id)
+      if (error) throw error
+      await refreshSubscriptions(req.user_id)
+      res.json({ success: true })
+    } catch (e) {
+      console.error('[Subscriptions] link error:', e.message)
+      res.status(500).json({ error: e.message })
+    }
+  })
+
+  // POST /api/subscriptions/from-transaction { transaction_id, name?, frequency? } — a new
+  // subscription from one charge the finder didn't see as one
+  app.post('/api/subscriptions/from-transaction', getUserFromToken, async (req, res) => {
+    try {
+      const tx = await ownCharge(req.user_id, req.body?.transaction_id)
+      if (!tx) return res.status(404).json({ error: 'Транзакцію не знайдено' })
+      if (!(Number(tx.amount) < 0)) return res.status(400).json({ error: 'Підписка — це списання, а не надходження' })
+      const frequency = PERIODS[req.body?.frequency] ? req.body.frequency : 'monthly'
+
+      const { data: key } = await supabase.rpc('merchant_key', { p_merchant: tx.merchant_name, p_note: tx.note })
+      const label = String(tx.merchant_name || '').trim() || String(tx.note || '').split('|')[0].trim()
+      const name = String(req.body?.name || '').trim().slice(0, 60) || prettyName(label, key)
+      const { data: card } = tx.card_id
+        ? await supabase.from('cards').select('currency').eq('id', tx.card_id).eq('user_id', req.user_id).maybeSingle()
+        : { data: null }
+
+      const last = new Date(tx.created_at)
+      const next = nextCharge(last, frequency)
+      const { data: sub, error } = await supabase
+        .from('subscriptions')
+        .insert([{
+          user_id: req.user_id,
+          name,
+          amount: Math.round(Math.abs(Number(tx.amount)) * 100) / 100,
+          frequency,
+          charges_per_period: 1,
+          day_of_month: frequency === 'monthly' ? last.getUTCDate() : null,
+          day_of_week: frequency === 'weekly' ? ((last.getUTCDay() + 6) % 7) + 1 : null,
+          is_expense: true,
+          is_active: Date.now() <= next.getTime() + PERIODS[frequency].grace * DAY,
+          last_executed_at: last.toISOString(),
+          next_execution_at: next.toISOString(),
+          card_id: tx.card_id || null,
+          currency: card?.currency || null,
+          category: tx.category && !/sync$/i.test(tx.category) ? tx.category : null,
+          merchant_key: key || null,
+          source: 'linked',
+        }])
+        .select()
+        .single()
+      if (error) throw error
+      const { error: linkError } = await supabase.from('transactions').update({ subscription_id: sub.id }).eq('id', tx.id).eq('user_id', req.user_id)
+      if (linkError) throw linkError
+      await refreshSubscriptions(req.user_id)
+      res.json({ success: true, subscription: sub })
+    } catch (e) {
+      console.error('[Subscriptions] from-transaction error:', e.message)
+      res.status(500).json({ error: e.message })
     }
   })
 

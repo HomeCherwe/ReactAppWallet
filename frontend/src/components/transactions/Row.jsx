@@ -1,11 +1,13 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { fmtDate, fmtAmount } from '../../utils/format'
-import { Trash2, RotateCcw, Link2Off, Check, Plus } from 'lucide-react'
+import { Trash2, RotateCcw, Link2Off, Check, Plus, Sparkles, Eye, Pencil, Repeat } from 'lucide-react'
 
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { getCategoryVisual } from '../../utils/categoryIcon'
 import { useCardLabeler } from '../../store/useCardsStore'
+import { useTxMenuStore } from '../../store/useTxMenuStore'
+import { useAssistantStore } from '../../store/useAssistantStore'
 
 /** Not settled at the bank yet (TrueLayer banks) — same pill as the iPhone app */
 function PendingBadge() {
@@ -171,6 +173,30 @@ export default function Row({
         Повертаємо
       </span>
     ) : null
+
+  // Right click: everything this row can do, plus asking the AI and «Додати в підписку» (the iPhone's
+  // long press has the same menu)
+  const openContextMenu = e => {
+    if (mode !== 'normal' || !tx?.id) return
+    const actions = []
+    actions.push({ label: 'Запитати AI', Icon: Sparkles, ai: true, onClick: () => useAssistantStore.getState().show(tx) })
+    if (onDetails) actions.push({ label: 'Відкрити', Icon: Eye, onClick: () => onDetails(tx, currency) })
+    if (onEdit) actions.push({ label: 'Редагувати', Icon: Pencil, onClick: () => onEdit(tx) })
+    if (isExp && !isTransfer && !pending) {
+      actions.push({
+        label: tx.subscription_id ? 'Підписка…' : 'Додати в підписку',
+        Icon: Repeat,
+        onClick: () => useTxMenuStore.getState().openSubscriptionPicker({ ...tx, currency: tx.currency || currency }),
+      })
+    }
+    if (onRefund) actions.push({ label: 'Прив’язати повернення', Icon: RotateCcw, onClick: () => onRefund(tx) })
+    if (onCancelRefund) actions.push({ label: 'Скасувати повернення', Icon: Link2Off, onClick: () => onCancelRefund(tx) })
+    if (onUnlinkTransfer) actions.push({ label: 'Скасувати переказ', Icon: Link2Off, onClick: () => onUnlinkTransfer(tx) })
+    if (onAskDelete) actions.push({ label: 'Видалити', Icon: Trash2, danger: true, onClick: () => onAskDelete(tx) })
+    e.preventDefault()
+    e.stopPropagation()
+    useTxMenuStore.getState().openMenu({ x: e.clientX, y: e.clientY, actions })
+  }
 
   const onRowClick = () => {
     if (wasDragged) {
@@ -460,14 +486,14 @@ export default function Row({
 
   if (!swipeEnabled) {
     return (
-      <div className={`${round} ${selected ? 'ring-2 ring-brand' : ''} ${pickBox} ${className}`} style={pickStyle}>
+      <div className={`${round} ${selected ? 'ring-2 ring-brand' : ''} ${pickBox} ${className}`} style={pickStyle} onContextMenu={openContextMenu}>
         {inner}
       </div>
     )
   }
 
   return (
-    <div ref={rowRef} className={`relative ${round} overflow-hidden ${selected ? 'ring-2 ring-brand' : ''} ${pickBox} ${className}`} style={pickStyle}>
+    <div ref={rowRef} className={`relative ${round} overflow-hidden ${selected ? 'ring-2 ring-brand' : ''} ${pickBox} ${className}`} style={pickStyle} onContextMenu={openContextMenu}>
       <div className="absolute inset-y-0 right-0 flex items-stretch z-0">
         {onRefund && (
           <button

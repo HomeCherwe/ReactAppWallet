@@ -64,6 +64,17 @@ export const updateSubscription = (id, patch) =>
 
 export const deleteSubscription = id => apiFetch(`/api/subscriptions/${id}`, { method: 'DELETE' })
 
+/** Made of bank charges: found in them, or started by hand from one (not the old hand-made kind) */
+export const isBankSubscription = s => s?.source === 'detected' || s?.source === 'linked'
+
+/** A charge the bank named differently goes into that subscription; null takes it out */
+export const linkToSubscription = (transactionId, subscriptionId) =>
+  post('/api/subscriptions/link', { transaction_id: transactionId, subscription_id: subscriptionId })
+
+/** A new subscription from one charge: { name, frequency: 'weekly' | 'monthly' | 'yearly' } */
+export const subscriptionFromTransaction = (transactionId, { name, frequency }) =>
+  post('/api/subscriptions/from-transaction', { transaction_id: transactionId, name, frequency })
+
 /** What one subscription costs a month (weekly ×52/12, yearly /12) */
 export function monthlyCost(s) {
   const per = Number(s.amount) * Math.max(1, s.charges_per_period || 1)

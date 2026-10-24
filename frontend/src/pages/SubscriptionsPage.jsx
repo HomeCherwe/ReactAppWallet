@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import { Repeat, RefreshCw, ChevronRight, ChevronDown, EyeOff, Pencil, Trash2, Undo2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { listCards } from '../api/cards'
-import { deleteSubscription, detectSubscriptions, listSubscriptions, monthlyCost, updateSubscription } from '../api/insights'
+import { deleteSubscription, detectSubscriptions, isBankSubscription, listSubscriptions, monthlyCost, updateSubscription } from '../api/insights'
 import DeleteSubscriptionModal from '../components/subscriptions/DeleteSubscriptionModal'
 import RenameSubscriptionModal from '../components/subscriptions/RenameSubscriptionModal'
 import SubscriptionTransactionsDrawer from '../components/subscriptions/SubscriptionTransactionsDrawer'
@@ -72,11 +72,11 @@ export default function SubscriptionsPage() {
 
   const groups = useMemo(() => {
     const list = subs ?? []
-    const detected = list.filter(s => s.source === 'detected' && !s.hidden)
+    const detected = list.filter(s => isBankSubscription(s) && !s.hidden)
     return {
       active: detected.filter(s => s.is_active).sort((a, b) => (a.next_execution_at || '').localeCompare(b.next_execution_at || '')),
       inactive: detected.filter(s => !s.is_active).sort((a, b) => (b.last_executed_at || '').localeCompare(a.last_executed_at || '')),
-      old: list.filter(s => s.source !== 'detected' && !s.hidden),
+      old: list.filter(s => !isBankSubscription(s) && !s.hidden),
       hidden: list.filter(s => s.hidden),
     }
   }, [subs])
@@ -136,7 +136,7 @@ export default function SubscriptionsPage() {
           <div className="text-xs text-white/55 truncate">
             {s.hidden
               ? 'прихована — не підписка'
-              : s.source !== 'detected'
+              : !isBankSubscription(s)
                 ? 'додана вручну раніше'
                 : s.is_active
                   ? `${FREQ[s.frequency] || ''} · наступне ${dueLabel(s.next_execution_at)}`

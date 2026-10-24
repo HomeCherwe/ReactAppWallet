@@ -5,8 +5,10 @@ import { Colors } from '../constants/theme'
 import { Card } from '../api/cards'
 import { Transaction } from '../api/transactions'
 import {
+  deleteSubscription,
   DetectedSubscription,
   detectSubscriptions,
+  isBankSubscription,
   listSubscriptionCharges,
   listSubscriptions,
   monthlyCost,
@@ -97,13 +99,13 @@ export default function SubscriptionsCard({ cards, rates, currency, hidden, titl
 
   const groups = useMemo(() => {
     const list = subs ?? []
-    const detected = list.filter(s => s.source === 'detected' && !s.hidden)
+    const detected = list.filter(s => isBankSubscription(s) && !s.hidden)
     const byDue = (a: DetectedSubscription, b: DetectedSubscription) =>
       (a.next_execution_at || '').localeCompare(b.next_execution_at || '')
     return {
       active: detected.filter(s => s.is_active).sort(byDue),
       inactive: detected.filter(s => !s.is_active).sort((a, b) => (b.last_executed_at || '').localeCompare(a.last_executed_at || '')),
-      old: list.filter(s => s.source !== 'detected' && !s.hidden),
+      old: list.filter(s => !isBankSubscription(s) && !s.hidden),
       hiddenOnes: list.filter(s => s.hidden),
     }
   }, [subs])
@@ -132,7 +134,7 @@ export default function SubscriptionsCard({ cards, rates, currency, hidden, titl
         <Text style={styles.meta} numberOfLines={1}>
           {s.hidden
             ? 'прихована — не підписка'
-            : s.source !== 'detected'
+            : !isBankSubscription(s)
             ? 'додана вручну'
             : s.is_active
               ? `${FREQ[s.frequency]} · наступне ${dueLabel(s.next_execution_at)}`
@@ -272,6 +274,25 @@ function SubscriptionSheet({
       },
     ])
 
+  // Started by hand from a charge: it goes away (its charges stay, just not in a subscription)
+  const remove = () =>
+    Alert.alert('Видалити підписку?', `«${s.name}» зникне. Транзакції залишаться.`, [
+      { text: 'Скасувати', style: 'cancel' },
+      {
+        text: 'Видалити',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteSubscription(s.id)
+            triggerSuccessHaptic()
+            onChanged()
+          } catch (e: any) {
+            Toast.show({ type: 'error', text1: 'Не вдалося', text2: e?.message })
+          }
+        },
+      },
+    ])
+
   const unhide = async () => {
     try {
       await updateSubscription(s.id, { hidden: false })
@@ -310,7 +331,7 @@ function SubscriptionSheet({
           <Text style={styles.sheetTitle} numberOfLines={1}>{s.name}</Text>
           <Text style={styles.sheetSub}>
             {hidden ? '••••' : chargeText(s, cur)} · {FREQ[s.frequency]}
-            {s.source === 'detected' && s.is_active && s.next_execution_at ? ` · наступне ${dueLabel(s.next_execution_at)}` : ''}
+            {isBankSubscription(s) && s.is_active && s.next_execution_at ? ` · наступне ${dueLabel(s.next_execution_at)}` : ''}
           </Text>
         </Pressable>
       </View>
@@ -349,6 +370,10 @@ function SubscriptionSheet({
         ) : s.source === 'detected' ? (
           <Pressable onPress={hide} style={({ pressed }) => [styles.sheetBtn, pressed && styles.pressed]}>
             <Text style={[styles.sheetBtnText, { color: '#FF6B6B' }]}>Це не підписка</Text>
+          </Pressable>
+        ) : s.source === 'linked' ? (
+          <Pressable onPress={remove} style={({ pressed }) => [styles.sheetBtn, pressed && styles.pressed]}>
+            <Text style={[styles.sheetBtnText, { color: '#FF6B6B' }]}>Видалити</Text>
           </Pressable>
         ) : null}
       </View>

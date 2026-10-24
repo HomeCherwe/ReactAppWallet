@@ -185,7 +185,7 @@ export async function scheduleSubscriptionReminders(subs: DetectedSubscription[]
     if (!enabled) return
 
     const planned = subs
-      .filter(s => s.source === 'detected' && s.is_active && !s.hidden && s.next_execution_at)
+      .filter(s => (s.source === 'detected' || s.source === 'linked') && s.is_active && !s.hidden && s.next_execution_at)
       .map(s => {
         const at = new Date(s.next_execution_at as string)
         at.setDate(at.getDate() - 1)
