@@ -69,6 +69,19 @@ export async function removeManualAccount(connectionId, cardId) {
   return apiFetch(`/api/bank-connections/${connectionId}/manual-accounts/${cardId}`, { method: 'DELETE' })
 }
 
+/**
+ * «Немає в банку»: transactions entered by hand on a card the bank syncs that the bank never brought
+ * (cash put on the bank card by mistake). Each has `bank_check: { bank }`. Same as the iPhone app.
+ */
+export async function listNotInBank() {
+  return apiFetch('/api/bank-check')
+}
+
+/** «Все правильно»: not shown as missing from the bank again */
+export async function confirmInBank(transactionId) {
+  return apiFetch('/api/bank-check/ok', { method: 'POST', body: JSON.stringify({ id: transactionId }) })
+}
+
 /** Links a bank account without a card to one of the user's cards; its transactions go there. */
 export async function linkBankAccountToCard(connectionId, accountId, cardId) {
   return apiFetch(`/api/bank-connections/${connectionId}/accounts/${encodeURIComponent(accountId)}`, {

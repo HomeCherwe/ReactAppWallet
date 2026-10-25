@@ -40,7 +40,7 @@ export async function readPreferences(supabase, userId) {
 }
 
 /** Merges values into one preferences section (e.g. "insights"), keeping everything else */
-async function patchPreferences(supabase, userId, section, values) {
+export async function patchPreferences(supabase, userId, section, values) {
   const { data: row } = await supabase.from('user_preferences').select('id, preferences').eq('user_id', userId).maybeSingle()
   if (!row) return
   const preferences = { ...(row.preferences || {}) }

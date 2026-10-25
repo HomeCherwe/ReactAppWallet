@@ -848,6 +848,13 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
             refunds={allRefunds}
             transfers={txFeed.transfers}
             pinned={pinned.items}
+            notInBank={pinned.notInBank}
+            onConfirmInBank={tx =>
+              pinned
+                .confirmNotInBank(tx)
+                .then(() => Toast.show({ type: 'success', text1: 'Позначено як правильну' }))
+                .catch((e: any) => Toast.show({ type: 'error', text1: 'Не вдалося', text2: e?.message }))
+            }
             pinnedCategories={pinnedCategories}
             search={txFeed.search}
             selectedIds={selection}

@@ -2,6 +2,7 @@ import * as WebBrowser from 'expo-web-browser'
 import { makeRedirectUri } from 'expo-auth-session'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { apiFetch } from '../lib/apiFetch'
+import type { Transaction } from './transactions'
 import { useSettingsStore } from '../store/useSettingsStore'
 
 // Banks connected through TrueLayer (Revolut, Wise, BNP, Monzo, …). Tokens stay on the backend.
@@ -177,6 +178,19 @@ export async function addManualAccount(connectionId: string, cardId: string, mat
 /** Not an account of this bank any more; the transfers made so far stay */
 export async function removeManualAccount(connectionId: string, cardId: string): Promise<void> {
   await apiFetch(`/api/bank-connections/${connectionId}/manual-accounts/${cardId}`, { method: 'DELETE' })
+}
+
+/**
+ * «Немає в банку»: transactions entered by hand on a card the bank syncs that the bank never brought
+ * (cash put on the bank card by mistake). Each has `bank_check.bank`. Same as the web.
+ */
+export async function listNotInBank(): Promise<(Transaction & { bank_check?: { bank?: string } })[]> {
+  return apiFetch('/api/bank-check')
+}
+
+/** «Все правильно»: not shown as missing from the bank again */
+export async function confirmInBank(transactionId: string): Promise<void> {
+  await apiFetch('/api/bank-check/ok', { method: 'POST', body: JSON.stringify({ id: transactionId }) })
 }
 
 /** Links a bank account to one of the user's existing cards (its transactions go there from the next sync). */

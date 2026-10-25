@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { listPinnedTransactions, listRefundsFor, Transaction, updateTransaction } from '../api/transactions'
+import { confirmInBank, listNotInBank } from '../api/bankConnections'
 import { hasPinTag, pinStateOf, withPinTag } from '../utils/pinned'
 
 /**
@@ -16,6 +17,8 @@ export function usePinnedTransactions({
   enabled: boolean
 }) {
   const [items, setItems] = useState<Transaction[]>([])
+  // «Немає в банку»: id → the bank and card it's missing from (hand-entered, the bank never brought it)
+  const [notInBank, setNotInBank] = useState<Record<string, { bank: string; cardId: string | null }>>({})
   // Refunds of pinned expenses, by expense id (shown nested under them)
   const [refunds, setRefunds] = useState<Record<string, Transaction[]>>({})
   // Stable dependencies for the id/category lists
@@ -26,16 +29,26 @@ export function usePinnedTransactions({
   const refresh = useCallback(async () => {
     const id = ++requestId.current
     try {
-      const list = await listPinnedTransactions({
-        pinnedCategories: categoriesKey ? categoriesKey.split('\u0001') : [],
-        excludeCardIds: excludeKey ? excludeKey.split(',') : [],
-      })
+      const excluded = excludeKey ? excludeKey.split(',') : []
+      const [pinnedList, missing] = await Promise.all([
+        listPinnedTransactions({
+          pinnedCategories: categoriesKey ? categoriesKey.split('\u0001') : [],
+          excludeCardIds: excluded,
+        }),
+        // Hand-entered ones the bank doesn't have wait here too (a failure hides nothing else)
+        listNotInBank().catch(() => []),
+      ])
+      const flagged = (missing || []).filter(t => !t.card_id || !excluded.includes(t.card_id))
+      const byId = new Map(pinnedList.map(t => [t.id, t]))
+      for (const t of flagged) if (!byId.has(t.id)) byId.set(t.id, t)
+      const list = [...byId.values()].sort((a, b) => b.created_at.localeCompare(a.created_at))
       const kids = await listRefundsFor(list.filter(t => Number(t.amount) < 0).map(t => t.id)).catch(() => [])
       if (id !== requestId.current) return
       const map: Record<string, Transaction[]> = {}
       for (const r of kids) (map[r.refund_for as string] ||= []).push(r)
       setItems(list)
       setRefunds(map)
+      setNotInBank(Object.fromEntries(flagged.map(t => [t.id, { bank: t.bank_check?.bank || 'банку', cardId: t.card_id ?? null }])))
     } catch (e) {
       console.warn('[Pinned] load failed:', e)
     }
@@ -74,5 +87,19 @@ export function usePinnedTransactions({
     [categoriesKey, refresh]
   )
 
-  return { items, refunds, refresh, togglePin }
+  /** «Все правильно»: it stays where it is and isn't questioned again */
+  const confirmNotInBank = useCallback(
+    async (tx: Transaction) => {
+      await confirmInBank(tx.id)
+      setNotInBank(prev => {
+        const next = { ...prev }
+        delete next[tx.id]
+        return next
+      })
+      setItems(prev => prev.filter(t => t.id !== tx.id || pinStateOf(t, categoriesKey ? categoriesKey.split('\u0001') : []) !== 'none'))
+    },
+    [categoriesKey]
+  )
+
+  return { items, refunds, refresh, togglePin, notInBank, confirmNotInBank }
 }

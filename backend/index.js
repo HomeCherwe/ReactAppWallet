@@ -10,6 +10,7 @@ import crypto from 'crypto'
 import { createClient } from '@supabase/supabase-js'
 import { registerBankConnections, syncAllBankConnections, psuHeadersFrom, pinSyncCategory } from './bankConnections.js'
 import { registerInsights } from './insights.js'
+import { registerBankCheck } from './bankCheck.js'
 import { registerAssistant } from './assistant.js'
 import { ACCOUNT_KINDS, cardBucket, withCardV2 } from './accountKind.js'
 import { cardLabelOf, makeTransferFromExisting } from './transfers.js'
@@ -3821,6 +3822,7 @@ app.post('/api/syncTrueLayer', getUserFromTokenOrApiKey, async (req, res) => {
 registerBankConnections(app, { supabase, getUserFromToken, getUserFromTokenOrApiKey })
 // Auto-categories, subscriptions found in bank charges, the month's report
 registerInsights(app, { supabase, getUserFromToken })
+registerBankCheck(app, { supabase, getUserFromToken })
 // «AI-асистент»: a chat that reads the user's data through fixed functions
 registerAssistant(app, { supabase, getUserFromToken })
 

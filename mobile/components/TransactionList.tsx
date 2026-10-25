@@ -101,6 +101,10 @@ interface TransactionListProps {
   /** Unlinks a refund: it counts as regular income again */
   onUnlinkRefund?: (refund: Transaction) => Promise<void>
   pinned?: Transaction[]
+  /** «Немає в банку»: id → the bank and card a hand-entered pinned transaction is missing from */
+  notInBank?: Record<string, { bank: string; cardId: string | null }>
+  /** «Все правильно» on one of those */
+  onConfirmInBank?: (tx: Transaction) => void
   pinnedCategories?: string[]
   /** Refund picking is controlled by the screen, which shows the floating hint bar */
   refundFor: Transaction | null
@@ -144,6 +148,8 @@ function TransactionList({
   onLinkRefund,
   onUnlinkRefund,
   pinned = [],
+  notInBank = {},
+  onConfirmInBank,
   pinnedCategories = [],
   refundFor,
   onRefundForChange,
@@ -385,6 +391,13 @@ function TransactionList({
   }, [pinned])
 
   // Waiting bank imports the rules have a category for
+  // Still on the card the bank didn't have it on (moved to another account: not the bank's question)
+  const isNotInBank = (t: Transaction) => {
+    const flag = notInBank[t.id]
+    return !!flag && flag.cardId === (t.card_id ?? null) && !t.transaction_id_card
+  }
+  const missingCount = pinnedTop.filter(isNotInBank).length
+
   const suggested = useMemo(
     () => pinnedTop.filter(t => t.suggested_category && isSyncCategory(t.category || '')),
     [pinnedTop]
@@ -502,6 +515,20 @@ function TransactionList({
             </View>
             <Animated.Text style={[styles.pinnedChevron, { transform: [{ rotate: chevronRotate }] }]}>⌄</Animated.Text>
           </Pressable>
+          {/* Hand-entered ones the bank doesn't have: shown even with the block closed */}
+          {missingCount > 0 && !selectedIds && !refundFor && (
+            <Pressable
+              onPress={() => {
+                if (pinnedCollapsed) togglePinned()
+              }}
+              style={styles.missingBar}
+            >
+              <Text style={styles.missingBarText}>
+                ⚠️ Не знайдено в банку: {missingCount}. Перевірте — можливо, це була готівка або інший рахунок. Натисніть на
+                транзакцію, щоб змінити рахунок або видалити її.
+              </Text>
+            </Pressable>
+          )}
           {!pinnedCollapsed && onAcceptSuggestions && suggested.length > 0 && !selectedIds && !refundFor && (
             <View style={styles.suggestBar}>
               <Text style={styles.suggestBarText} numberOfLines={2}>
@@ -547,6 +574,24 @@ function TransactionList({
                     onAcceptSuggestion={onAcceptSuggestions ? acceptOne : undefined}
                     {...swipeProps}
                   />
+                  {isNotInBank(tx) && (
+                    <View style={styles.missingRow}>
+                      <Text style={styles.missingText} numberOfLines={1}>
+                        ⚠️ Немає в {notInBank[tx.id]?.bank} — перевірте
+                      </Text>
+                      {onConfirmInBank ? (
+                        <Pressable
+                          hitSlop={8}
+                          onPress={() => {
+                            triggerLightHaptic()
+                            onConfirmInBank(tx)
+                          }}
+                        >
+                          <Text style={styles.missingOk}>Все правильно</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  )}
                   {kids.map((r, k) => (
                     <TxRow
                       key={`pin-${r.id}`}
@@ -828,6 +873,29 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(255, 122, 26, 0.35)',
   },
+  missingBar: {
+    marginHorizontal: 12,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 140, 58, 0.10)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 140, 58, 0.45)',
+  },
+  missingBarText: { fontSize: 13, lineHeight: 18, color: Colors.white80 },
+  missingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 2,
+    paddingBottom: 10,
+    backgroundColor: PINNED_SURFACE,
+  },
+  missingText: { flex: 1, fontSize: 12, fontWeight: '700', color: '#FF8C3A' },
+  missingOk: { fontSize: 12, fontWeight: '700', color: Colors.white60 },
   suggestBar: {
     flexDirection: 'row',
     alignItems: 'center',
