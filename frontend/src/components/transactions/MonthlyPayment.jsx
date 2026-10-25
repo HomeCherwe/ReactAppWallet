@@ -17,7 +17,7 @@ import { apiFetch, getApiUrl } from '../../utils.jsx'
 import { listTransactions, searchTransactions, updateTransaction, deleteTransaction, archiveTransaction, deleteTransactions, getTransactionCategories } from '../../api/transactions'
 import { PERIODS, periodRange } from '../../utils/periods'
 import { isCategoryExcluded } from '../../utils/statsCategories'
-import { listBankConnections } from '../../api/bankConnections'
+import { confirmInBank, listBankConnections, listNotInBank } from '../../api/bankConnections'
 import { useBankSyncStore } from '../../store/useBankSyncStore'
 import BankSyncIndicator from '../BankSyncIndicator'
 import FilterChip from '../FilterChip'
@@ -87,6 +87,16 @@ export default function MonthlyPayment() {
   }
   const [rows, setRows] = useState([])
   const [pinnedRows, setPinnedRows] = useState([])
+  // «Немає в банку»: id → { bank, card_id } of hand-entered transactions the bank never brought
+  const [notInBank, setNotInBank] = useState(() => new Map())
+  // Read through a ref: the txBus handler outlives the render it was made in
+  const notInBankRef = useRef(notInBank)
+  notInBankRef.current = notInBank
+  // Still on the card the bank didn't have it on (moved to another account: not the bank's question)
+  const isNotInBank = tx => {
+    const flag = notInBankRef.current.get(tx?.id)
+    return !!flag && flag.card_id === tx.card_id && !tx.transaction_id_card
+  }
   const [initialLoading, setInitialLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [cardMap, setCardMap] = useState({})
@@ -289,7 +299,7 @@ export default function MonthlyPayment() {
     const isTxPinned = (tx) => {
       const isAutoPinned = pinnedCategories.includes(tx.category) || isSyncCategory(tx.category)
       const isManuallyPinned = String(tx.note || '').includes('[pinned]')
-      return isAutoPinned || isManuallyPinned
+      return isAutoPinned || isManuallyPinned || isNotInBank(tx)
     }
 
     for (const tx of rawVisibleRows) {
@@ -317,7 +327,23 @@ export default function MonthlyPayment() {
     }
     
     return { pinnedTxs: pinned, regularTxs: regular }
-  }, [rawVisibleRows, pinnedRows, pinnedCategories, rows, searchMode])
+  }, [rawVisibleRows, pinnedRows, pinnedCategories, rows, searchMode, notInBank])
+  // «Все правильно»: the transaction stays where it is and isn't questioned again
+  const confirmNotInBank = async tx => {
+    try {
+      await confirmInBank(tx.id)
+      setNotInBank(prev => {
+        const next = new Map(prev)
+        next.delete(tx.id)
+        return next
+      })
+      toast.success('Позначено як правильну')
+    } catch (e) {
+      toast.error(`Не вдалося: ${e.message}`)
+    }
+  }
+  const notInBankCount = useMemo(() => pinnedTxs.filter(isNotInBank).length, [pinnedTxs, notInBank])
+
   const suggestedPinned = useMemo(
     () => pinnedTxs.filter(t => t.suggested_category && isSyncCategory(t.category)),
     [pinnedTxs]
@@ -452,7 +478,16 @@ export default function MonthlyPayment() {
         pinnedRequests.push(listTransactions({ from: 0, to: 9999, categoryIn: validPinnedCats, excludeUsdt: !showUsdt }))
       }
       pinnedRequests.push(listTransactions({ from: 0, to: 9999, hasPinnedTag: true, excludeUsdt: !showUsdt }))
-      
+      // Hand-entered ones the bank doesn't have wait in «Закріплені» too (a failure here hides nothing else)
+      pinnedRequests.push(
+        listNotInBank()
+          .then(list => {
+            setNotInBank(new Map((list || []).map(t => [t.id, { bank: t.bank_check?.bank, card_id: t.card_id }])))
+            return list || []
+          })
+          .catch(() => [])
+      )
+
       try {
         const pinnedResults = await Promise.all(pinnedRequests)
         setPinnedRows(dedupeById(pinnedResults.flat().filter(Boolean)))
@@ -636,7 +671,7 @@ export default function MonthlyPayment() {
       }
 
       if (type === 'UPDATE' && tx) {
-        const isStillPinned = pinnedCategories.includes(tx.category) || isSyncCategory(tx.category) || String(tx.note || '').includes('[pinned]')
+        const isStillPinned = pinnedCategories.includes(tx.category) || isSyncCategory(tx.category) || String(tx.note || '').includes('[pinned]') || isNotInBank(tx)
         // Update or remove from pinnedRows based on whether tx still meets pinning condition
         setPinnedRows(prev => {
           const exists = (prev || []).some(r => r?.id === tx.id)
@@ -1618,6 +1653,20 @@ export default function MonthlyPayment() {
                   </div>
                 </button>
                 
+                {/* Hand-entered ones the bank doesn't have: shown even with the block closed */}
+                {notInBankCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setPinnedExpanded(true)}
+                    className="mx-3 mb-2 w-[calc(100%-1.5rem)] flex items-start gap-2.5 rounded-2xl bg-[#FF8C3A]/[0.10] border border-[#FF8C3A]/35 px-3 py-2.5 text-left"
+                  >
+                    <AlertTriangle size={16} className="text-[#FF8C3A] shrink-0 mt-0.5" />
+                    <span className="text-[13px] text-white/80">
+                      Не знайдено в банку: {notInBankCount}. Перевірте — можливо, це була готівка або інший рахунок. Відкрийте транзакцію,
+                      щоб змінити рахунок або видалити її.
+                    </span>
+                  </button>
+                )}
                 {pinnedExpanded && suggestedPinned.length > 0 && (
                   <div className="mx-3 mb-1 flex flex-wrap items-center gap-3 rounded-2xl bg-[#FFB25C]/[0.08] border border-[#FFB25C]/25 px-3 py-2.5">
                     <span className="flex-1 min-w-[180px] text-[13px] text-white/70">
@@ -1699,6 +1748,20 @@ export default function MonthlyPayment() {
                                     wiggleDir={idx % 2 ? 1 : -1}
                                     transferWith={tx.is_transfer ? accountName(partnersOf(tx)[0]) : undefined}
                                   />
+                                  {isNotInBank(tx) && (
+                                    <div className="mt-1 mb-1 ml-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
+                                      <span className="inline-flex items-center gap-1.5 font-semibold text-[#FF8C3A]">
+                                        <AlertTriangle size={13} />
+                                        Немає в {notInBank.get(tx.id)?.bank || 'банку'} — перевірте
+                                      </span>
+                                      <button type="button" onClick={() => openDetails(tx, currency)} className="font-semibold text-white/60 hover:text-white">
+                                        Відкрити
+                                      </button>
+                                      <button type="button" onClick={() => confirmNotInBank(tx)} className="font-semibold text-white/60 hover:text-white">
+                                        Все правильно
+                                      </button>
+                                    </div>
+                                  )}
                                   {renderTransferPartners(tx)}
 
                                   {/* Nested refund transactions */}

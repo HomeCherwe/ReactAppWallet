@@ -23,6 +23,8 @@ export interface Transaction {
   exclude_from_stats?: boolean
   split_from?: string | null
   merchant_name?: string | null
+  /** The bank's id of an imported transaction; none for one entered by hand */
+  transaction_id_card?: string | null
   is_transfer?: boolean
   /** Both legs of a transfer share it; 'from' is the money out, 'to' the money in */
   transfer_id?: string | null
