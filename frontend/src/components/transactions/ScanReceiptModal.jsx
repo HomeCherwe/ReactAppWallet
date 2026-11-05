@@ -44,6 +44,8 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
   const [expandedId, setExpandedId] = useState(null)
   const [allExpanded, setAllExpanded] = useState(false)
   const [globalCardId, setGlobalCardId] = useState('')
+  // Tried to save without picking a card
+  const [cardMissing, setCardMissing] = useState(false)
   const [globalCategory, setGlobalCategory] = useState('')
   const [showGlobalCatDropdown, setShowGlobalCatDropdown] = useState(false)
   const [openCategoryTxId, setOpenCategoryTxId] = useState(null)
@@ -74,6 +76,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
       setExpandedId(null)
       setAllExpanded(false)
       setGlobalCardId('')
+      setCardMissing(false)
       setGlobalCategory('')
       setShowGlobalCatDropdown(false)
       setOpenCategoryTxId(null)
@@ -199,7 +202,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
         setStep('upload')
         return
       }
-      // Assign temporary ids and default card; merge merchant into note
+      // Assign temporary ids; merge merchant into note. The card is never picked for the user
       const withIds = result.map((tx, i) => {
         const merchantPart = tx.merchant || ''
         const notePart = tx.note || ''
@@ -208,7 +211,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
           ...tx,
           _id: `scan_${Date.now()}_${i}`,
           _selected: true,
-          cardId: cards[0]?.id || '',
+          cardId: '',
           dateLocal: toDatetimeLocal(parseDateDDMMYYYY(tx.date)),
           note: combinedNote,
         }
@@ -308,7 +311,8 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
     // Validate all have card selected
     const noCard = toSave.find(tx => !tx.cardId)
     if (noCard) {
-      toast.error('Оберіть карту для всіх транзакцій')
+      toast.error('Ви не вибрали картку: оберіть її для всіх транзакцій або для кожної окремо')
+      setCardMissing(true)
       setExpandedId(noCard._id)
       return
     }
@@ -516,7 +520,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
               <div className="flex items-center gap-1.5">
                 <span className="text-xs text-white/55 whitespace-nowrap">Карта:</span>
                 <select
-                  className="flex-1 border rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-brand min-w-0"
+                  className={`flex-1 border rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-brand min-w-0 ${cardMissing && !globalCardId ? 'border-rose-500' : ''}`}
                   value={globalCardId}
                   onChange={(e) => {
                     const cardId = e.target.value
@@ -741,7 +745,7 @@ export default function ScanReceiptModal({ open, onClose, onSaved }) {
                               <div>
                                 <label className="text-[11px] text-white/55 mb-0.5 block">Карта</label>
                                 <select
-                                  className="border rounded-lg px-2 py-1.5 w-full text-sm"
+                                  className={`border rounded-lg px-2 py-1.5 w-full text-sm ${cardMissing && !tx.cardId ? 'border-rose-500' : ''}`}
                                   value={tx.cardId}
                                   onChange={e => updateTx(tx._id, 'cardId', e.target.value)}
                                 >

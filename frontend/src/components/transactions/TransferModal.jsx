@@ -14,6 +14,9 @@ function toLocalInput(d) {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
 }
 
+// Cash (no card) is chosen on purpose too: an empty field means nothing was picked yet
+const CASH = 'cash'
+
 export default function TransferModal({ open, onClose, onDone }) {
   const settings = useSettingsStore((state) => state.settings)
   const showUsdt = settings?.transactionsFilters?.showUsdt ?? true
@@ -125,6 +128,8 @@ export default function TransferModal({ open, onClose, onDone }) {
 
     const a = Number(amount || 0)
     if (!a || a <= 0) return alert('Введіть суму > 0')
+    if (!from) return alert('Ви не вибрали рахунок, з якого переказати')
+    if (!to) return alert('Ви не вибрали рахунок, на який переказати')
     if (from === to) return alert('Оберіть різні рахунки')
     const toAmt = differentCurrency ? Number(amountTo || 0) : null
     if (differentCurrency && !(toAmt > 0)) return alert(`Вкажіть суму зарахування в ${toCard?.currency}`)
@@ -133,7 +138,7 @@ export default function TransferModal({ open, onClose, onDone }) {
 
     setSaving(true)
     try {
-      const res = await createTransfer({ fromCardId: from || null, toCardId: to || null, amount: a, amountTo: toAmt, note, createdAt: when.toISOString() })
+      const res = await createTransfer({ fromCardId: from === CASH ? null : from, toCardId: to === CASH ? null : to, amount: a, amountTo: toAmt, note, createdAt: when.toISOString() })
       // emit events for UI refresh
       try {
         const src = res.find(r => r.transfer_role === 'from')
@@ -162,12 +167,14 @@ export default function TransferModal({ open, onClose, onDone }) {
     >
       <form onSubmit={submit} className="grid gap-3">
               <select className="border rounded px-3 py-2" value={from} onChange={e=>setFrom(e.target.value)}>
-                <option value="">— Готівка —</option>
+                <option value="">— З рахунку: оберіть —</option>
+                <option value={CASH}>Готівка</option>
                 {cards.filter(c => !c.archived || String(c.id) === String(from)).map(c => <option key={c.id} value={c.id}>{c.bank} — {c.name}</option>)}
               </select>
 
               <select className="border rounded px-3 py-2" value={to} onChange={e=>setTo(e.target.value)}>
-                <option value="">— Готівка —</option>
+                <option value="">— На рахунок: оберіть —</option>
+                <option value={CASH}>Готівка</option>
                 {cards.filter(c => !c.archived || String(c.id) === String(to)).map(c => <option key={c.id} value={c.id}>{c.bank} — {c.name}</option>)}
               </select>
 

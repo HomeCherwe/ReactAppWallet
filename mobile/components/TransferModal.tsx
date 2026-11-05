@@ -41,19 +41,14 @@ export default function TransferModal({
     setDate(new Date())
     setDateTouched(false)
     setAmountTo('')
+    // The accounts are never picked for the user
+    setFromCardId('')
+    setToCardId('')
+    setErrorMsg('')
   }, [visible])
   useEffect(() => {
     setAmountTo('')
   }, [fromCardId, toCardId])
-
-  useEffect(() => {
-    if (cards.length >= 2) {
-      setFromCardId(cards[0].id)
-      setToCardId(cards[1].id)
-    } else if (cards.length === 1) {
-      setFromCardId(cards[0].id)
-    }
-  }, [cards])
 
   if (!visible) return null
 
@@ -64,7 +59,7 @@ export default function TransferModal({
       return
     }
     if (!fromCardId || !toCardId) {
-      setErrorMsg('Оберіть рахунки звідки і куди')
+      setErrorMsg(!fromCardId ? 'Ви не вибрали рахунок, з якого переказати' : 'Ви не вибрали рахунок, на який переказати')
       return
     }
     if (fromCardId === toCardId) {
