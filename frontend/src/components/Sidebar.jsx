@@ -1,4 +1,4 @@
-import { Home, CreditCard, BarChart3, Repeat, Archive, HandCoins, Eye, EyeOff } from 'lucide-react'
+import { Home, CreditCard, BarChart3, Repeat, Archive, HandCoins, Eye, EyeOff, Activity } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { supabase, cacheUser } from '../lib/supabase'
@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react'
 import { useSettingsStore } from '../store/useSettingsStore'
 import QuickAddFab from './QuickAddFab'
 import AppLogo from './AppLogo'
+import { useIsAdmin } from '../api/admin'
 
 export const NAV_ITEMS = [
   { path: '/', label: 'Головна', icon: Home },
@@ -75,6 +76,9 @@ export default function Sidebar() {
   const updateSetting = useSettingsStore(state => state.updateSetting)
   const navigate = useNavigate()
   const isActive = useIsActive()
+  // «Адмінка» shows only for the owner
+  const isAdmin = useIsAdmin()
+  const items = isAdmin ? [...NAV_ITEMS, { path: '/admin', label: 'Адмінка', icon: Activity }] : NAV_ITEMS
 
   return (
     <aside className="sticky top-6 z-30 self-start w-full">
@@ -86,7 +90,7 @@ export default function Sidebar() {
           <QuickAddFab variant="inline" />
         </div>
 
-        {NAV_ITEMS.map(({ path, label, icon: Icon }) => {
+        {items.map(({ path, label, icon: Icon }) => {
           const active = isActive(path)
           return (
             <motion.button

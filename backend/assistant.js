@@ -4,6 +4,7 @@
 
 import { readPreferences, userCategories } from './insights.js'
 import { accountKind, kindOutOfStats, withCardV2 } from './accountKind.js'
+import { describeOpenAIError } from './openaiStatus.js'
 
 // An account as the user sees it in the apps: bank + card name («Готівка EUR», not just «EUR»)
 function accountLabel(card) {
@@ -566,7 +567,8 @@ export function registerAssistant(app, { supabase, getUserFromToken }) {
       res.json({ answer, transactions })
     } catch (e) {
       console.error('[Assistant] error:', e.message)
-      res.status(500).json({ error: 'Асистент зараз не відповідає — спробуй ще раз' })
+      const known = describeOpenAIError(e?.message)
+      res.status(known ? 503 : 500).json({ error: known?.message || 'Асистент зараз не відповідає — спробуй ще раз' })
     }
   })
 }

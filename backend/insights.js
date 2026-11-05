@@ -4,6 +4,8 @@
 // - subscriptions: regular charges found in bank transactions (shown for information);
 // - the month's report: a few sentences from GPT about the month's numbers.
 
+import { describeOpenAIError } from './openaiStatus.js'
+
 const DAY = 864e5
 const OPENAI_MODEL = 'gpt-5.1'
 // New merchants asked about in one GPT request
@@ -728,7 +730,8 @@ export function registerInsights(app, { supabase, getUserFromToken }) {
       res.json({ success: true, report, created_at: row.created_at, currency })
     } catch (e) {
       console.error('[MonthlyReport] error:', e.message)
-      res.status(500).json({ success: false, error: 'Не вдалося написати звіт — спробуйте пізніше' })
+      const known = describeOpenAIError(e?.message)
+      res.status(known ? 503 : 500).json({ success: false, error: known?.message || 'Не вдалося написати звіт — спробуйте пізніше' })
     }
   })
 }

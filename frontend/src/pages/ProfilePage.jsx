@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase, invalidateUserCache } from '../lib/supabase'
 import { motion } from 'framer-motion'
-import { User, Mail, Save, Upload, Key, Copy, Eye, EyeOff, RefreshCw, LogOut, Check, Coins, Pin } from 'lucide-react'
+import { User, Mail, Save, Upload, Key, Copy, Eye, EyeOff, RefreshCw, LogOut, Check, Coins, Pin, Activity } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getApiKey, generateApiKey } from '../api/preferences'
 import { getApiUrl, apiFetch } from '../utils.jsx'
@@ -11,6 +11,8 @@ import { SUPPORTED_CURRENCIES, usePrimaryCurrency, setPrimaryCurrency } from '..
 import { EXCLUDED_CATEGORIES_PATH, useExcludedCategories } from '../utils/statsCategories'
 import { getTransactionCategories } from '../api/transactions'
 import AutoCategoriesSettings from '../components/AutoCategoriesSettings'
+import { useNavigate } from 'react-router-dom'
+import { useIsAdmin } from '../api/admin'
 
 // Symbol tile colors in the currency list
 const CURRENCY_COLORS = {
@@ -40,6 +42,8 @@ function SectionTitle({ icon: Icon, color, title, subtitle }) {
 }
 
 export default function ProfilePage() {
+  const navigate = useNavigate()
+  const isAdmin = useIsAdmin()
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -389,6 +393,19 @@ export default function ProfilePage() {
       className="space-y-4"
     >
       <h1 className="text-[28px] font-bold tracking-tight px-1">Налаштування</h1>
+
+      {/* On a wide screen «Адмінка» is in the sidebar; only the owner sees it */}
+      {isAdmin && (
+        <button
+          type="button"
+          onClick={() => navigate('/admin')}
+          className="lg:hidden w-full flex items-center gap-3 p-4 rounded-3xl bg-white/[0.05] border border-white/10 text-left hover:bg-white/[0.08] transition-colors"
+        >
+          <Activity size={18} className="text-brand" />
+          <span className="flex-1 font-semibold">Адмінка: стан і помилки</span>
+          <span className="text-xl leading-none text-white/35">›</span>
+        </button>
+      )}
 
       {/* Profile */}
       <section className={section}>

@@ -16,6 +16,7 @@ import { useSettingsStore } from "./store/useSettingsStore"
 import { useBankAutoSync } from "./hooks/useBankAutoSync"
 import { useMarkAppInstalled } from "./hooks/useMarkAppInstalled"
 import { useSubscriptionReminders } from './hooks/useSubscriptionReminders'
+import { installErrorReporter } from './utils/errorReporter'
 import { toastConfig } from "./components/ToastConfig"
 import MenuOverlayHost from "./components/MenuOverlayHost"
 
@@ -25,6 +26,9 @@ import HomeScreen from "./screens/HomeScreen"
 import SubscriptionsScreen from "./screens/SubscriptionsScreen"
 import AnalyticsScreen from "./screens/AnalyticsScreen"
 import CardsScreen from "./screens/CardsScreen"
+
+// Errors in the app reach the owner's «Адмінка»
+installErrorReporter()
 
 // Tabs config (Debts excluded per user instructions; the archive lives in Settings)
 const TABS = [

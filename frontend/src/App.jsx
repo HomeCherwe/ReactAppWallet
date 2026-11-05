@@ -7,6 +7,7 @@ import DashboardPage from './pages/DashboardPage'
 import ProfilePage from './pages/ProfilePage'
 import AnalyticsPage from './pages/AnalyticsPage'
 import SubscriptionsPage from './pages/SubscriptionsPage'
+import AdminPage from './pages/AdminPage'
 import CardsPage from './pages/CardsPage'
 import ArchivesPage from './pages/ArchivesPage'
 import DebtsPage from './pages/DebtsPage'
@@ -490,6 +491,11 @@ export default function App(){
                 <ArchivesPage />
               </div>
             } />
+          <Route path="/admin" element={
+            <div className="lg:col-span-2">
+              <AdminPage />
+            </div>
+          } />
           <Route path="/debts" element={
             <div className="lg:col-span-2">
               <DebtsPage />

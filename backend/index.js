@@ -11,6 +11,8 @@ import { createClient } from '@supabase/supabase-js'
 import { registerBankConnections, syncAllBankConnections, psuHeadersFrom, pinSyncCategory } from './bankConnections.js'
 import { registerInsights } from './insights.js'
 import { registerBankCheck } from './bankCheck.js'
+import { installAppLogs, registerAppLogs } from './appLogs.js'
+import { describeOpenAIError } from './openaiStatus.js'
 import { registerAssistant } from './assistant.js'
 import { ACCOUNT_KINDS, cardBucket, withCardV2 } from './accountKind.js'
 import { cardLabelOf, makeTransferFromExisting } from './transfers.js'
@@ -77,6 +79,9 @@ if (!isServiceRole) {
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
+
+// The server's errors and warnings also go to the admin page (appLogs.js); before any route
+installAppLogs(app, supabase)
 
 // Global HTTP client with keep-alive for external APIs (Binance, etc.)
 const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 50 })
@@ -2659,7 +2664,9 @@ Return ONLY the JSON object { "transactions": [...] }. Nothing else.`
     const raw = await r.text()
     if (!r.ok) {
       console.error('[scan-transactions] OpenAI error:', raw)
-      return res.status(502).json({ error: 'Не вдалося розпізнати зображення — спробуйте інше фото', details: raw.slice(0, 500) })
+      // The photo isn't the problem when OpenAI itself refuses: say what is
+      const known = describeOpenAIError(raw, r.status)
+      return res.status(known ? 503 : 502).json({ error: known?.message || 'Не вдалося розпізнати зображення — спробуйте інше фото', details: raw.slice(0, 500) })
     }
 
     let transactions = []
@@ -3823,6 +3830,8 @@ registerBankConnections(app, { supabase, getUserFromToken, getUserFromTokenOrApi
 // Auto-categories, subscriptions found in bank charges, the month's report
 registerInsights(app, { supabase, getUserFromToken })
 registerBankCheck(app, { supabase, getUserFromToken })
+// «Адмінка»: the project's errors and health
+registerAppLogs(app, { supabase, getUserFromToken })
 // «AI-асистент»: a chat that reads the user's data through fixed functions
 registerAssistant(app, { supabase, getUserFromToken })
 

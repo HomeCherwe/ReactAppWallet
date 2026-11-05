@@ -4,6 +4,10 @@ import { HashRouter } from 'react-router-dom'
 import App from './App.jsx'
 import './styles.css'
 import { PreferencesProvider } from './context/PreferencesContext.jsx'
+import { installErrorReporter } from './utils/errorReporter'
+
+// Errors on the page reach the owner's «Адмінка»
+installErrorReporter()
 
 // Use HashRouter for GitHub Pages and Capacitor compatibility
 // URLs will look like: http://localhost:5173/#/profile
