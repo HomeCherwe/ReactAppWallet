@@ -7,6 +7,7 @@ import { apiFetch } from '../utils.jsx'
 import { usePrimaryCurrency, convertAmount, currencySymbol } from '../utils/primaryCurrency'
 import { isCategoryExcluded, useExcludedCategories } from '../utils/statsCategories'
 import { kindOutOfStats } from '../utils/accountKind'
+import RollingNumber from './RollingNumber'
 
 const MONTHS = [
   'Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень',
@@ -58,7 +59,7 @@ export default function EarningsStatCard({ title, mode }) {
       abortControllerRef.current = abortController
       const aborted = () => abortController.signal.aborted || !mounted
 
-      setLoading(true)
+      // The last numbers stay on screen while new ones load, then roll to them
       try {
         const now = new Date()
         const firstDayThisMonth = new Date(now.getFullYear(), now.getMonth(), 1)
@@ -102,8 +103,6 @@ export default function EarningsStatCard({ title, mode }) {
       } catch (e) {
         if (e.name === 'AbortError' || aborted()) return
         console.error('fetch earnings stat failed', e)
-        setTotal(0)
-        setPrevTotal(0)
       } finally {
         if (!aborted()) setLoading(false)
       }
@@ -152,7 +151,7 @@ export default function EarningsStatCard({ title, mode }) {
         {MONTHS[now.getMonth()]} {now.getFullYear()}
       </div>
       <div className={`text-[26px] sm:text-3xl font-bold tracking-tight tabular-nums ${amountColor}`}>
-        {loading ? '—' : `${amountSign}${fmt(total)}`}
+        {loading ? '—' : <RollingNumber value={total} format={v => `${amountSign}${fmt(v)}`} />}
       </div>
 
       {!loading && prevTotal !== 0 && (

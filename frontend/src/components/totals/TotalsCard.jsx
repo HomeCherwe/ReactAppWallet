@@ -16,6 +16,7 @@ import useMonoRates from '../../hooks/useMonoRates'
 import { usePrimaryCurrency, sumIn, convertAmount, equivalentCurrencies } from '../../utils/primaryCurrency'
 import { formatMoney } from '../../utils/cardTheme'
 import { BUCKETS, KIND_META, KIND_OF_BUCKET } from '../../utils/accountKind'
+import RollingNumber from '../RollingNumber'
 
 const EMPTY = { cards: {}, savings: {}, cash: {}, investments: {} }
 const signed = (v, cur, opts) => `${v < 0 ? '−' : ''}${formatMoney(v, cur, opts)}`
@@ -150,7 +151,7 @@ export default function TotalsCard({ title = 'Загальний баланс' }
         {ready ? (
           <>
             <div className="text-[26px] sm:text-3xl font-bold tracking-tight text-white tabular-nums truncate">
-              {hidden ? '••••••' : signed(total, primary)}
+              {hidden ? '••••••' : <RollingNumber value={total} format={v => signed(v, primary)} />}
             </div>
             <div className="mt-1 h-4 text-xs font-medium text-white/40 tabular-nums truncate">
               {hidden || !equivalents ? '' : `≈ ${equivalents}`}

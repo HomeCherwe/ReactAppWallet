@@ -7,6 +7,7 @@ import {
   StatusBar,
   TouchableOpacity,
   Animated,
+  AppState,
   Platform,
   RefreshControl,
   Alert,
@@ -110,12 +111,37 @@ const NO_PINNED_CATEGORIES: string[] = []
 // Time for a sheet to finish closing before the next one opens
 const SHEET_SWAP_DELAY_MS = 380
 
+/**
+ * The month's income, spending or remainder: rolls like the total balance. The font shrinks with the
+ * length (manual sizing — the digits are separate views, adjustsFontSizeToFit can't fit them).
+ */
+function StatNumber({ value, format, color, hidden, width }: {
+  value: number
+  format: (value: number) => string
+  color: string
+  hidden: boolean
+  width: number
+}) {
+  const fontSize = Math.max(9, Math.min(15, Math.floor(width / (format(value).length * 0.6))))
+  return (
+    <View style={styles.statValueLine}>
+      {hidden ? (
+        <Text style={[styles.statValue, { color }]} numberOfLines={1}>••••</Text>
+      ) : (
+        <RollingNumber value={value} format={format} style={[styles.statValue, { color, fontSize }]} />
+      )}
+    </View>
+  )
+}
+
 export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) {
   const scrollY = useRef(new Animated.Value(0)).current
   const statsScrollX = useRef(new Animated.Value(0)).current
   const STATS_SLIDE_WIDTH = Dimensions.get('window').width - 84
   const STATS_GAP = 40
   const SNAP_INTERVAL = STATS_SLIDE_WIDTH + STATS_GAP
+  // One of the three cells of a slide: its padding, gaps and dividers taken off
+  const statCellWidth = (STATS_SLIDE_WIDTH - 46) / 3
 
   const [userName, setUserName] = useState('...')
   const [userEmail, setUserEmail] = useState('')
@@ -198,7 +224,9 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
     return 'Добрий вечір 🌙'
   }
 
+  const loadRequest = useRef(0)
   const loadData = useCallback(async () => {
+    const id = ++loadRequest.current
     try {
       // Fetch everything in parallel, then apply it in one render — no step-by-step jumping
       const [savedCur, ratesMap, userRes, prefs, cardsData, sumByCard, totalsData] = await Promise.all([
@@ -214,6 +242,8 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
       const stats = await getRecentMonthsStats(
         savedCur, cardsData, ratesMap, 6, false, excludedIdsOf(cardsData, getLegacyExcludedIds())
       )
+      // A newer reload is on its way (a sync finished, one more transaction): its numbers win
+      if (id !== loadRequest.current) return
 
       const user = userRes.data.user
       const balMap: Record<string, number> = {}
@@ -238,12 +268,15 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
       })
       setBalances(balMap)
       setTotals(totalsData)
-      setRecentMonthsStats(stats)
+      // Empty only when the request failed: the last numbers stay until the next reload
+      if (stats.length > 0) setRecentMonthsStats(stats)
     } catch (err) {
       console.error('HomeScreen load error:', err)
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (id === loadRequest.current) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
   }, [])
 
@@ -265,13 +298,21 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
   // Background bank sync (e.g. Revolut on app open) added transactions — reload quietly
   useEffect(() => {
     return txBus.subscribe(ev => {
-      if (ev?.type === 'SYNCED') {
+      if (ev?.type === 'SYNCED' || ev?.type === 'REALTIME') {
         loadData()
         refreshTxFeed()
         refreshPinned()
       }
     })
   }, [loadData, refreshTxFeed, refreshPinned])
+
+  // Back in the app: the numbers may have changed on the web or in the bank meanwhile
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', state => {
+      if (state === 'active') loadData()
+    })
+    return () => sub.remove()
+  }, [loadData])
 
   const handleCurrencyChange = async (newCur: string) => {
     setPrimaryCurrency(newCur)
@@ -702,7 +743,6 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
                   {recentMonthsStats.map((stat, i) => {
                     const saved = stat.income - stat.expense;
                     const savedColor = saved > 0 ? Colors.green : (saved < 0 ? '#FF6B6B' : Colors.orange);
-                    const savedPrefix = saved > 0 ? '+' : (saved < 0 ? '-' : '');
                     return (
                     <View key={stat.id} style={{ width: STATS_SLIDE_WIDTH, marginRight: i === recentMonthsStats.length - 1 ? 0 : STATS_GAP }}>
                       <Text style={styles.monthLabel}>{i === 0 ? 'Цей місяць' : stat.label}</Text>
@@ -717,13 +757,13 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
                                </Text>
                             )}
                           </View>
-                          <Text 
-                            style={[styles.statValue, { color: Colors.green }]}
-                            numberOfLines={1}
-                            adjustsFontSizeToFit
-                          >
-                            {hideBalances ? '••••' : `+${formatMoney(stat.income, primaryCurrency, { hideCents: true })}`}
-                          </Text>
+                          <StatNumber
+                            value={stat.income}
+                            format={v => `+${formatMoney(v, primaryCurrency, { hideCents: true })}`}
+                            color={Colors.green}
+                            hidden={hideBalances}
+                            width={statCellWidth}
+                          />
                         </View>
                         <View style={styles.statDivider} />
                         <View style={styles.balanceStat}>
@@ -736,13 +776,13 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
                                </Text>
                             )}
                           </View>
-                          <Text 
-                            style={[styles.statValue, { color: '#FF6B6B' }]}
-                            numberOfLines={1}
-                            adjustsFontSizeToFit
-                          >
-                            {hideBalances ? '••••' : `-${formatMoney(stat.expense, primaryCurrency, { hideCents: true })}`}
-                          </Text>
+                          <StatNumber
+                            value={stat.expense}
+                            format={v => `-${formatMoney(v, primaryCurrency, { hideCents: true })}`}
+                            color="#FF6B6B"
+                            hidden={hideBalances}
+                            width={statCellWidth}
+                          />
                         </View>
                         <View style={styles.statDivider} />
                         <View style={styles.balanceStat}>
@@ -750,13 +790,13 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
                             <View style={[styles.statDot, { backgroundColor: savedColor }]} />
                             <Text style={styles.statLabel}>Залишок</Text>
                           </View>
-                          <Text 
-                            style={[styles.statValue, { color: savedColor }]}
-                            numberOfLines={1}
-                            adjustsFontSizeToFit
-                          >
-                            {hideBalances ? '••••' : `${savedPrefix}${formatMoney(Math.abs(saved), primaryCurrency, { hideCents: true })}`}
-                          </Text>
+                          <StatNumber
+                            value={saved}
+                            format={v => `${v > 0 ? '+' : v < 0 ? '-' : ''}${formatMoney(Math.abs(v), primaryCurrency, { hideCents: true })}`}
+                            color={savedColor}
+                            hidden={hideBalances}
+                            width={statCellWidth}
+                          />
                         </View>
                       </View>
                     </View>

@@ -9,6 +9,7 @@ interface CacheEntry<T> {
 
 let cardsCache: CacheEntry<any[]> | null = null
 let sumByCardCache: CacheEntry<Record<string, any>> | null = null
+let sumByCardGeneration = 0
 
 export function invalidateCardsCache() {
   cardsCache = null
@@ -16,6 +17,7 @@ export function invalidateCardsCache() {
 
 export function invalidateSumByCardCache() {
   sumByCardCache = null
+  sumByCardGeneration++
 }
 
 export async function getCachedCards(fetcher: () => Promise<any[]>): Promise<any[]> {
@@ -31,7 +33,9 @@ export async function getCachedSumByCard(
 ): Promise<Record<string, any>> {
   const now = Date.now()
   if (sumByCardCache && (now - sumByCardCache.timestamp) < CACHE_TTL) return sumByCardCache.data
+  const generation = sumByCardGeneration
   const data = await fetcher()
-  sumByCardCache = { data, timestamp: now }
+  // Transactions changed while this was on its way: the answer is already old, don't keep it
+  if (generation === sumByCardGeneration) sumByCardCache = { data, timestamp: now }
   return data
 }
