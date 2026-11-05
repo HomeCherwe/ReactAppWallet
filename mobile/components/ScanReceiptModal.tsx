@@ -79,6 +79,9 @@ export default function ScanReceiptModal({ visible, cards, onClose, onSaved }: S
   const [images, setImages] = useState<Picked[]>([])
   const [rows, setRows] = useState<Row[]>([])
   const [cardId, setCardId] = useState<string>('')
+  // Tried to save without picking a card (it's never picked for the user)
+  const [cardMissing, setCardMissing] = useState(false)
+  const reviewScroll = useRef<ScrollView>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [categories, setCategories] = useState<string[]>(BASE_CATEGORIES)
   const [saving, setSaving] = useState(false)
@@ -91,7 +94,8 @@ export default function ScanReceiptModal({ visible, cards, onClose, onSaved }: S
     setImages([])
     setRows([])
     setExpanded(null)
-    setCardId(prev => (cards.some(c => c.id === prev) ? prev : cards[0]?.id ?? ''))
+    setCardId('')
+    setCardMissing(false)
     getTransactionCategories()
       .then(list => setCategories([...new Set([...BASE_CATEGORIES, ...list.filter(Boolean)])]))
       .catch(() => {})
@@ -207,12 +211,6 @@ export default function ScanReceiptModal({ visible, cards, onClose, onSaved }: S
           amountText: String(Math.abs(Number(t.amount) || 0)).replace('.', ','),
         }))
       )
-      // A card in the currency of the receipt, if the current one doesn't match
-      const cur = found[0]?.currency
-      if (cur && card?.currency !== cur) {
-        const match = cards.find(c => c.currency === cur)
-        if (match) setCardId(match.id)
-      }
       triggerSuccessHaptic()
       setStep('review')
     } catch (e: any) {
@@ -228,7 +226,10 @@ export default function ScanReceiptModal({ visible, cards, onClose, onSaved }: S
     const chosen = rows.filter(r => r.selected)
     if (chosen.length === 0) return
     if (!cardId) {
-      Toast.show({ type: 'error', text1: 'Оберіть картку' })
+      triggerErrorHaptic()
+      setCardMissing(true)
+      reviewScroll.current?.scrollTo({ y: 0, animated: true })
+      Toast.show({ type: 'error', text1: 'Ви не вибрали картку', text2: 'Оберіть, на яку картку записати транзакції' })
       return
     }
     setSaving(true)
@@ -334,13 +335,20 @@ export default function ScanReceiptModal({ visible, cards, onClose, onSaved }: S
 
       {step === 'review' && (
         <>
-          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <Text style={styles.label}>Картка</Text>
+          <ScrollView ref={reviewScroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <Text style={[styles.label, cardMissing && styles.labelError]}>{cardId ? 'Картка' : 'Оберіть картку'}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
               {sortedCards.map(c => {
                 const active = c.id === cardId
                 return (
-                  <Pressable key={c.id} onPress={() => setCardId(c.id)} style={[styles.chip, active && styles.chipActive]}>
+                  <Pressable
+                    key={c.id}
+                    onPress={() => {
+                      setCardId(c.id)
+                      setCardMissing(false)
+                    }}
+                    style={[styles.chip, active && styles.chipActive]}
+                  >
                     <Text style={[styles.chipText, active && styles.chipTextActive]} numberOfLines={1}>
                       {c.name}
                     </Text>
@@ -590,6 +598,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     color: Colors.white40,
     paddingHorizontal: 4,
+  },
+  labelError: {
+    color: Colors.red,
   },
   chips: {
     gap: 8,

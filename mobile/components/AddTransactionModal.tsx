@@ -78,6 +78,8 @@ export default function AddTransactionModal({
   const [usage, setUsage] = useState<RecentUsage | null>(null)
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+  // Tried to save without picking a card (it's never picked for the user)
+  const [cardMissing, setCardMissing] = useState(false)
   // When it happened: now by default, any date and time can be picked
   const [date, setDate] = useState(() => new Date())
   // Untouched, the transaction gets the moment it's saved; the wheel being open hides the keypad
@@ -129,6 +131,8 @@ export default function AddTransactionModal({
     setExpr('')
     setNote('')
     setErrorMsg('')
+    setSelectedCardId('')
+    setCardMissing(false)
     setCatQuery('')
     setCustomCategory('')
     setDate(new Date())
@@ -139,21 +143,19 @@ export default function AddTransactionModal({
       .catch(() => setUsage({ expense: [], income: [], cardIds: [] }))
   }, [visible])
 
-  // Default selections follow the recency order
+  // A card that went away doesn't stay picked
   useEffect(() => {
-    if (!orderedCards.some(c => c.id === selectedCardId)) {
-      setSelectedCardId(orderedCards[0]?.id ?? '')
-    }
+    if (selectedCardId && !orderedCards.some(c => c.id === selectedCardId)) setSelectedCardId('')
   }, [orderedCards])
 
+  // The default category follows the recency order
   useEffect(() => {
     if (!categories.includes(selectedCategory)) setSelectedCategory(categories[0] ?? '')
   }, [categories])
 
-  // After a fresh open with usage loaded, start from the most recent card/category
+  // After a fresh open with usage loaded, start from the most recent category
   useEffect(() => {
     if (!visible || !usage) return
-    setSelectedCardId(orderedCards[0]?.id ?? '')
     setSelectedCategory(categories[0] ?? '')
   }, [usage])
 
@@ -172,6 +174,8 @@ export default function AddTransactionModal({
     LayoutAnimation.configureNext(LayoutAnimation.create(220, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity))
   const chooseCard = (id: string) => {
     if (id === selectedCardId) return
+    setCardMissing(false)
+    setErrorMsg('')
     moveToFront()
     setSelectedCardId(id)
     cardScroll.current?.scrollTo({ x: 0, animated: true })
@@ -204,6 +208,13 @@ export default function AddTransactionModal({
     if (value === null || value <= 0) {
       triggerErrorHaptic()
       setErrorMsg('Вкажіть суму більше нуля')
+      return
+    }
+    if (orderedCards.length > 0 && !selectedCardId) {
+      triggerErrorHaptic()
+      setErrorMsg('Ви не вибрали картку')
+      setCardMissing(true)
+      bodyScroll.current?.scrollTo({ y: 0, animated: true })
       return
     }
 
@@ -297,7 +308,9 @@ export default function AddTransactionModal({
         {/* Card */}
         {orderedCards.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionLabel}>РАХУНОК / КАРТКА</Text>
+            <Text style={[styles.sectionLabel, cardMissing && styles.sectionLabelError]}>
+              {selectedCardId ? 'РАХУНОК / КАРТКА' : 'ОБЕРІТЬ РАХУНОК / КАРТКУ'}
+            </Text>
             <ScrollView
               ref={cardScroll}
               horizontal
@@ -594,6 +607,9 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginBottom: 8,
     marginLeft: 4,
+  },
+  sectionLabelError: {
+    color: Colors.red,
   },
   chipsRow: {
     flexDirection: 'row',
