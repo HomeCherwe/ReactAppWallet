@@ -20,6 +20,8 @@ import { GlassPressable } from './LiquidGlass'
 import SheetModal from './SheetModal'
 import AutoCategoriesSettings from './AutoCategoriesSettings'
 import ArchivesScreen from '../screens/ArchivesScreen'
+import AdminScreen from '../screens/AdminScreen'
+import { fetchIsAdmin } from '../api/admin'
 
 interface SettingsModalProps {
   visible: boolean
@@ -51,6 +53,12 @@ export default function SettingsModal({
   const excludedCategories = useExcludedCategories()
   const [excludedInput, setExcludedInput] = useState('')
   const [archiveOpen, setArchiveOpen] = useState(false)
+  // «Адмінка» shows only for the owner
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [adminOpen, setAdminOpen] = useState(false)
+  useEffect(() => {
+    if (visible) fetchIsAdmin().then(setIsAdmin)
+  }, [visible])
   const [allCategories, setAllCategories] = useState<string[]>([])
 
   const lastSavedName = useRef(userName || '')
@@ -334,6 +342,19 @@ export default function SettingsModal({
                 </View>
               </View>
 
+              {isAdmin && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>Проект</Text>
+                  <View style={styles.cardGroup}>
+                    <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFill} />
+                    <TouchableOpacity style={styles.settingRow} activeOpacity={0.7} onPress={() => setAdminOpen(true)}>
+                      <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: Colors.white }}>🩺 Адмінка: стан і помилки</Text>
+                      <Text style={{ fontSize: 20, color: Colors.white40 }}>›</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
               {/* AUTO-CATEGORIES: bank imports get a category from the user's habits */}
               <View style={styles.section}>
                 <Text style={styles.sectionLabel}>Автокатегорії</Text>
@@ -412,6 +433,9 @@ export default function SettingsModal({
 
       <Modal visible={archiveOpen} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setArchiveOpen(false)}>
         <ArchivesScreen onClose={() => setArchiveOpen(false)} />
+      </Modal>
+      <Modal visible={adminOpen} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setAdminOpen(false)}>
+        <AdminScreen onClose={() => setAdminOpen(false)} />
       </Modal>
     </SheetModal>
   )
