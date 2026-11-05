@@ -16,10 +16,16 @@ interface DigitProps {
 function Digit({ digit, direction, height, delay, textStyle }: DigitProps) {
   const y = useRef(new Animated.Value(-(digit + 10) * height)).current
   const current = useRef(digit)
+  const lastHeight = useRef(height)
 
   useEffect(() => {
     const from = current.current
     current.current = digit
+    // The font changed size: the strip's rows moved
+    if (lastHeight.current !== height) {
+      lastHeight.current = height
+      y.setValue(-(from + 10) * height)
+    }
     if (from === digit) return
 
     let target = digit + 10
@@ -35,7 +41,7 @@ function Digit({ digit, direction, height, delay, textStyle }: DigitProps) {
     }).start(({ finished }) => {
       if (finished) y.setValue(-(digit + 10) * height)
     })
-  }, [digit])
+  }, [digit, height])
 
   return (
     <View style={{ height, overflow: 'hidden' }}>
