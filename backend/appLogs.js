@@ -164,8 +164,8 @@ function capture(level, args) {
     const message = parts.join(' ')
     const store = requestContext.getStore()
     const req = store?.req
-    // Someone's expired login is routine, not a failure of the project
-    const quiet = /^\[getUserFromToken\]/.test(message)
+    // Someone's expired login and Node's own notices at startup are routine, not failures of the project
+    const quiet = /^\[getUserFromToken\]|^\(node:\d+\) (\[\w+\] )?\w*Warning:/.test(message)
     const row = record({
       source: 'server',
       level: quiet ? 'warn' : level,
