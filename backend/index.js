@@ -373,6 +373,9 @@ const isSyncCategory = (category) => /\bsync$/i.test(String(category || '').trim
 
 // Cards API
 const CARD_COLUMNS = 'id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, exclude_from_stats, banks(name, iban, bic, beneficiary, exclude_from_stats)'
+// Preferences only the server writes: a client saving its settings neither sees nor overwrites them
+const SERVER_PREF_KEYS = [CLAUDE_PREF_KEY, 'api_key']
+
 // Lists leave the background picture out (megabytes): each card gets a link to it (cardBg.js)
 const CARD_LIST_COLUMNS = CARD_COLUMNS.replace('bg_url, ', '')
 
@@ -1883,9 +1886,9 @@ app.get('/api/preferences', getUserFromToken, async (req, res) => {
     if (error && error.code !== 'PGRST116') throw error // PGRST116 = no rows
 
     const result = { ...(data?.preferences || {}) }
-    // Do NOT include API keys here anymore
-    // Claude connections are the server's (Settings reads them from /api/claude/connections)
-    delete result[CLAUDE_PREF_KEY]
+    // What only the server writes stays out: Claude connections (Settings reads them from
+    // /api/claude/connections) and the automation key (from /api/api-key)
+    for (const key of SERVER_PREF_KEYS) delete result[key]
 
     // Add metadata
     if (data) {
@@ -1917,8 +1920,10 @@ app.post('/api/preferences', getUserFromToken, async (req, res) => {
       .select('id, preferences')
       .eq('user_id', req.user_id)
       .single()
-    delete prefsWithoutAPIs[CLAUDE_PREF_KEY]
-    if (existing?.preferences?.[CLAUDE_PREF_KEY]) prefsWithoutAPIs[CLAUDE_PREF_KEY] = existing.preferences[CLAUDE_PREF_KEY]
+    for (const key of SERVER_PREF_KEYS) {
+      delete prefsWithoutAPIs[key]
+      if (existing?.preferences?.[key] !== undefined) prefsWithoutAPIs[key] = existing.preferences[key]
+    }
 
     if (existing) {
       // Update
@@ -1959,8 +1964,8 @@ app.patch('/api/preferences', getUserFromToken, async (req, res) => {
     if (!updates || typeof updates !== 'object') {
       return res.status(400).json({ error: 'Invalid updates object' })
     }
-    // Claude connections are changed only through /api/claude/connections
-    delete updates[CLAUDE_PREF_KEY]
+    // Claude connections and the automation key change only through their own endpoints
+    for (const key of SERVER_PREF_KEYS) delete updates[key]
 
     // Отримуємо поточні налаштування з БД
     const { data: existing, error: fetchError } = await supabase
@@ -3368,7 +3373,8 @@ export default app
 
 // Vercel використовує serverless functions, тому не потрібен listen
 // Але для локальної розробки потрібен
-if (process.env.NODE_ENV !== 'production' || process.env.VERCEL !== '1') {
+// Tests (npm test) start their own server on a free port
+if ((process.env.NODE_ENV !== 'production' || process.env.VERCEL !== '1') && process.env.NODE_ENV !== 'test') {
   const port = process.env.PORT || 8787
   // Listen on 0.0.0.0 to allow access from other devices on the network
   app.listen(port, '0.0.0.0', () => {
