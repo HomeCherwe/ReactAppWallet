@@ -62,6 +62,7 @@ import TxSheet from '../components/TxSheet'
 import AssistantSheet from '../components/AssistantSheet'
 import TransferFromTxSheet from '../components/TransferFromTxSheet'
 import { confirmUnlinkTransfer } from '../utils/transferActions'
+import { confirmDeleteTx } from '../utils/txActions'
 import TransferModal from '../components/TransferModal'
 import SplitTxModal from '../components/SplitTxModal'
 import ScanReceiptModal from '../components/ScanReceiptModal'
@@ -78,8 +79,6 @@ import {
   getSumByCard,
   getRecentMonthsStats,
   MonthStat,
-  deleteTransaction,
-  archiveTransaction,
   linkRefund,
   unlinkRefund,
   Transaction,
@@ -518,40 +517,8 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
     refreshAfterTxChange()
   }
 
-  // Delete can't be undone; the archive can (Налаштування → Архів)
-  const handleDeleteTx = (tx: Transaction) => {
-    Alert.alert(
-      'Видалити транзакцію?',
-      'Видалення не можна скасувати. В архіві вона зникне зі списку й балансу, але її можна повернути (Налаштування → Архів).',
-      [
-        { text: 'Скасувати', style: 'cancel' },
-        {
-          text: 'В архів',
-          onPress: async () => {
-            try {
-              await archiveTransaction(tx.id)
-              Toast.show({ type: 'success', text1: 'Транзакцію заархівовано', text2: 'Повернути: Налаштування → Архів' })
-              refreshAfterTxChange()
-            } catch (e: any) {
-              Alert.alert('Помилка', e.message || 'Не вдалося заархівувати')
-            }
-          },
-        },
-        {
-          text: 'Видалити',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteTransaction(tx.id)
-              refreshAfterTxChange()
-            } catch (e: any) {
-              Alert.alert('Помилка', e.message || 'Не вдалося видалити')
-            }
-          },
-        },
-      ]
-    )
-  }
+  // Delete can't be undone; the archive can (Налаштування → Архів) — same dialog as everywhere
+  const handleDeleteTx = (tx: Transaction) => confirmDeleteTx(tx, () => refreshAfterTxChange())
 
   return (
     <View style={styles.root}>

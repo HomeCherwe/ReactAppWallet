@@ -45,7 +45,7 @@ function calculateExpression(value) {
   }
 }
 
-export default function EditTxModal({ open, tx, onClose, onSaved }) {
+export default function EditTxModal({ open, tx, onClose, onSaved, zIndex = 110 }) {
   const [saving, setSaving] = useState(false)
   const [loadingData, setLoadingData] = useState(false)
   const [cards, setCards] = useState([])
@@ -556,7 +556,7 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
       open={open}
       onClose={onClose}
       title="Редагування транзакції"
-      zIndex={110}
+      zIndex={zIndex}
       maxWidth="md"
     >
       {/* Скелетон поки дані завантажуються */}

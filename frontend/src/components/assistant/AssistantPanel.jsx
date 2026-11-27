@@ -132,7 +132,7 @@ export default function AssistantPanel() {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={hide}
-          className="fixed inset-0 bg-black/45 backdrop-blur-sm z-[140]"
+          className="fixed inset-0 bg-black/45 backdrop-blur-sm z-[1150]"
         />
       )}
       {open && (
@@ -142,7 +142,7 @@ export default function AssistantPanel() {
           animate={{ x: 0 }}
           exit={{ x: '100%' }}
           transition={{ type: 'spring', stiffness: 380, damping: 36 }}
-          className="fixed inset-y-0 right-0 z-[141] w-full sm:w-[460px] flex flex-col bg-[#141418] border-l border-white/10 shadow-2xl"
+          className="fixed inset-y-0 right-0 z-[1151] w-full sm:w-[460px] flex flex-col bg-[#141418] border-l border-white/10 shadow-2xl"
         >
           {/* Header */}
           <div className="flex items-center gap-3 px-4 py-3.5 border-b border-white/[0.08]">

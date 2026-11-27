@@ -36,6 +36,8 @@ interface MenuState {
   highlight: number | null
   /** Item rects on screen, reported by the host after layout */
   itemRects: { y: number; h: number; x: number; w: number }[]
+  /** Mounted hosts, oldest first: only the newest draws the menu (a sheet's host sits above the root's) */
+  hosts: number[]
 }
 
 /**
@@ -47,6 +49,7 @@ export const useMenuOverlay = create<MenuState>(() => ({
   dragging: false,
   highlight: null,
   itemRects: [],
+  hosts: [],
 }))
 
 export function openMenu(req: MenuRequest) {
@@ -57,10 +60,21 @@ export function closeMenu() {
   useMenuOverlay.setState({ menu: null, dragging: false, highlight: null })
 }
 
-// Set by the host: runs the item's action after the menu has faded out
-let pickHandler: ((index: number) => void) | null = null
-export function setMenuPickHandler(fn: ((index: number) => void) | null) {
-  pickHandler = fn
+// Each host's pick (runs the item's action after the menu has faded out); the newest host's is used
+const pickers = new Map<number, (index: number) => void>()
+let nextHostId = 1
+export const newMenuHostId = () => nextHostId++
+export function addMenuHost(id: number, pick: (index: number) => void): () => void {
+  pickers.set(id, pick)
+  useMenuOverlay.setState(s => ({ hosts: [...s.hosts, id] }))
+  return () => {
+    pickers.delete(id)
+    useMenuOverlay.setState(s => ({ hosts: s.hosts.filter(h => h !== id) }))
+  }
+}
+const topHost = () => {
+  const hosts = useMenuOverlay.getState().hosts
+  return hosts[hosts.length - 1]
 }
 
 /** Finger moved (page coordinates) while still holding after the long press. */
@@ -77,7 +91,7 @@ export function menuPointerUp() {
   const s = useMenuOverlay.getState()
   if (!s.menu || !s.dragging) return
   useMenuOverlay.setState({ dragging: false })
-  if (s.highlight != null) pickHandler?.(s.highlight)
+  if (s.highlight != null) pickers.get(topHost())?.(s.highlight)
 }
 
 /** Touch handlers for the row that opened the menu (raw touch events keep flowing to it). */

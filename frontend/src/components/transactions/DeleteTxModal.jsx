@@ -1,7 +1,7 @@
 import { Archive, Trash2, X } from 'lucide-react'
 import BaseModal from '../BaseModal'
 
-export default function DeleteTxModal({ open, transaction, transactions, onDelete, onArchive, onCancel }) {
+export default function DeleteTxModal({ open, transaction, transactions, onDelete, onArchive, onCancel, zIndex }) {
   // Підтримка як однієї транзакції, так і масиву транзакцій
   const isBulk = Array.isArray(transactions) && transactions.length > 0
   const count = isBulk ? transactions.length : (transaction ? 1 : 0)
@@ -23,7 +23,7 @@ export default function DeleteTxModal({ open, transaction, transactions, onDelet
           <span>{isBulk ? `Видалити ${count} транзакцій?` : 'Видалити транзакцію?'}</span>
         </div>
       }
-      zIndex={110}
+      zIndex={zIndex ?? 110}
       maxWidth="sm"
     >
       {/* Body */}
