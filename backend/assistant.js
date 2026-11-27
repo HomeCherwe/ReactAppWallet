@@ -7,7 +7,7 @@ import { accountKind, kindOutOfStats, withCardV2 } from './accountKind.js'
 import { describeOpenAIError } from './openaiStatus.js'
 
 // An account as the user sees it in the apps: bank + card name («Готівка EUR», not just «EUR»)
-function accountLabel(card) {
+export function accountLabel(card) {
   if (!card) return ''
   const bank = String(card.bank || '').trim()
   const name = String(card.name || '').trim()
@@ -83,7 +83,7 @@ const likeSafe = s => String(s || '').replace(/[%,()*\\"]/g, ' ').trim().slice(0
 // What the assistant knows about the user before asking anything
 // ---------------------------------------------------------------------------
 
-async function loadContext(supabase, userId, offsetMin) {
+export async function loadContext(supabase, userId, offsetMin) {
   const [prefs, { data: cards }, categories, rates] = await Promise.all([
     readPreferences(supabase, userId),
     // Never card numbers, CVV or IBAN
@@ -131,10 +131,10 @@ function countsInStats(t, ctx) {
   return true
 }
 
-const TX_FIELDS =
+export const TX_FIELDS =
   'id, amount, amount_stat, created_at, category, note, merchant_name, card_id, is_transfer, exclude_from_stats, refund_for, status, archives, category_source, subscription_id'
 
-function compactRow(t, ctx) {
+export function compactRow(t, ctx) {
   const card = t.card_id ? ctx.cardById.get(t.card_id) : null
   const flags = []
   if (t.is_transfer) flags.push('transfer')
@@ -198,7 +198,7 @@ function cardsMatching(ctx, card) {
 // The functions GPT may call
 // ---------------------------------------------------------------------------
 
-const TOOLS = [
+export const TOOLS = [
   {
     type: 'function',
     function: {
@@ -274,7 +274,7 @@ const TOOLS = [
   },
 ]
 
-async function runTool(name, args, { supabase, userId, ctx, seen }) {
+export async function runTool(name, args, { supabase, userId, ctx, seen }) {
   const remember = rows => rows.forEach(r => seen.add(r.id))
 
   if (name === 'search_transactions') {

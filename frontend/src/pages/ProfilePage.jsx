@@ -11,6 +11,7 @@ import { SUPPORTED_CURRENCIES, usePrimaryCurrency, setPrimaryCurrency } from '..
 import { EXCLUDED_CATEGORIES_PATH, useExcludedCategories } from '../utils/statsCategories'
 import { getTransactionCategories } from '../api/transactions'
 import AutoCategoriesSettings from '../components/AutoCategoriesSettings'
+import ClaudeConnectorSettings from '../components/ClaudeConnectorSettings'
 import { useNavigate } from 'react-router-dom'
 import { useIsAdmin } from '../api/admin'
 
@@ -620,6 +621,8 @@ export default function ProfilePage() {
       </section>
 
       <AutoCategoriesSettings sectionClass={section} SectionTitle={SectionTitle} />
+
+      <ClaudeConnectorSettings sectionClass={section} SectionTitle={SectionTitle} />
 
       {/* Automation key */}
       <section className={section}>

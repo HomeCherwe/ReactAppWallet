@@ -22,9 +22,24 @@ import { useBankAutoSync } from './hooks/useBankAutoSync'
 import { useSettingsStore } from './store/useSettingsStore'
 import AssistantPanel from './components/assistant/AssistantPanel'
 import TxContextMenuHost from './components/transactions/TxContextMenu'
+import ConnectClaudePage from './pages/ConnectClaudePage'
+import { takeConnectFromUrl, pendingConnect } from './api/claude'
+
+// Claude sent the user here to approve a connection (#/connect?req=…): kept through the Google sign-in
+takeConnectFromUrl()
 
 export default function App(){
   const [session, setSession] = useState(null)
+  const [connectReq, setConnectReq] = useState(pendingConnect)
+  // …also when the link opens in a tab that already has MyWallet
+  useEffect(() => {
+    const onHash = () => {
+      takeConnectFromUrl()
+      setConnectReq(pendingConnect())
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
   const [loading, setLoading] = useState(true)
   const [syncLoading, setSyncLoading] = useState(false)
   const [initialDataLoading, setInitialDataLoading] = useState(true)
@@ -437,6 +452,11 @@ export default function App(){
   // Show auth screen if not authenticated
   if (!session) {
     return <Auth />
+  }
+
+  // Approving a Claude connection: just that, without loading the whole app
+  if (connectReq) {
+    return <ConnectClaudePage req={connectReq} onClose={() => setConnectReq(null)} />
   }
 
   // Show loader while syncing Binance or loading initial data
