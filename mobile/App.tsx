@@ -17,6 +17,7 @@ import { useBankAutoSync } from "./hooks/useBankAutoSync"
 import { useMarkAppInstalled } from "./hooks/useMarkAppInstalled"
 import { useSubscriptionReminders } from './hooks/useSubscriptionReminders'
 import { installErrorReporter } from './utils/errorReporter'
+import { startAutoUpdates } from './utils/appUpdate'
 import { toastConfig } from "./components/ToastConfig"
 import MenuOverlayHost from "./components/MenuOverlayHost"
 
@@ -29,6 +30,8 @@ import CardsScreen from "./screens/CardsScreen"
 
 // Errors in the app reach the owner's «Адмінка»
 installErrorReporter()
+// New versions switch on by themselves (utils/appUpdate.ts)
+startAutoUpdates()
 
 // Tabs config (Debts excluded per user instructions; the archive lives in Settings)
 const TABS = [
