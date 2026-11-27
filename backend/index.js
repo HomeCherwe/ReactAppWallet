@@ -106,19 +106,18 @@ const binancePricesCache = {
   ttlMs: 5 * 60 * 1000 // 5 minutes
 }
 
-// Middleware для отримання user_id з JWT токену
+// The Supabase sign-in token, only from the Authorization header ("Bearer <jwt>"): never from
+// the body or the address, and a user_id sent by the client is never trusted
+function bearerToken(req) {
+  const m = String(req.headers.authorization || '').match(/^Bearer\s+(\S+)\s*$/i)
+  return m ? m[1] : null
+}
+
+// Middleware: the signed-in user
 async function getUserFromToken(req, res, next) {
   try {
-    const authHeader = req.headers.authorization
-    const token = authHeader?.replace('Bearer ', '') || req.body?.token || req.query?.token
-
-    if (!token || token.trim() === '') {
-      // Якщо токен не передано, перевіряємо чи передано user_id напряму (для спрощення)
-      if (req.body?.user_id) {
-        req.user_id = req.body.user_id
-        return next()
-      }
-      console.warn(`[getUserFromToken] No token found for ${req.method} ${req.path}`)
+    const token = bearerToken(req)
+    if (!token) {
       return res.status(401).json({ error: 'No authentication token provided' })
     }
 
@@ -128,7 +127,6 @@ async function getUserFromToken(req, res, next) {
     if (error) {
       const errorMsg = error.message || JSON.stringify(error) || 'Unknown error'
       console.error(`[getUserFromToken] Invalid token for ${req.method} ${req.path}:`, errorMsg)
-      console.error(`[getUserFromToken] Token length: ${token.length}, starts with: ${token.substring(0, 20)}...`)
       return res.status(401).json({ error: 'Invalid or expired token', details: errorMsg })
     }
 
@@ -146,22 +144,29 @@ async function getUserFromToken(req, res, next) {
   }
 }
 
+// The automation key (Settings → API Key): X-API-Key header; api_key in the body or address still
+// works for Shortcuts made before the header was documented
+const apiKeyFrom = req => req.headers['x-api-key'] || req.body?.api_key || req.query?.api_key
+
 // Middleware для аутентифікації через API Key
 async function getUserFromApiKey(req, res, next) {
   try {
-    const apiKey = req.headers['x-api-key'] || req.body?.api_key || req.query?.api_key
+    const apiKey = apiKeyFrom(req)
 
     if (!apiKey) {
       return res.status(401).json({ error: 'API key required. Use X-API-Key header or api_key in body/query' })
     }
+    // Keys are random hex; anything else (an object, a short guess) is refused before the database
+    if (typeof apiKey !== 'string' || !/^[\w-]{20,200}$/.test(apiKey)) {
+      return res.status(401).json({ error: 'Invalid API key' })
+    }
 
-    // Шукаємо користувача за API key в user_preferences
-    // API key тепер зберігається в preferences.api_key
+    // API key зберігається в user_preferences.preferences.api_key
     const { data: userPrefs, error } = await supabase
       .from('user_preferences')
       .select('user_id')
       .contains('preferences', { api_key: apiKey })
-      .single()
+      .maybeSingle()
 
     if (error) {
       console.error('[getUserFromApiKey] Database error:', error)
@@ -183,41 +188,36 @@ async function getUserFromApiKey(req, res, next) {
 
 // Комбінована middleware - приймає або JWT або API Key
 async function getUserFromTokenOrApiKey(req, res, next) {
-  const token = req.headers.authorization?.replace('Bearer ', '') || req.body?.token || req.query?.token
-  const apiKey = req.headers['x-api-key'] || req.body?.api_key || req.query?.api_key
-
-  if (apiKey) {
-    // Використати API Key аутентифікацію
-    return getUserFromApiKey(req, res, next)
-  } else if (token) {
-    // Використати JWT аутентифікацію
-    return getUserFromToken(req, res, next)
-  } else {
-    return res.status(401).json({
-      error: 'Authentication required. Provide JWT token (Authorization: Bearer <token>) or API key (X-API-Key header)'
-    })
-  }
+  if (apiKeyFrom(req)) return getUserFromApiKey(req, res, next)
+  if (bearerToken(req)) return getUserFromToken(req, res, next)
+  return res.status(401).json({
+    error: 'Authentication required. Provide JWT token (Authorization: Bearer <token>) or API key (X-API-Key header)'
+  })
 }
 
-// Опціональна middleware (для endpoints що не потребують авторизації)
-async function optionalAuth(req, res, next) {
-  try {
-    const authHeader = req.headers.authorization
-    const token = authHeader?.replace('Bearer ', '') || req.body?.token || req.query?.token
-
-    if (token) {
-      const { data: { user }, error } = await supabase.auth.getUser(token)
-      if (!error && user) {
-        req.user_id = user.id
-        req.user = user
-      }
-    }
-
-    next()
-  } catch (error) {
-    // Продовжуємо без авторизації
-    next()
+// A row the request points at (a card, bank, transaction, subscription) must be the user's own:
+// the server's key sees every user's rows, so ids from the client are checked here
+async function ownsRow(table, userId, id) {
+  if (!id) return true
+  const { data, error } = await supabase.from(table).select('id').eq('id', id).eq('user_id', userId).maybeSingle()
+  if (error) {
+    if (error.code === '22P02') return false // not even an id
+    throw error
   }
+  return !!data
+}
+
+/** The first reference in a transaction's fields that isn't the user's → its error message */
+async function foreignTxRef(userId, fields) {
+  const refs = [
+    ['card_id', 'cards', 'Рахунок не знайдено'],
+    ['refund_for', 'transactions', 'Транзакцію не знайдено'],
+    ['subscription_id', 'subscriptions', 'Підписку не знайдено'],
+  ]
+  for (const [field, table, message] of refs) {
+    if (fields?.[field] && !(await ownsRow(table, userId, fields[field]))) return message
+  }
+  return null
 }
 
 // ========================================
@@ -422,6 +422,7 @@ app.post('/api/cards', getUserFromToken, async (req, res) => {
     const { bank_id, name, currency, bg_url, exclude_from_stats = false, initial_balance, card_number } = req.body
     const v2 = cardV2Fields(req.body)
     if (v2.error) return res.status(400).json({ error: v2.error })
+    if (bank_id && !(await ownsRow('banks', req.user_id, bank_id))) return res.status(404).json({ error: 'Банк не знайдено' })
 
     // Отримуємо назву банку, якщо bank_id вказано
     let bankName = null
@@ -510,6 +511,8 @@ app.put('/api/cards/:id', getUserFromToken, async (req, res) => {
     if (patch.exclude_from_stats !== undefined) {
       patch.exclude_from_stats = !!patch.exclude_from_stats
     }
+
+    if (patch.bank_id && !(await ownsRow('banks', req.user_id, patch.bank_id))) return res.status(404).json({ error: 'Банк не знайдено' })
 
     // Якщо змінюється bank_id, потрібно оновити bank
     if (patch.bank_id !== undefined) {
@@ -1302,6 +1305,8 @@ async function cardLabelFor(userId, cardId) {
 app.post('/api/transactions', getUserFromToken, async (req, res) => {
   try {
     const payload = { ...req.body, user_id: req.user_id }
+    const foreign = await foreignTxRef(req.user_id, payload)
+    if (foreign) return res.status(404).json({ error: foreign })
 
     // The account's name comes with the card (the iPhone app sends only card_id)
     if (payload.card_id && !payload.card) {
@@ -1353,6 +1358,8 @@ app.put('/api/transactions/:id', getUserFromToken, async (req, res) => {
     const patch = { ...req.body }
     delete patch.id
     delete patch.user_id
+    const foreign = await foreignTxRef(req.user_id, patch)
+    if (foreign) return res.status(404).json({ error: foreign })
 
     // We'll need the current transaction for robust amount_stat recompute (refund children & parent updates).
     const { data: existingTx, error: existingErr } = await supabase
@@ -1603,6 +1610,7 @@ app.post('/api/transfers', getUserFromToken, async (req, res) => {
     const findCard = (id) => cards.find(c => c.id === id)
     const fromCard = findCard(fromCardId)
     const toCard = findCard(toCardId)
+    if ((fromCardId && !fromCard) || (toCardId && !toCard)) return res.status(404).json({ error: 'Рахунок не знайдено' })
 
     const countAsIncome = transferBucket(fromCard) === 'savings' && transferBucket(toCard) !== 'savings'
 
@@ -2182,6 +2190,7 @@ app.post('/api/subscriptions', getUserFromToken, async (req, res) => {
     if (!name || !amount || !frequency) {
       return res.status(400).json({ error: 'Missing required fields: name, amount, frequency' })
     }
+    if (card_id && !(await ownsRow('cards', req.user_id, card_id))) return res.status(404).json({ error: 'Рахунок не знайдено' })
 
     // Calculate next_execution_at
     const nextExecution = calculateNextExecution(frequency, day_of_week, day_of_month, null)
@@ -2239,6 +2248,7 @@ app.put('/api/subscriptions/:id', getUserFromToken, async (req, res) => {
     // Only what the apps edit (never user_id, source, …): rename, hide ("Це не підписка"), old hand-made ones
     const editable = ['name', 'category', 'note', 'hidden', 'is_active', 'amount', 'card_id', 'frequency', 'day_of_week', 'day_of_month', 'is_expense', 'participants', 'total_participants']
     const updates = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => editable.includes(k)))
+    if (updates.card_id && !(await ownsRow('cards', req.user_id, updates.card_id))) return res.status(404).json({ error: 'Рахунок не знайдено' })
 
     // Verify ownership
     const { data: existing } = await supabase
@@ -2436,13 +2446,16 @@ app.post('/api/subscriptions/:id/create-transaction', getUserFromToken, async (r
 
     // Get card name and bank name for display
     let cardDisplayName = null
+    let cardId = null
     if (subscription.card_id) {
       const { data: cardData } = await supabase
         .from('cards')
         .select('name, banks(name)')
         .eq('id', subscription.card_id)
-        .single()
+        .eq('user_id', req.user_id)
+        .maybeSingle()
       if (cardData) {
+        cardId = subscription.card_id
         const bankName = cardData.banks?.name || ''
         const cardName = cardData.name || ''
         cardDisplayName = bankName && cardName ? `${bankName} ${cardName}` : (cardName || bankName || null)
@@ -2467,7 +2480,7 @@ app.post('/api/subscriptions/:id/create-transaction', getUserFromToken, async (r
       .insert([{
         user_id: req.user_id,
         amount,
-        card_id: subscription.card_id,
+        card_id: cardId,
         card: cardDisplayName,
         category: transactionCategory,
         note: transactionNote,
@@ -2488,7 +2501,7 @@ app.post('/api/subscriptions/:id/create-transaction', getUserFromToken, async (r
   }
 })
 
-app.post('/api/parse-receipt', upload.single('image'), async (req, res) => {
+app.post('/api/parse-receipt', getUserFromToken, upload.single('image'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'image required' })
     if (!process.env.OPENAI_API_KEY) return res.status(500).json({ error: 'OPENAI_API_KEY missing' })
@@ -3017,7 +3030,7 @@ app.post('/api/syncMonoBank', getUserFromTokenOrApiKey, async function (req, res
 
       // Check by external id in our transactions table
       const txId = String(item.id)
-      const { data: existing, error: fetchErr } = await supabase.from('transactions').select('id').eq('transaction_id_card', txId).limit(1).maybeSingle()
+      const { data: existing, error: fetchErr } = await supabase.from('transactions').select('id').eq('user_id', req.user_id).eq('transaction_id_card', txId).limit(1).maybeSingle()
       if (fetchErr) {
         console.error('Supabase lookup error for', txId, fetchErr)
         // continue processing others
@@ -3729,12 +3742,16 @@ async function refreshTrueLayerToken(user_id, refresh_token) {
 }
 
 
-app.post('/api/truelayer/data', async (req, res) => {
+app.post('/api/truelayer/data', getUserFromToken, async (req, res) => {
   try {
     const { access_token, endpoint } = req.body
 
     if (!access_token || !endpoint) {
       return res.status(400).json({ error: 'Missing access_token or endpoint' })
+    }
+    // Only a path inside TrueLayer's data API (accounts, accounts/<id>/transactions, …)
+    if (typeof endpoint !== 'string' || !/^[\w-]+(\/[\w-]+)*$/.test(endpoint)) {
+      return res.status(400).json({ error: 'Invalid endpoint' })
     }
 
     // Live URL for production

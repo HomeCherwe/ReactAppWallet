@@ -5,7 +5,7 @@ import { createTransaction, getTransactionCategories, getDebtParties } from '../
 import { txBus } from '../../utils/txBus'
 import useMonoRates from '../../hooks/useMonoRates'
 import BaseModal from '../BaseModal'
-import { getApiUrl } from '../../utils.jsx'
+import { getApiUrl, getAuthToken } from '../../utils.jsx'
 import { listCards } from '../../api/cards'
 import { cardLabel } from '../../utils/cardLabel'
 import toast from 'react-hot-toast'
@@ -248,7 +248,9 @@ export default function CreateTxModal({ open, onClose, onSaved }) {
     const apiEndpoint = import.meta.env.PROD 
       ? `${getApiUrl()}/api/parse-receipt`
       : '/api/parse-receipt'
-    const res = await fetch(apiEndpoint, { method: 'POST', body: fd })
+    // The server reads receipts only for a signed-in user
+    const token = await getAuthToken()
+    const res = await fetch(apiEndpoint, { method: 'POST', body: fd, headers: token ? { Authorization: `Bearer ${token}` } : {} })
     if (!res.ok) throw new Error('Парсинг чека не вдалось')
     return await res.json()
   }

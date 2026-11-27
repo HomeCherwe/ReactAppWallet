@@ -11,7 +11,7 @@ import { cardLabel } from '../../utils/cardLabel'
 // offset (a winter transaction edited in summer keeps its hour)
 const toLocalInput = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
 import useMonoRates from '../../hooks/useMonoRates'
-import { getApiUrl } from '../../utils.jsx'
+import { getApiUrl, getAuthToken } from '../../utils.jsx'
 import toast from 'react-hot-toast'
 import { X } from 'lucide-react'
 
@@ -196,7 +196,9 @@ export default function EditTxModal({ open, tx, onClose, onSaved }) {
     const apiEndpoint = import.meta.env.PROD 
       ? `${getApiUrl()}/api/parse-receipt`
       : '/api/parse-receipt'
-    const res = await fetch(apiEndpoint, { method: 'POST', body: fd })
+    // The server reads receipts only for a signed-in user
+    const token = await getAuthToken()
+    const res = await fetch(apiEndpoint, { method: 'POST', body: fd, headers: token ? { Authorization: `Bearer ${token}` } : {} })
     if (!res.ok) throw new Error('Парсинг чека не вдалось')
     return await res.json()
   }
