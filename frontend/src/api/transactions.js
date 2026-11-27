@@ -221,7 +221,7 @@ export async function deleteTransactions(ids) {
 
 
 // Внутрішня функція для реального фетча
-async function _sumTransactionsByCardInternal() {
+export async function _sumTransactionsByCardInternal() {
   try {
     const result = await apiFetch('/api/transactions/sum-by-card')
 

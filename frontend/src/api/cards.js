@@ -3,10 +3,11 @@ import { supabase } from '../lib/supabase'
 import { getCachedCards, invalidateCardsCache } from '../utils/dataCache'
 import { apiFetch } from '../utils.jsx'
 
-// Внутрішня функція для реального фетча
-async function _listCardsInternal() {
+// Внутрішня функція для реального фетча (also the fallback when Home's one request fails)
+export async function fetchCardsFresh() {
   return await apiFetch('/api/cards')
 }
+const _listCardsInternal = fetchCardsFresh
 
 export async function listCards() {
   // Використовуємо кеш
