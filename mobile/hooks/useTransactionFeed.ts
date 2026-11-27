@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { groupTransferLegs, listFeedTransactions, listRefundsFor, listTransferLegs, searchTransactions, Transaction } from '../api/transactions'
 import { PeriodId, periodRange } from '../utils/periods'
+import { readLaunchCache, sessionUserId, writeLaunchCache } from '../utils/launchCache'
 
 export type TxFilter = 'all' | 'expense' | 'income'
 
@@ -88,6 +89,27 @@ export function useTransactionFeed({
     }
   }
 
+  // Launch: last time's first page at once; the fresh one replaces it when it arrives
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      const cached = await readLaunchCache<{
+        items: Transaction[]
+        refunds: Record<string, Transaction[]>
+        transfers: Record<string, Transaction[]>
+      }>('feed', await sessionUserId())
+      if (!alive || !cached?.items?.length || itemsRef.current.length > 0) return
+      setItems(cached.items)
+      setRefunds(cached.refunds || {})
+      setTransfers(cached.transfers || {})
+      setHasMore(cached.items.length === PAGE_SIZE)
+      setLoading(false)
+    })()
+    return () => {
+      alive = false
+    }
+  }, [])
+
   useEffect(() => {
     const t = setTimeout(() => setSentQuery(query.trim()), SEARCH_DEBOUNCE_MS)
     return () => clearTimeout(t)
@@ -124,6 +146,10 @@ export function useTransactionFeed({
       setRefunds(pageRefunds)
       setTransfers(pageTransfers)
       setHasMore(page.length === PAGE_SIZE)
+      // The plain list (no search or filter) is what the next launch shows first
+      if (!searchActive && filter === 'all') {
+        sessionUserId().then(uid => writeLaunchCache('feed', uid, { items: page, refunds: pageRefunds, transfers: pageTransfers }))
+      }
     } catch {
       if (id === requestId.current) {
         failed.current = true

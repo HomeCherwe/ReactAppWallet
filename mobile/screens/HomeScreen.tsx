@@ -84,6 +84,8 @@ import {
   Transaction,
 } from '../api/transactions'
 import { emptyTotals, fetchTotalsByBucket, TotalsData } from '../api/totals'
+import { fetchHome, HomeData, monthStatsFrom, totalsFrom } from '../api/home'
+import { readLaunchCache, sessionUserId, writeLaunchCache } from '../utils/launchCache'
 import { getPreferences } from '../api/preferences'
 import {
   fetchExchangeRates,
@@ -96,6 +98,7 @@ import {
   getStoredPrimaryCurrency,
   setStoredPrimaryCurrency,
   SUPPORTED_CURRENCIES,
+  primaryCurrencyFromPrefs,
 } from '../utils/settings'
 import { GlassPressable } from '../components/LiquidGlass'
 
@@ -224,10 +227,82 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
   }
 
   const loadRequest = useRef(0)
+  // Fresh numbers are on screen: what was remembered from last time must not cover them
+  const freshShown = useRef(false)
+
+  // Draws Home from one /api/home answer (fresh, or remembered from the last launch)
+  const applyHome = useCallback(
+    (home: HomeData, cur: string, ratesMap: RatesMap, who: { email?: string; name?: string } | null) => {
+      const balMap: Record<string, number> = {}
+      for (const c of home.cards) balMap[c.id] = Number(c.initial_balance || 0) + Number(home.sums[c.id] || 0)
+      setPrimaryCurrency(cur)
+      setRates(ratesMap)
+      if (who?.email) setUserEmail(who.email)
+      if (who?.name) setUserName(who.name)
+      const prefs = home.preferences || {}
+      setFavoriteCardIds(prefs.cards?.favoriteCardIds || [])
+      setShowFavoritesOnly(prefs.cards?.showFavoritesOnly ?? false)
+      setCards(home.cards)
+      setBalances(balMap)
+      setTotals(totalsFrom(home.cards, home.sums, home.cash))
+      const stats = monthStatsFrom(home.months.rows, home.cards, ratesMap, cur, excludedIdsOf(home.cards, getLegacyExcludedIds()))
+      if (stats.length > 0) setRecentMonthsStats(stats)
+    },
+    []
+  )
+
+  // Launch: what was on screen last time, at once (the fresh answer replaces it a moment later)
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      const uid = await sessionUserId()
+      const cached = await readLaunchCache<{ home: HomeData; cur: string; rates: RatesMap; who: { email?: string; name?: string } }>('home', uid)
+      if (!alive || !cached || freshShown.current) return
+      useSettingsStore.getState().hydrate(cached.home.preferences)
+      applyHome(cached.home, cached.cur, cached.rates, cached.who)
+      setLoading(false)
+    })()
+    return () => {
+      alive = false
+    }
+  }, [applyHome])
+
   const loadData = useCallback(async () => {
     const id = ++loadRequest.current
     try {
-      // Fetch everything in parallel, then apply it in one render — no step-by-step jumping
+      // One request for the whole screen (GET /api/home); rates and the session are on the phone
+      const [ratesMap, sessionRes, home] = await Promise.all([
+        fetchExchangeRates(),
+        supabase.auth.getSession(),
+        fetchHome(),
+      ])
+      if (id !== loadRequest.current) return
+      // The preferences came with it: the settings don't ask for them separately
+      useSettingsStore.getState().hydrate(home.preferences)
+      const cur = await primaryCurrencyFromPrefs(home.preferences)
+      const user = sessionRes.data.session?.user
+      const who = {
+        email: user?.email,
+        name: user?.user_metadata?.full_name
+          ? String(user.user_metadata.full_name).split(' ')[0]
+          : user?.email
+            ? user.email.split('@')[0]
+            : undefined,
+      }
+      if (id !== loadRequest.current) return
+      freshShown.current = true
+      applyHome(home, cur, ratesMap, who)
+      // One-time move of exclusions saved in preferences into cards.exclude_from_stats
+      migrateLegacyExclusions(home.cards).then(ids => {
+        if (ids.length) setCards(cs => cs.map(c => (ids.includes(c.id) ? { ...c, exclude_from_stats: true } : c)))
+      })
+      writeLaunchCache('home', user?.id ?? null, { home, cur, rates: ratesMap, who })
+      return
+    } catch (err) {
+      console.warn('[Home] /api/home failed, loading the old way:', err)
+    }
+    try {
+      // The old way (many requests): only if /api/home didn't answer
       const [savedCur, ratesMap, userRes, prefs, cardsData, sumByCard, totalsData] = await Promise.all([
         getStoredPrimaryCurrency(),
         fetchExchangeRates(),
@@ -269,6 +344,7 @@ export default function HomeScreen({ onNavigateToCards }: HomeScreenProps = {}) 
       setTotals(totalsData)
       // Empty only when the request failed: the last numbers stay until the next reload
       if (stats.length > 0) setRecentMonthsStats(stats)
+      freshShown.current = true
     } catch (err) {
       console.error('HomeScreen load error:', err)
     } finally {

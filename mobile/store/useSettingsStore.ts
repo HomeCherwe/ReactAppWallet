@@ -7,6 +7,8 @@ type SettingsState = {
   loaded: boolean
   initialize: () => Promise<void>
   reset: () => void
+  /** Preferences that came with another answer (Home's /api/home): no separate request */
+  hydrate: (prefs: Record<string, any> | null | undefined) => void
   getNestedSetting: <T>(path: string, defaultValue: T) => T
   updateNestedSetting: (path: string, value: any) => void
 }
@@ -44,10 +46,21 @@ function debounceSave(settings: Record<string, any>) {
 
 let initPromise: Promise<void> | null = null
 
+// Home asks /api/home at launch, which brings the preferences too: wait a little for them before
+// asking /api/preferences separately
+let markHydrated: () => void = () => {}
+let hydrated = new Promise<void>(resolve => (markHydrated = resolve))
+const HYDRATE_WAIT_MS = 4000
+
 async function loadSettings(set: (partial: Partial<SettingsState>) => void) {
   try {
     const cached = await AsyncStorage.getItem(STORAGE_KEY)
     if (cached) set({ settings: JSON.parse(cached) })
+    const came = await Promise.race([
+      hydrated.then(() => true),
+      new Promise<boolean>(resolve => setTimeout(() => resolve(false), HYDRATE_WAIT_MS)),
+    ])
+    if (came) return
     const prefs = await getPreferences()
     if (prefs && Object.keys(prefs).length > 0) {
       set({ settings: prefs, loaded: true })
@@ -70,7 +83,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   reset: () => {
     set({ settings: {}, loaded: false })
+    hydrated = new Promise<void>(resolve => (markHydrated = resolve))
     AsyncStorage.removeItem(STORAGE_KEY).catch(() => {})
+  },
+  hydrate: prefs => {
+    // A change of the user's is still being saved: keep it
+    if (!prefs || Object.keys(prefs).length === 0 || saveTimer) return
+    set({ settings: prefs, loaded: true })
+    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(prefs)).catch(() => {})
+    markHydrated()
   },
   getNestedSetting: <T>(path: string, defaultValue: T): T => {
     const val = getNestedValue(get().settings, path)

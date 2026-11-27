@@ -1,4 +1,10 @@
 // Currency conversion and formatting utilities matching web application logic
+import AsyncStorage from '@react-native-async-storage/async-storage'
+
+// Rates are remembered between launches: a fresh copy is used at once, an older one is refreshed
+// in the background, and an old copy beats the built-in fallback when the network is down
+const RATES_STORAGE_KEY = 'rates_cache_v1'
+const RATES_FRESH_MS = 6 * 3600000
 
 export interface RatesMap {
   [key: string]: number
@@ -8,10 +14,32 @@ let cachedRates: RatesMap | null = null
 let ratesCachePromise: Promise<RatesMap> | null = null
 const RATES_CACHE_TTL = 3600000 // 1 hour
 
+async function readStoredRates(): Promise<{ at: number; map: RatesMap } | null> {
+  try {
+    const raw = await AsyncStorage.getItem(RATES_STORAGE_KEY)
+    const v = raw ? JSON.parse(raw) : null
+    return v?.map && typeof v.at === 'number' ? v : null
+  } catch {
+    return null
+  }
+}
+
 export async function fetchExchangeRates(): Promise<RatesMap> {
   if (cachedRates) return cachedRates
   if (ratesCachePromise) return ratesCachePromise
 
+  const stored = await readStoredRates()
+  if (stored) {
+    cachedRates = stored.map
+    // Older than a few hours: use it now, refresh for next time
+    if (Date.now() - stored.at > RATES_FRESH_MS) fetchLiveRates(stored.map).catch(() => {})
+    return stored.map
+  }
+  return fetchLiveRates(null)
+}
+
+function fetchLiveRates(previous: RatesMap | null): Promise<RatesMap> {
+  if (ratesCachePromise) return ratesCachePromise
   ratesCachePromise = (async () => {
     try {
       const resUAH = await fetch('https://open.er-api.com/v6/latest/UAH')
@@ -41,10 +69,15 @@ export async function fetchExchangeRates(): Promise<RatesMap> {
 
       cachedRates = map
       ratesCachePromise = null
+      AsyncStorage.setItem(RATES_STORAGE_KEY, JSON.stringify({ at: Date.now(), map })).catch(() => {})
       return map
     } catch (err) {
       console.warn('Failed to fetch live rates, using fallback rates:', err)
       ratesCachePromise = null
+      if (previous) {
+        cachedRates = previous
+        return previous
+      }
       // Fallback realistic rates
       const fallback: RatesMap = {
         '980->980': 1,
