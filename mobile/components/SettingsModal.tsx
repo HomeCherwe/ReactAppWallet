@@ -22,6 +22,7 @@ import AutoCategoriesSettings from './AutoCategoriesSettings'
 import ArchivesScreen from '../screens/ArchivesScreen'
 import AdminScreen from '../screens/AdminScreen'
 import { fetchIsAdmin } from '../api/admin'
+import { getClaudeConnections, removeClaudeConnection, ClaudeConnection } from '../api/claude'
 
 interface SettingsModalProps {
   visible: boolean
@@ -60,6 +61,38 @@ export default function SettingsModal({
     if (visible) fetchIsAdmin().then(setIsAdmin)
   }, [visible])
   const [allCategories, setAllCategories] = useState<string[]>([])
+  // «Claude»: the connector address and the Claude apps already connected (same as the web)
+  const [claude, setClaude] = useState<{ url: string; connections: ClaudeConnection[] } | null>(null)
+  const [claudeFailed, setClaudeFailed] = useState(false)
+  const loadClaude = () =>
+    getClaudeConnections()
+      .then(d => {
+        setClaude(d)
+        setClaudeFailed(false)
+      })
+      .catch(() => setClaudeFailed(true))
+  useEffect(() => {
+    if (visible) loadClaude()
+  }, [visible])
+  const fmtWhen = (iso: string | null) =>
+    iso ? new Date(iso).toLocaleString('uk-UA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+  const confirmRemoveClaude = (c: ClaudeConnection) =>
+    Alert.alert('Відключити Claude?', `${c.client_name} більше не матиме доступу до MyWallet. Підключити знову можна в Claude.`, [
+      { text: 'Скасувати', style: 'cancel' },
+      {
+        text: 'Відключити',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await removeClaudeConnection(c.id)
+            setClaude(d => (d ? { ...d, connections: d.connections.filter(x => x.id !== c.id) } : d))
+            Toast.show({ type: 'success', text1: 'Claude відключено' })
+          } catch (e: any) {
+            Toast.show({ type: 'error', text1: e?.message || 'Не вдалося відключити' })
+          }
+        },
+      },
+    ])
 
   const lastSavedName = useRef(userName || '')
 
@@ -361,6 +394,67 @@ export default function SettingsModal({
                 <View style={styles.cardGroup}>
                   <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFill} />
                   <AutoCategoriesSettings />
+                </View>
+              </View>
+
+              {/* CLAUDE: MyWallet as a connector in Claude (same as the web's settings) */}
+              <View style={styles.section}>
+                <Text style={styles.sectionLabel}>Claude</Text>
+                <View style={styles.cardGroup}>
+                  <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFill} />
+                  <View style={styles.settingRowBlock}>
+                    <Text style={styles.settingDesc}>
+                      Підключи свій MyWallet до Claude як коннектор. Кожен бачить тільки свій гаманець.
+                    </Text>
+                    {[
+                      'У Claude: Налаштування → Коннектори → «Додати свій коннектор».',
+                      'Назва — MyWallet, адреса — та, що нижче. Натисни «Додати».',
+                      '«Підключити» → відкриється MyWallet: увійди й натисни «Дозволити».',
+                      'Готово: питай Claude про витрати чи проси додати транзакцію. Працює і в застосунку Claude на телефоні.',
+                    ].map((step, i) => (
+                      <View key={i} style={[styles.guideStep, i === 0 && { marginTop: 12 }]}>
+                        <Text style={styles.guideNum}>{i + 1}</Text>
+                        <Text style={styles.guideText}>{step}</Text>
+                      </View>
+                    ))}
+
+                    {claudeFailed ? (
+                      <Text style={[styles.settingDesc, { color: Colors.red }]}>Не вдалося завантажити — спробуй пізніше.</Text>
+                    ) : !claude ? (
+                      <ActivityIndicator color={Colors.orange} style={{ marginVertical: 10 }} />
+                    ) : (
+                      <>
+                        <Text style={styles.inputLabelTop}>Адреса коннектора</Text>
+                        <View style={styles.apiKeyBox}>
+                          <Text style={styles.apiKeyText} numberOfLines={1} selectable>
+                            {claude.url}
+                          </Text>
+                          <TouchableOpacity onPress={() => shareText(claude.url)} hitSlop={8}>
+                            <Text style={styles.copyText}>Копіювати</Text>
+                          </TouchableOpacity>
+                        </View>
+
+                        <Text style={styles.inputLabelTop}>Підключено</Text>
+                        {claude.connections.length === 0 ? (
+                          <Text style={styles.settingDesc}>Поки нічого не підключено.</Text>
+                        ) : (
+                          claude.connections.map(c => (
+                            <View key={c.id} style={[styles.apiKeyBox, { marginBottom: 8 }]}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.settingLabelTitle} numberOfLines={1}>{c.client_name}</Text>
+                                <Text style={[styles.settingDesc, { marginTop: 2 }]} numberOfLines={2}>
+                                  {c.redirect_host} · з {fmtWhen(c.created_at)} · востаннє {fmtWhen(c.last_used_at)}
+                                </Text>
+                              </View>
+                              <TouchableOpacity onPress={() => confirmRemoveClaude(c)} hitSlop={8}>
+                                <Text style={[styles.copyText, { color: Colors.red }]}>Відключити</Text>
+                              </TouchableOpacity>
+                            </View>
+                          ))
+                        )}
+                      </>
+                    )}
+                  </View>
                 </View>
               </View>
 

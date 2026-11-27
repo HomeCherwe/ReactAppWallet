@@ -14,6 +14,7 @@ import { registerBankCheck } from './bankCheck.js'
 import { installAppLogs, registerAppLogs } from './appLogs.js'
 import { describeOpenAIError } from './openaiStatus.js'
 import { registerAssistant } from './assistant.js'
+import { registerClaudeConnector, CLAUDE_PREF_KEY } from './claudeConnector.js'
 import { ACCOUNT_KINDS, cardBucket, withCardV2 } from './accountKind.js'
 import { cardLabelOf, makeTransferFromExisting } from './transfers.js'
 dotenv.config();
@@ -51,13 +52,19 @@ const corsOptions = {
   credentials: false,
 };
 
-app.use(cors(corsOptions)); // цього достатньо!
+// The Claude connector (MCP + OAuth) is called by Claude from anywhere: open to every origin
+const openCors = cors({ origin: '*', allowedHeaders: ['Content-Type', 'Authorization', 'Mcp-Protocol-Version', 'Mcp-Session-Id'], exposedHeaders: ['WWW-Authenticate'] })
+const isConnectorPath = p => p === '/mcp' || p.startsWith('/oauth/') || p.startsWith('/.well-known/')
+const appCors = cors(corsOptions)
+app.use((req, res, next) => (isConnectorPath(req.path) ? openCors : appCors)(req, res, next));
 
 // ✅ Allow JSON bodies
 // Scanning gets photos as JPEG data URLs in JSON (from the iPhone app): a bigger limit just there
 const jsonBody = express.json()
 const jsonScanBody = express.json({ limit: '6mb' })
 app.use((req, res, next) => (req.path === '/api/scan-transactions' ? jsonScanBody : jsonBody)(req, res, next));
+// OAuth token requests come as a form
+app.use('/oauth', express.urlencoded({ extended: false }));
 
 
 // server-side Supabase client (use service role key when available)
@@ -1861,8 +1868,10 @@ app.get('/api/preferences', getUserFromToken, async (req, res) => {
 
     if (error && error.code !== 'PGRST116') throw error // PGRST116 = no rows
 
-    const result = data?.preferences || {}
+    const result = { ...(data?.preferences || {}) }
     // Do NOT include API keys here anymore
+    // Claude connections are the server's (Settings reads them from /api/claude/connections)
+    delete result[CLAUDE_PREF_KEY]
 
     // Add metadata
     if (data) {
@@ -1888,12 +1897,14 @@ app.post('/api/preferences', getUserFromToken, async (req, res) => {
       delete prefsWithoutAPIs.APIs
     }
 
-    // Check if exists
+    // Check if exists (and keep what only the server writes: Claude connections)
     const { data: existing } = await supabase
       .from('user_preferences')
-      .select('id')
+      .select('id, preferences')
       .eq('user_id', req.user_id)
       .single()
+    delete prefsWithoutAPIs[CLAUDE_PREF_KEY]
+    if (existing?.preferences?.[CLAUDE_PREF_KEY]) prefsWithoutAPIs[CLAUDE_PREF_KEY] = existing.preferences[CLAUDE_PREF_KEY]
 
     if (existing) {
       // Update
@@ -1934,6 +1945,8 @@ app.patch('/api/preferences', getUserFromToken, async (req, res) => {
     if (!updates || typeof updates !== 'object') {
       return res.status(400).json({ error: 'Invalid updates object' })
     }
+    // Claude connections are changed only through /api/claude/connections
+    delete updates[CLAUDE_PREF_KEY]
 
     // Отримуємо поточні налаштування з БД
     const { data: existing, error: fetchError } = await supabase
@@ -3834,6 +3847,7 @@ registerBankCheck(app, { supabase, getUserFromToken })
 registerAppLogs(app, { supabase, getUserFromToken })
 // «AI-асистент»: a chat that reads the user's data through fixed functions
 registerAssistant(app, { supabase, getUserFromToken })
+registerClaudeConnector(app, { supabase, getUserFromToken })
 
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err)
