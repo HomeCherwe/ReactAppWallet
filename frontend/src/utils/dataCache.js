@@ -51,6 +51,27 @@ export async function getCachedCards(fetchFunction) {
 }
 
 /**
+ * Fills the cards cache from a request already on its way (Home's /api/home at launch), so the
+ * widgets that ask for cards share it; if it fails, the usual request runs instead.
+ */
+export function primeCards(promise, fallback) {
+  if (cachedCards && Date.now() - cardsCacheTimestamp < CARDS_CACHE_TTL) return
+  const at = Date.now()
+  cardsCachePromise = promise
+    .catch(() => fallback())
+    .then(result => {
+      cachedCards = result
+      cardsCacheTimestamp = at
+      cardsCachePromise = null
+      return result
+    })
+    .catch(err => {
+      cardsCachePromise = null
+      throw err
+    })
+}
+
+/**
  * Отримати транзакції з кешу або зробити новий запит
  * @param {Function} fetchFunction - Функція для фетча транзакцій
  * @returns {Promise<Array>}
@@ -140,12 +161,54 @@ export async function getCachedSumByCard(fetchFunction) {
   return sumByCardPromise
 }
 
+/** The same for each card's sum */
+export function primeSumByCard(promise, fallback) {
+  if (cachedSumByCard && Date.now() - sumByCardTimestamp < SUM_BY_CARD_CACHE_TTL) return
+  const at = Date.now()
+  sumByCardPromise = promise
+    .catch(() => fallback())
+    .then(result => {
+      cachedSumByCard = result
+      sumByCardTimestamp = at
+      sumByCardPromise = null
+      return result
+    })
+    .catch(err => {
+      sumByCardPromise = null
+      throw err
+    })
+}
+
+// Cash (transactions without an account) from the same request; null = ask the usual way
+let cachedCash = null
+let cashTimestamp = 0
+let cashPromise = null
+export function primeCash(promise) {
+  cashPromise = promise
+    .then(value => {
+      cachedCash = typeof value === 'number' ? value : null
+      cashTimestamp = Date.now()
+      cashPromise = null
+      return cachedCash
+    })
+    .catch(() => {
+      cashPromise = null
+      return null
+    })
+}
+export function takePrimedCash() {
+  if (cashPromise) return cashPromise
+  if (cachedCash != null && Date.now() - cashTimestamp < SUM_BY_CARD_CACHE_TTL) return Promise.resolve(cachedCash)
+  return Promise.resolve(null)
+}
+
 /**
  * Інвалідувати кеш sum by card
  */
 export function invalidateSumByCardCache() {
   cachedSumByCard = null
   sumByCardTimestamp = 0
+  cachedCash = null
 }
 
 /**

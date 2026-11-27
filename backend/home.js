@@ -102,6 +102,8 @@ export function registerHome(app, { supabase, getUserFromToken }) {
         : startDate.toISOString()
       const end = Number.isNaN(endDate.getTime()) ? new Date(now.getTime() + 864e5).toISOString() : endDate.toISOString()
       const timeZone = validTimeZone(String(req.query.tz || '')) || 'Europe/Kyiv'
+      // months=0: only the accounts, sums, cash and preferences (the web adds up its own months)
+      const withMonths = req.query.months !== '0'
 
       const [cardsRes, sumsRes, cashRows, prefsRes, months] = await Promise.all([
         withCardV2(extra =>
@@ -116,7 +118,7 @@ export function registerHome(app, { supabase, getUserFromToken }) {
           supabase.from('transactions').select('amount').eq('user_id', userId).is('card_id', null).or('archives.is.null,archives.eq.false')
         ),
         supabase.from('user_preferences').select('preferences').eq('user_id', userId).maybeSingle(),
-        monthAggregates(supabase, userId, start, end, timeZone),
+        withMonths ? monthAggregates(supabase, userId, start, end, timeZone) : [],
       ])
       if (cardsRes.error) throw cardsRes.error
       if (sumsRes.error) throw sumsRes.error

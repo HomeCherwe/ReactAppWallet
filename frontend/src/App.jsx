@@ -14,9 +14,7 @@ import DebtsPage from './pages/DebtsPage'
 import Auth from './components/Auth'
 import { txBus } from './utils/txBus'
 import { getApiUrl, apiFetch } from './utils.jsx'
-import { listCards } from './api/cards'
-import { sumTransactionsByCard, listTransactions } from './api/transactions'
-import { fetchTotalsByBucket } from './api/totals'
+import { startHomePrefetch } from './api/home'
 import { useRealtimeTransactions } from './hooks/useRealtimeTransactions'
 import { useBankAutoSync } from './hooks/useBankAutoSync'
 import { useSettingsStore } from './store/useSettingsStore'
@@ -41,11 +39,12 @@ export default function App(){
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
   const [loading, setLoading] = useState(true)
-  const [syncLoading, setSyncLoading] = useState(false)
-  const [initialDataLoading, setInitialDataLoading] = useState(true)
-  const loadedUserIdRef = useRef(null)
-  const syncInProgressRef = useRef(false)
-  const abortControllerRef = useRef(null)
+  // Home's accounts, sums and cash in one request, started before the widgets ask for them
+  const primedFor = useRef(null)
+  if (session?.user?.id && primedFor.current !== session.user.id) {
+    primedFor.current = session.user.id
+    startHomePrefetch()
+  }
   
   // Підписка на Realtime зміни транзакцій (тільки для авторизованих користувачів)
   useRealtimeTransactions()
@@ -124,289 +123,21 @@ export default function App(){
     return () => subscription.unsubscribe()
   }, [])
 
-  // Auto-sync Binance and load all initial data on app load (only when authenticated)
+  // Signed in: the Binance balance syncs in the background and Home updates when it lands. The
+  // screen no longer waits for it (up to 20 s) or for anything else before showing up; the
+  // widgets load their own data, sharing one /api/home request (started below).
   useEffect(() => {
-    
-    if (!session) {
-      
-      // If no session, still allow components to load (for non-authenticated users)
-      setInitialDataLoading(false)
-      loadedUserIdRef.current = null
-      syncInProgressRef.current = false
-      // Cancel any pending requests
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort()
-        abortControllerRef.current = null
-      }
-      return
-    }
-
-    const currentUserId = session.user?.id
-    
-    
-    if (!currentUserId) {
-      
-      setInitialDataLoading(false)
-      return
-    }
-    
-    // If data is already loaded for this user, do not reload
-    if (loadedUserIdRef.current === currentUserId) {
-      
-      setInitialDataLoading(false)
-      return
-    }
-
-    // If sync is already in progress, skip
-    if (syncInProgressRef.current) {
-      
-      setInitialDataLoading(false) // Ensure loading state is cleared
-      return
-    }
-
-    // Cancel any previous pending requests
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
-    }
-
-    // Create new AbortController for this request
-    const abortController = new AbortController()
-    abortControllerRef.current = abortController
-
-    const loadAllData = async () => {
-      
-      
-      // Safety timeout: ensure loading state is reset after 30 seconds max
-      const safetyTimeout = setTimeout(() => {
-        // Safety timeout: forcing loading state to false after 30s
-        setSyncLoading(false)
-        setInitialDataLoading(false)
-        syncInProgressRef.current = false
-      }, 30000) // 30 seconds max
-
-      try {
-        
-        // Mark as in progress and mark user as loading BEFORE starting
-        syncInProgressRef.current = true
-        loadedUserIdRef.current = currentUserId
-        setSyncLoading(true)
-        setInitialDataLoading(true)
-        
-
-        // Sync Binance with timeout to prevent hanging
-        
-        const syncBinancePromise = Promise.race([
-          apiFetch('/api/syncBinance', {
-            method: 'POST',
-            signal: abortController.signal
-          }),
-          new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Sync timeout')), 20000) // 20 seconds timeout
-          })
-        ]).then(response => {
-          
-          // Check if request was aborted
-          if (abortController.signal.aborted) {
-            return null
-          }
-          const data = response || {}
-          if (data.success && data.synced) {
-            
-            // Small delay to ensure components are fully mounted and subscribed
-            setTimeout(() => {
-              txBus.emit({ 
-                card_id: data.card_id, 
-                delta: data.delta 
-              })
-            }, 300)
-          } else {
-            
-          }
-          return data
-        }).catch(error => {
-          // Ignore abort errors and timeout
-          if (error.name === 'AbortError' || abortController.signal.aborted) {
-            return null
-          }
-          if (error.message === 'Sync timeout') {
-            // Binance sync timeout after 20s, continuing without sync
-            return null
-          }
-          console.error('Binance sync failed:', error.message)
-          return null
-        })
-
-        // Process subscriptions (check and execute due subscriptions)
-        
-        const processSubscriptionsPromise = apiFetch('/api/subscriptions/process', {
-          method: 'POST',
-          signal: abortController.signal
-        }).then(response => {
-          
-          if (abortController.signal.aborted) return null
-          if (response?.processed > 0) {
-            
-            // Emit txBus event to refresh components
-            setTimeout(() => {
-              txBus.emit({ type: 'SUBSCRIPTIONS_PROCESSED', count: response.processed })
-            }, 300)
-          }
-          return response
-        }).catch(error => {
-          if (error.name === 'AbortError' || abortController.signal.aborted) return null
-          console.error('Process subscriptions error:', error)
-          return null
-        })
-
-        // Load all critical data in parallel with individual timeouts
-        
-        
-        // Helper to add timeout to any promise
-        const withTimeout = (promise, timeoutMs, name) => {
-          return Promise.race([
-            promise,
-            new Promise((_, reject) => {
-              setTimeout(() => {
-                // Timeout after ${timeoutMs}ms
-                reject(new Error(`${name} timeout`))
-              }, timeoutMs)
-            })
-          ]).catch(e => {
-            if (e.message.includes('timeout')) {
-              // Timed out, returning empty result
-              return null
-            }
-            throw e
-          })
-        }
-        
-        const listCardsPromise = withTimeout(
-          listCards().then(cards => {
-            
-            return cards
-          }).catch(e => { 
-            if (abortController.signal.aborted) return []
-            console.error('[App] ❌ listCards error:', e); 
-            return [] 
-          }),
-          10000,
-          'listCards'
-        )
-        
-        const sumTransactionsPromise = withTimeout(
-          sumTransactionsByCard().then(data => {
-            
-            return data
-          }).catch(e => { 
-            if (abortController.signal.aborted) return {}
-            console.error('[App] ❌ sumTransactionsByCard error:', e); 
-            return {} 
-          }),
-          10000,
-          'sumTransactionsByCard'
-        )
-        
-        const fetchTotalsPromise = withTimeout(
-          fetchTotalsByBucket().then(data => {
-            
-            return data
-          }).catch(e => { 
-            if (abortController.signal.aborted) return { cash: {}, cards: {}, savings: {} }
-            console.error('[App] ❌ fetchTotalsByBucket error:', e); 
-            return { cash: {}, cards: {}, savings: {} } 
-          }),
-          10000,
-          'fetchTotalsByBucket'
-        )
-        
-        const listTransactionsPromise = withTimeout(
-          listTransactions({ from: 0, to: 9, search: '' }).then(txs => {
-            
-            return txs
-          }).catch(e => { 
-            if (abortController.signal.aborted) return []
-            console.error('[App] ❌ listTransactions error:', e); 
-            return [] 
-          }),
-          10000,
-          'listTransactions'
-        )
-        
-        const dataPromises = [
-          syncBinancePromise,
-          processSubscriptionsPromise,
-          listCardsPromise,
-          sumTransactionsPromise,
-          fetchTotalsPromise,
-          listTransactionsPromise
-        ]
-
-        // Wait for all promises to complete (including syncBinance)
-        const results = await Promise.allSettled(dataPromises)
-        
-        // Check if any critical promise failed
-        const criticalPromises = [listCardsPromise, sumTransactionsPromise, fetchTotalsPromise, listTransactionsPromise]
-        const criticalResults = results.slice(2) // Skip syncBinance and subscriptions
-        const allCriticalSucceeded = criticalResults.every(r => r.status === 'fulfilled')
-        
-        if (!allCriticalSucceeded) {
-          // Some critical promises failed, but continuing...
-        }
-        
-        
-        
-        // Check if request was aborted before completing
-        if (abortController.signal.aborted) {
-          
-          clearTimeout(safetyTimeout)
-          return
-        }
-        
-        
-      } catch (error) {
-        // Ignore abort errors
-        if (error.name === 'AbortError' || abortController.signal.aborted) {
-          
-          clearTimeout(safetyTimeout)
-          return
-        }
-        console.error('[App] ❌ Error loading initial data:', error)
-      } finally {
-        
-        
-        // Clear safety timeout
-        clearTimeout(safetyTimeout)
-        // Only reset if this is still the current request
-        if (!abortController.signal.aborted) {
-          
-          setSyncLoading(false)
-          setInitialDataLoading(false)
-          syncInProgressRef.current = false
-          abortControllerRef.current = null
-          
-          // Force a re-render check
-          setTimeout(() => {
-            
-          }, 100)
-        } else {
-          
-        }
-      }
-    }
-
-    
-    loadAllData()
-
-    // Cleanup function to abort request if component unmounts or effect re-runs
-    return () => {
-      
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort()
-        abortControllerRef.current = null
-      }
-      syncInProgressRef.current = false
-    }
-  }, [session?.user?.id]) // Dependency on user ID to re-run only if user changes
+    if (!session?.user?.id) return
+    const controller = new AbortController()
+    apiFetch('/api/syncBinance', { method: 'POST', signal: controller.signal })
+      .then(data => {
+        if (data?.success && data.synced) setTimeout(() => txBus.emit({ card_id: data.card_id, delta: data.delta }), 300)
+      })
+      .catch(e => {
+        if (e?.name !== 'AbortError') console.warn('Binance sync failed:', e?.message)
+      })
+    return () => controller.abort()
+  }, [session?.user?.id])
 
   // Логування статистики кешу після повного завантаження
   useEffect(() => {
@@ -459,13 +190,6 @@ export default function App(){
     return <ConnectClaudePage req={connectReq} onClose={() => setConnectReq(null)} />
   }
 
-  // Show loader while syncing Binance or loading initial data
-  if (syncLoading || initialDataLoading) {
-    
-    return (
-      <AppLoader subtitle={syncLoading ? 'Синхронізація даних' : 'Завантаження даних'} />
-    )
-  }
   
   
 

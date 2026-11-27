@@ -2,6 +2,7 @@ import { listCards } from './cards'
 import { sumTransactionsByCard } from './transactions'
 import { apiFetch } from '../utils.jsx'
 import { getBucket } from '../utils/accountKind'
+import { takePrimedCash } from '../utils/dataCache'
 
 function emptyOut() { return { cards: {}, savings: {}, cash: {}, investments: {} } }
 
@@ -28,8 +29,12 @@ export async function fetchBalances() {
     }
 
     try {
-      const cashTransactions = await apiFetch('/api/transactions?card_id=null&fields=amount,created_at,archives')
-      const cashSum = (cashTransactions || []).filter(tx => !tx.archives).reduce((sum, tx) => sum + Number(tx.amount || 0), 0)
+      // Home's one request at launch brought it already; otherwise ask
+      let cashSum = await takePrimedCash()
+      if (cashSum == null) {
+        const cashTransactions = await apiFetch('/api/transactions?card_id=null&fields=amount,created_at,archives')
+        cashSum = (cashTransactions || []).filter(tx => !tx.archives).reduce((sum, tx) => sum + Number(tx.amount || 0), 0)
+      }
       if (Math.abs(cashSum) > 0.001) out.cash.UAH = (out.cash.UAH || 0) + cashSum
     } catch (cashErr) {
       console.error('Failed to fetch cash transactions:', cashErr)
