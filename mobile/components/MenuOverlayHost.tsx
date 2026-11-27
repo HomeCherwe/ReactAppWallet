@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { Animated, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
 import { Colors } from '../constants/theme'
 import { triggerLightHaptic, triggerMediumHaptic, triggerSelectionHaptic } from '../utils/haptics'
-import { MenuRequest, closeMenu, setMenuPickHandler, useMenuOverlay } from '../store/useMenuOverlay'
+import { MenuRequest, addMenuHost, closeMenu, newMenuHostId, useMenuOverlay } from '../store/useMenuOverlay'
 import { GlassSurface } from './LiquidGlass'
 import Icon from './Icon'
 import { AI_ACCENT, AiGlowBorder } from './AiGlow'
@@ -44,7 +44,10 @@ function layoutFor(m: MenuRequest, screenW: number, screenH: number) {
  * shows a glass menu. Items follow the finger (slide and lift to pick) or can be tapped.
  */
 export default function MenuOverlayHost() {
-  const menu = useMenuOverlay(s => s.menu)
+  // Inside a sheet (a Modal) there is a second host: the newest one draws, the root one waits
+  const id = useRef(newMenuHostId()).current
+  const isTop = useMenuOverlay(s => s.hosts[s.hosts.length - 1] === id)
+  const menu = useMenuOverlay(s => (isTop ? s.menu : null))
   const highlight = useMenuOverlay(s => s.highlight)
   const { width: screenW, height: screenH } = useWindowDimensions()
   const anim = useRef(new Animated.Value(0)).current
@@ -63,8 +66,8 @@ export default function MenuOverlayHost() {
 
   // Item rects on screen, so the finger can be followed
   useEffect(() => {
-    if (menu) useMenuOverlay.setState({ itemRects: layoutFor(menu, screenW, screenH).rects })
-  }, [menu, screenW, screenH])
+    if (menu && isTop) useMenuOverlay.setState({ itemRects: layoutFor(menu, screenW, screenH).rects })
+  }, [menu, screenW, screenH, isTop])
 
   // Selection tick while sliding over items
   const lastHighlight = useRef<number | null>(null)
@@ -80,10 +83,7 @@ export default function MenuOverlayHost() {
   }
   const pickRef = useRef(pick)
   pickRef.current = pick
-  useEffect(() => {
-    setMenuPickHandler(i => pickRef.current(i))
-    return () => setMenuPickHandler(null)
-  }, [])
+  useEffect(() => addMenuHost(id, i => pickRef.current(i)), [])
 
   const m = shown
   if (!m) return null

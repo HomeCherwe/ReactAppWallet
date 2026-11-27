@@ -8,7 +8,13 @@ import { CardPeriod, getCardPeriodTotals, groupTransferLegs, listCardTransaction
 import { triggerLightHaptic } from '../utils/haptics'
 import SheetModal from './SheetModal'
 import { GlassPressable } from './LiquidGlass'
-import TxRow, { fmtMoney } from './TxRow'
+import TxRow, { closeSwipedRow, fmtMoney } from './TxRow'
+import MenuOverlayHost from './MenuOverlayHost'
+import RefundPickBar from './RefundPickBar'
+import { TxChange, useTxActions } from '../hooks/useTxActions'
+import { useRefundPick } from '../hooks/useRefundPick'
+import { txMenuActions } from '../utils/txMenu'
+import { MenuFrame, openMenu as openMenuOverlay } from '../store/useMenuOverlay'
 import TxSheet from './TxSheet'
 import { useExcludedCategories } from '../utils/statsCategories'
 import { cardLabel } from '../utils/cardLabel'
@@ -111,6 +117,29 @@ export default function CardTransactionsSheet({ card, balance, hidden, onClose, 
   // The transaction opened from this list; reloadKey refetches after it was saved
   const [openTx, setOpenTx] = useState<Transaction | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  // Only the totals (after a delete the row just leaves the list, the scroll stays)
+  const [totalsKey, setTotalsKey] = useState(0)
+
+  // Long press and swipe: the same actions as on Home
+  const handleChange = useCallback(
+    (change: TxChange, tx?: Transaction) => {
+      if (change === 'deleted' && tx) {
+        setTxs(prev => prev.filter(t => t.id !== tx.id))
+        setTotalsKey(k => k + 1)
+      } else {
+        setReloadKey(k => k + 1)
+      }
+      onChanged?.()
+    },
+    [onChanged]
+  )
+  const actions = useTxActions({ cards: cards.length ? cards : c ? [c] : [], hidden, onChanged: handleChange })
+  const refund = useRefundPick({
+    refundFor: actions.refundFor,
+    onRefundForChange: actions.setRefundFor,
+    onLinkRefund: actions.handlers.onLinkRefund,
+    onUnlinkRefund: actions.handlers.onUnlinkRefund,
+  })
 
   useEffect(() => {
     AsyncStorage.getItem(INCLUDE_ALL_KEY).then(v => setIncludeAll(v === '1'))
@@ -154,7 +183,7 @@ export default function CardTransactionsSheet({ card, balance, hidden, onClose, 
     getCardPeriodTotals(query, includeAll)
       .then(t => id === requestId.current && setTotals(t))
       .catch(e => console.warn('[CardTx] totals failed:', e))
-  }, [card, query, includeAll, reloadKey])
+  }, [card, query, includeAll, reloadKey, totalsKey])
 
   const loadMore = useCallback(() => {
     if (!query || loading || loadingMore || !hasMore) return
@@ -212,6 +241,24 @@ export default function CardTransactionsSheet({ card, balance, hidden, onClose, 
   const net = totals ? totals.income + totals.expense : 0
   const canNavigate = period === 'week' || period === 'month' || period === 'year'
   const grad = GRADIENTS[(c.id.charCodeAt(0) || 0) % GRADIENTS.length]
+
+  const openMenu = (tx: Transaction, frame: MenuFrame) => {
+    closeSwipedRow()
+    openMenuOverlay({
+      frame,
+      actions: txMenuActions(tx, {
+        ...actions.handlers,
+        onPressTx: setOpenTx,
+        onStartRefund: refund.startRefund,
+        canLinkRefund: true,
+        canUnlinkRefund: true,
+      }),
+      previewStyle: styles.menuPreview,
+      preview: (
+        <TxRow tx={tx} card={c} hidden={hidden} last swipeEnabled={false} transferWith={tx.is_transfer ? otherAccount(tx) : undefined} />
+      ),
+    })
+  }
 
   const pickPeriod = (p: PeriodId) => {
     if (p === period) return
@@ -331,7 +378,15 @@ export default function CardTransactionsSheet({ card, balance, hidden, onClose, 
   )
 
   return (
-    <SheetModal visible={!!card} onClose={onClose} sheetStyle={styles.sheet}>
+    <SheetModal
+      visible={!!card}
+      onClose={() => {
+        actions.setRefundFor(null)
+        onClose()
+      }}
+      sheetStyle={styles.sheet}
+      overlay={<MenuOverlayHost />}
+    >
       <View style={styles.titleRow}>
         <Text style={styles.title}>Транзакції картки</Text>
         <GlassPressable onPress={onClose} style={styles.closeBtn}>
@@ -360,9 +415,14 @@ export default function CardTransactionsSheet({ card, balance, hidden, onClose, 
             tx={item}
             card={c}
             hidden={hidden}
-            swipeEnabled={false}
             last={index === section.data.length - 1}
-            onPress={setOpenTx}
+            mode={refund.modeFor(item)}
+            wiggle={refund.wiggle}
+            wiggleDir={index % 2 ? 1 : -1}
+            onPress={tx => (actions.refundFor ? refund.pickRefund(tx) : setOpenTx(tx))}
+            onLongPress={openMenu}
+            onRefund={refund.startRefund}
+            onDelete={actions.handlers.onDeleteTx}
             transferWith={item.is_transfer ? otherAccount(item) : undefined}
           />
         )}
@@ -403,12 +463,18 @@ export default function CardTransactionsSheet({ card, balance, hidden, onClose, 
           setReloadKey(k => k + 1)
           onChanged?.()
         }}
+        onDeleted={deleted => handleChange('deleted', deleted)}
       />
+      {actions.sheets}
+      <RefundPickBar expense={actions.refundFor} currency={cur} hidden={hidden} onCancel={refund.cancelRefundPick} />
     </SheetModal>
   )
 }
 
 const styles = StyleSheet.create({
+  menuPreview: {
+    backgroundColor: '#141416',
+  },
   sheet: {
     borderTopLeftRadius: 32,
     borderTopRightRadius: 32,

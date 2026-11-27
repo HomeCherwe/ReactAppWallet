@@ -5,7 +5,7 @@ import {
   X, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, BarChart2,
   CreditCard, Calendar, ChevronDown, Eye, EyeOff, Settings
 } from 'lucide-react'
-import { listTransactionsByCard } from '../../api/transactions'
+import { listTransactionsByCard, deleteTransaction, archiveTransaction } from '../../api/transactions'
 import { listCards } from '../../api/cards'
 import { groupTransferLegs, listTransferLegs } from '../../api/transfers'
 import { useCardLabeler } from '../../store/useCardsStore'
@@ -13,6 +13,10 @@ import useMonoRates from '../../hooks/useMonoRates'
 import { usePreferences } from '../../context/PreferencesContext'
 import { updatePreferencesSection } from '../../api/preferences'
 import Row from './Row'
+import DetailsModal from './DetailsModal'
+import EditTxModal from './EditTxModal'
+import DeleteTxModal from './DeleteTxModal'
+import { txBus } from '../../utils/txBus'
 import { formatMoney } from '../../utils/cardTheme'
 import { isCategoryExcluded } from '../../utils/statsCategories'
 
@@ -250,6 +254,37 @@ export default function CardTransactionsDrawer({ card, onClose, onOpenSettings, 
     setHasMore(true)
     loadPage({ append: false })
   }, [loadPage])
+
+  // ── a transaction's actions (right click, swipe, ✎): open, edit, delete / archive ──
+  const [activeTx, setActiveTx] = useState(null)
+  const [txModal, setTxModal] = useState(null) // 'details' | 'edit' | 'delete'
+  const openTx = kind => tx => {
+    setActiveTx(tx)
+    setTxModal(kind)
+  }
+  const closeTxModal = () => {
+    setTxModal(null)
+    setActiveTx(null)
+  }
+  const dropTx = async remove => {
+    const tx = activeTx
+    if (!tx) return
+    try {
+      await remove(tx.id)
+      setTxs(prev => prev.filter(t => t.id !== tx.id))
+      txBus.emit({ card_id: tx.card_id || null, delta: -Number(tx.amount || 0) })
+    } catch (e) {
+      console.error('[CardTransactionsDrawer] delete failed', e)
+      alert(e?.message || 'Не вдалося видалити')
+    }
+    closeTxModal()
+  }
+  const txSaved = fresh => {
+    if (!fresh?.id) return
+    // Moved to another account: it leaves this card's list
+    if (fresh.card_id && card?.id && fresh.card_id !== card.id) setTxs(prev => prev.filter(t => t.id !== fresh.id))
+    else setTxs(prev => prev.map(t => (t.id === fresh.id ? { ...t, ...fresh } : t)))
+  }
 
   // ── infinite scroll ───────────────────────────────────────────────────────
   const bottomRef = useRef(null)
@@ -651,6 +686,9 @@ export default function CardTransactionsDrawer({ card, onClose, onOpenSettings, 
                           currency={cardMap[tx.card_id] || cur}
                           compact
                           transferWith={tx.is_transfer ? otherAccount(tx) : undefined}
+                          onDetails={openTx('details')}
+                          onEdit={openTx('edit')}
+                          onAskDelete={openTx('delete')}
                         />
                       ))}
                     </div>
@@ -679,6 +717,25 @@ export default function CardTransactionsDrawer({ card, onClose, onOpenSettings, 
           )}
         </div>
       </motion.div>
+
+      {/* Above the drawer (z 1000) */}
+      <DetailsModal
+        open={txModal === 'details'}
+        tx={activeTx}
+        currency={activeTx ? cardMap[activeTx.card_id] || cur : cur}
+        onClose={closeTxModal}
+        onEdit={tx => openTx('edit')(tx || activeTx)}
+        zIndex={1100}
+      />
+      <EditTxModal open={txModal === 'edit'} tx={activeTx} onClose={closeTxModal} onSaved={txSaved} zIndex={1100} />
+      <DeleteTxModal
+        open={txModal === 'delete'}
+        transaction={activeTx}
+        onDelete={() => dropTx(deleteTransaction)}
+        onArchive={() => dropTx(archiveTransaction)}
+        onCancel={closeTxModal}
+        zIndex={1100}
+      />
     </>,
     document.body
   )

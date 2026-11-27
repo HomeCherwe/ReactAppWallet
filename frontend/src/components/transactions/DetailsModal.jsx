@@ -6,7 +6,7 @@ import { canBeTransfer, listTransferLegs } from '../../api/transfers'
 import { useCardLabeler } from '../../store/useCardsStore'
 import BaseModal from '../BaseModal'
 
-export default function DetailsModal({ open, tx, currency, onClose, onEdit, onSplit, cards = [], onMakeTransfer, onUnlinkTransfer }) {
+export default function DetailsModal({ open, tx, currency, onClose, onEdit, onSplit, cards = [], onMakeTransfer, onUnlinkTransfer, zIndex = 110 }) {
   // A transfer: both of its legs (this one and the other account's), money out first
   const [legs, setLegs] = useState(null)
   const loadFor = useRef(null)
@@ -35,7 +35,7 @@ export default function DetailsModal({ open, tx, currency, onClose, onEdit, onSp
       open={open}
       onClose={onClose}
       title="Деталі транзакції"
-      zIndex={110}
+      zIndex={zIndex}
       maxWidth="md"
     >
       <div className="space-y-2 text-sm">

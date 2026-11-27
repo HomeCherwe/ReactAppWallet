@@ -27,6 +27,7 @@ import { GlassPressable } from './LiquidGlass'
 import Icon from './Icon'
 import { fmtMoney } from './TxRow'
 import { cardLabel } from '../utils/cardLabel'
+import { confirmDeleteTx } from '../utils/txActions'
 
 interface Props {
   tx: Transaction | null
@@ -35,16 +36,18 @@ interface Props {
   onClose: () => void
   /** Saved: the screen reloads its lists */
   onSaved: (updated: Transaction) => void
+  /** Deleted or archived from here (default: onSaved, so the screen reloads) */
+  onDeleted?: (tx: Transaction) => void
 }
 
 const parseAmount = (s: string) => parseFloat(s.replace(',', '.').replace(/\s/g, ''))
 
 /**
  * Tap on a transaction: everything about it, editable right here (no separate "edit" step).
- * "Зберегти" appears only once something changed. Actions (pin, split, refund, delete) live in
- * the long-press menu and the swipe.
+ * "Зберегти" appears only once something changed. Actions (pin, split, refund…) live in the
+ * long-press menu and the swipe; «Видалити» is also at the bottom here.
  */
-export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) {
+export default function TxSheet({ tx, cards, hidden, onClose, onSaved, onDeleted }: Props) {
   // Keep showing the last transaction while the sheet slides out
   const last = useRef<Transaction | null>(null)
   if (tx) last.current = tx
@@ -441,7 +444,21 @@ export default function TxSheet({ tx, cards, hidden, onClose, onSaved }: Props) 
           />
         </View>
 
-        <Text style={styles.footerHint}>Утримуйте транзакцію в списку — закріпити, розділити, повернення, видалити</Text>
+        <Pressable
+          onPress={() =>
+            t &&
+            confirmDeleteTx(t, deleted => {
+              onClose()
+              ;(onDeleted ?? onSaved)(deleted)
+            })
+          }
+          style={({ pressed }) => [styles.deleteBtn, pressed && { opacity: 0.7 }]}
+        >
+          <Icon name="trash" size={16} color={Colors.red} />
+          <Text style={styles.deleteText}>Видалити</Text>
+        </Pressable>
+
+        <Text style={styles.footerHint}>Утримуйте транзакцію в списку — закріпити, розділити, переказ, повернення</Text>
         <View style={{ height: 90 }} />
       </ScrollView>
 
@@ -752,6 +769,24 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.white80,
     marginTop: 2,
+  },
+  deleteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 48,
+    marginTop: 16,
+    marginBottom: 12,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 69, 58, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 69, 58, 0.25)',
+  },
+  deleteText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: Colors.red,
   },
   footerHint: {
     fontSize: 11,

@@ -1,20 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, Alert, Animated, LayoutAnimation } from 'react-native'
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, Animated, LayoutAnimation } from 'react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import Toast from 'react-native-toast-message'
 import { Colors, Radius } from '../constants/theme'
 import { Transaction } from '../api/transactions'
 import { Card } from '../api/cards'
 import { FeedSearch, TxFilter } from '../hooks/useTransactionFeed'
-import { triggerErrorHaptic, triggerLightHaptic, triggerMediumHaptic, triggerSuccessHaptic } from '../utils/haptics'
+import { triggerLightHaptic } from '../utils/haptics'
 import { TransactionRowsSkeleton } from './Skeleton'
 import BankSyncIndicator from './BankSyncIndicator'
 import TxSearchBar from './TxSearchBar'
 import PossibleDuplicates from './PossibleDuplicates'
-import TxRow, { RowMode, closeSwipedRow, fmtMoney } from './TxRow'
+import TxRow, { closeSwipedRow, fmtMoney } from './TxRow'
+import { useRefundPick } from '../hooks/useRefundPick'
+import { txMenuActions } from '../utils/txMenu'
 import AddToSubscriptionSheet from './AddToSubscriptionSheet'
 import { MenuAction, MenuFrame, openMenu as openMenuOverlay } from '../store/useMenuOverlay'
-import { pinStateOf, txDisplayTitle } from '../utils/pinned'
+import { pinStateOf } from '../utils/pinned'
 import { isSyncCategory } from '../utils/cardExclusion'
 import { useExcludedCategories } from '../utils/statsCategories'
 import { cardLabel } from '../utils/cardLabel'
@@ -39,10 +40,6 @@ function pluralHint(n: number): string {
   return 'підказок'
 }
 
-/** Can this transaction be picked as the refund of an expense? */
-function canBeRefund(t: Transaction): boolean {
-  return Number(t.amount) > 0 && !t.refund_for && !t.is_transfer && !t.archives
-}
 
 const smoothLayout = () =>
   LayoutAnimation.configureNext(LayoutAnimation.create(220, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity))
@@ -193,128 +190,12 @@ function TransactionList({
   const chevronRotate = chevron.interpolate({ inputRange: [0, 1], outputRange: ['-90deg', '0deg'] })
 
   // ---- Refund picking (like the web): swipe an expense → "Повернення" → tap the income ----
-  const setRefundFor = (tx: Transaction | null) => onRefundForChange(tx)
-  const [linking, setLinking] = useState(false)
-
-  // Pickable rows jiggle while picking (one shared native-driven value)
-  const wiggle = useRef(new Animated.Value(0)).current
-  useEffect(() => {
-    if (!refundFor) {
-      wiggle.stopAnimation()
-      wiggle.setValue(0)
-      return
-    }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(wiggle, { toValue: 1, duration: 110, useNativeDriver: true }),
-        Animated.timing(wiggle, { toValue: -1, duration: 220, useNativeDriver: true }),
-        Animated.timing(wiggle, { toValue: 0, duration: 110, useNativeDriver: true }),
-      ])
-    )
-    loop.start()
-    return () => loop.stop()
-  }, [refundFor])
-
-  const cancelRefundPick = useCallback(() => {
-    setRefundFor(null)
-  }, [])
-
-  const startRefund = useCallback(
-    (tx: Transaction) => {
-      if (tx.refund_for) {
-        // Already a refund: offer to unlink it
-        Alert.alert(
-          'Скасувати повернення?',
-          `«${txDisplayTitle(tx)}» знову рахуватиметься як звичайний дохід у статистиці.`,
-          [
-            { text: 'Ні', style: 'cancel' },
-            {
-              text: 'Скасувати повернення',
-              style: 'destructive',
-              onPress: async () => {
-                try {
-                  await onUnlinkRefund?.(tx)
-                  triggerSuccessHaptic()
-                  Toast.show({ type: 'success', text1: 'Повернення скасовано', text2: 'Транзакція знову враховується як дохід' })
-                } catch (e: any) {
-                  triggerErrorHaptic()
-                  Toast.show({ type: 'error', text1: 'Не вдалося скасувати повернення', text2: e?.message })
-                }
-              },
-            },
-          ]
-        )
-        return
-      }
-      if (Number(tx.amount) >= 0) {
-        triggerErrorHaptic()
-        Toast.show({
-          type: 'info',
-          text1: 'Повернення — тільки для витрат',
-          text2: 'Потягніть уліво витрату (−), а потім оберіть дохід, яким її повернули',
-          visibilityTime: 4500,
-        })
-        return
-      }
-      if (tx.is_transfer) {
-        triggerErrorHaptic()
-        Toast.show({ type: 'info', text1: 'Переказ не може мати повернення', text2: 'Оберіть звичайну витрату' })
-        return
-      }
-      triggerMediumHaptic()
-      setTimeout(() => setRefundFor(tx), 180)
-    },
-    [onUnlinkRefund]
-  )
-
-  const pickRefund = useCallback(
-    async (refund: Transaction) => {
-      const expense = refundFor
-      if (!expense || linking) return
-      if (refund.id === expense.id) return
-      if (!canBeRefund(refund)) {
-        triggerErrorHaptic()
-        Toast.show({
-          type: 'error',
-          text1: refund.refund_for ? 'Це вже повернення іншої витрати' : 'Оберіть дохід (+)',
-          text2: refund.refund_for
-            ? 'Спершу скасуйте його повернення свайпом уліво'
-            : 'Повернення — це гроші, що прийшли назад: від магазину, сервісу чи друга',
-          visibilityTime: 4000,
-        })
-        return
-      }
-      setLinking(true)
-      try {
-        await onLinkRefund?.(expense, refund)
-        triggerSuccessHaptic()
-        setRefundFor(null)
-        const refundAmount = Number(refund.amount)
-        // What's left after all its refunds (earlier ones are already in amount_stat)
-        const left = -(Number(expense.amount_stat ?? expense.amount) + refundAmount)
-        Toast.show({
-          type: 'success',
-          text1: 'Повернення прив’язано',
-          text2:
-            left > 0.005
-              ? `«${txDisplayTitle(expense)}»: у статистиці тепер −${fmtMoney(left)}`
-              : `«${txDisplayTitle(expense)}» повністю повернено`,
-        })
-      } catch (e: any) {
-        triggerErrorHaptic()
-        Toast.show({ type: 'error', text1: 'Не вдалося прив’язати повернення', text2: e?.message })
-      } finally {
-        setLinking(false)
-      }
-    },
-    [refundFor, linking, onLinkRefund]
-  )
-
-  const modeFor = (t: Transaction): RowMode => {
-    if (!refundFor) return 'normal'
-    if (t.id === refundFor.id) return 'target'
-    return canBeRefund(t) ? 'pickable' : 'dimmed'
-  }
+  const { linking, wiggle, cancelRefundPick, startRefund, pickRefund, modeFor } = useRefundPick({
+    refundFor,
+    onRefundForChange,
+    onLinkRefund,
+    onUnlinkRefund,
+  })
 
   const handlePress = useCallback(
     (tx: Transaction) => {
@@ -345,33 +226,22 @@ function TransactionList({
     })
   }
 
-  const menuActions = (tx: Transaction): MenuAction[] => {
-    const out: MenuAction[] = []
-    if (onAskAI) out.push({ label: 'Запитати AI', icon: 'sparkles', ai: true, onPress: () => onAskAI(tx) })
-    if (onStartSelect) out.push({ label: 'Вибрати', icon: 'check', onPress: () => onStartSelect(tx) })
-    const pin = pinStateOf(tx, pinnedCategories)
-    if (pin === 'category') {
-      out.push({ label: 'Обрати категорію', icon: 'tag', onPress: () => onPressTx?.(tx) })
-    } else if (onTogglePin) {
-      out.push({ label: pin === 'tag' ? 'Відкріпити' : 'Закріпити', icon: pin === 'tag' ? 'pinOff' : 'pin', onPress: () => onTogglePin(tx) })
-    }
-    if (onSplitTx && !tx.refund_for) out.push({ label: 'Розділити', icon: 'split', onPress: () => onSplitTx(tx) })
-    // A charge the bank named differently than its subscription (the web's right click has the same)
-    if (Number(tx.amount) < 0 && !tx.is_transfer && tx.status !== 'pending') {
-      out.push({ label: tx.subscription_id ? 'Підписка…' : 'Додати в підписку', icon: 'repeat', onPress: () => setSubscriptionTx(tx) })
-    }
-    if (tx.is_transfer && tx.transfer_id) {
-      if (onUnlinkTransfer) out.push({ label: 'Скасувати переказ', icon: 'transfer', onPress: () => onUnlinkTransfer(tx) })
-    } else if (onMakeTransfer && !tx.refund_for && !tx.is_debt && tx.status !== 'pending') {
-      out.push({ label: 'Зробити переказом', icon: 'transfer', onPress: () => onMakeTransfer(tx) })
-    }
-    if (onLinkRefund && Number(tx.amount) < 0 && !tx.is_transfer) {
-      out.push({ label: 'Прив’язати повернення', icon: 'undo', onPress: () => startRefund(tx) })
-    }
-    if (onUnlinkRefund && tx.refund_for) out.push({ label: 'Скасувати повернення', icon: 'close', onPress: () => startRefund(tx) })
-    if (onDeleteTx) out.push({ label: 'Видалити', icon: 'trash', destructive: true, onPress: () => onDeleteTx(tx) })
-    return out
-  }
+  const menuActions = (tx: Transaction): MenuAction[] =>
+    txMenuActions(tx, {
+      onAskAI,
+      onStartSelect,
+      pinnedCategories,
+      onPressTx,
+      onTogglePin,
+      onSplitTx,
+      onAddToSubscription: setSubscriptionTx,
+      onMakeTransfer,
+      onUnlinkTransfer,
+      onStartRefund: startRefund,
+      canLinkRefund: !!onLinkRefund,
+      canUnlinkRefund: !!onUnlinkRefund,
+      onDeleteTx,
+    })
 
   const swipeProps = {
     onRefund: onLinkRefund ? startRefund : undefined,

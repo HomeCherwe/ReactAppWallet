@@ -25,6 +25,8 @@ interface SheetModalProps {
   /** Called once the slide-in finishes (e.g. to focus an input without fighting the animation) */
   onOpened?: () => void
   children: React.ReactNode
+  /** Drawn over the whole screen inside the Modal, e.g. <MenuOverlayHost/> for long-press menus */
+  overlay?: React.ReactNode
 }
 
 /**
@@ -57,6 +59,7 @@ export default function SheetModal({
   sheetStyle,
   onOpened,
   children,
+  overlay,
 }: SheetModalProps) {
   const { height } = useWindowDimensions()
   const [mounted, setMounted] = useState(visible)
@@ -228,6 +231,7 @@ export default function SheetModal({
           </InsideGlassContext.Provider>
         </Animated.View>
       </KeyboardAvoidingView>
+      {overlay}
     </Modal>
   )
 }

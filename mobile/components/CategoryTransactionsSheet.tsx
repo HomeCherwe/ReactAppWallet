@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react'
+import React, { useCallback, useMemo, useRef, useState } from 'react'
 import { SectionList, StyleSheet, Text, View } from 'react-native'
 import { Colors } from '../constants/theme'
 import { Card } from '../api/cards'
@@ -7,7 +7,13 @@ import { formatMoney } from '../utils/currency'
 import { getCategoryIcon } from '../utils/categoryIcon'
 import { GlassPressable } from './LiquidGlass'
 import SheetModal from './SheetModal'
-import TxRow from './TxRow'
+import TxRow, { closeSwipedRow } from './TxRow'
+import MenuOverlayHost from './MenuOverlayHost'
+import RefundPickBar from './RefundPickBar'
+import { TxChange, useTxActions } from '../hooks/useTxActions'
+import { useRefundPick } from '../hooks/useRefundPick'
+import { txMenuActions } from '../utils/txMenu'
+import { MenuFrame, openMenu as openMenuOverlay } from '../store/useMenuOverlay'
 import TxSheet from './TxSheet'
 
 export interface CategoryView {
@@ -39,11 +45,49 @@ export default function CategoryTransactionsSheet({ view, cards, hidden, onClose
   if (view) last.current = view
   const v = view ?? last.current
   const [openTx, setOpenTx] = useState<Transaction | null>(null)
+  // Deleted or archived here: they leave the list at once; Analytics reloads when the sheet closes
+  const [removed, setRemoved] = useState<Set<string>>(() => new Set())
+  const dirty = useRef(false)
+  const lastViewKey = useRef<CategoryView | null>(null)
+  if (view && view !== lastViewKey.current) {
+    lastViewKey.current = view
+    dirty.current = false
+    if (removed.size) setRemoved(new Set())
+  }
+
+  // Long press and swipe: the same actions as on Home
+  const handleChange = useCallback(
+    (change: TxChange, tx?: Transaction) => {
+      if (change === 'deleted' && tx) {
+        setRemoved(prev => new Set(prev).add(tx.id))
+        dirty.current = true
+      } else {
+        // Split, transfer, refund…: the numbers change, Analytics reloads (like after an edit)
+        onChanged()
+      }
+    },
+    [onChanged]
+  )
+  const actions = useTxActions({ cards, hidden, onChanged: handleChange })
+  const refund = useRefundPick({
+    refundFor: actions.refundFor,
+    onRefundForChange: actions.setRefundFor,
+    onLinkRefund: actions.handlers.onLinkRefund,
+    onUnlinkRefund: actions.handlers.onUnlinkRefund,
+  })
+  const close = () => {
+    actions.setRefundFor(null)
+    if (dirty.current) {
+      dirty.current = false
+      onChanged()
+    } else onClose()
+  }
 
   const cardsById = useMemo(() => Object.fromEntries(cards.map(c => [c.id, c])), [cards])
   const sections = useMemo(() => {
     const out: { key: string; title: string; data: Transaction[] }[] = []
     for (const t of v?.transactions ?? []) {
+      if (removed.has(t.id)) continue
       const d = new Date(t.created_at)
       const key = d.toDateString()
       let s = out[out.length - 1]
@@ -54,13 +98,30 @@ export default function CategoryTransactionsSheet({ view, cards, hidden, onClose
       s.data.push(t)
     }
     return out
-  }, [v?.transactions])
+  }, [v?.transactions, removed])
 
   if (!v) return null
   const isIncome = v.kind === 'income'
+  const shownCount = v.transactions.filter(t => !removed.has(t.id)).length
+
+  const openMenu = (tx: Transaction, frame: MenuFrame) => {
+    closeSwipedRow()
+    openMenuOverlay({
+      frame,
+      actions: txMenuActions(tx, {
+        ...actions.handlers,
+        onPressTx: setOpenTx,
+        onStartRefund: refund.startRefund,
+        canLinkRefund: true,
+        canUnlinkRefund: true,
+      }),
+      previewStyle: styles.menuPreview,
+      preview: <TxRow tx={tx} card={tx.card_id ? cardsById[tx.card_id] : undefined} hidden={hidden} last swipeEnabled={false} />,
+    })
+  }
 
   return (
-    <SheetModal visible={!!view} onClose={onClose} sheetStyle={styles.sheet}>
+    <SheetModal visible={!!view} onClose={close} sheetStyle={styles.sheet} overlay={<MenuOverlayHost />}>
       <View style={styles.header}>
         <View style={[styles.icon, isIncome && styles.iconIncome]}>
           <Text style={styles.iconText}>{getCategoryIcon(v.category, isIncome ? 1 : -1)}</Text>
@@ -68,10 +129,10 @@ export default function CategoryTransactionsSheet({ view, cards, hidden, onClose
         <View style={styles.headerText}>
           <Text style={styles.title} numberOfLines={1}>{v.category}</Text>
           <Text style={styles.sub}>
-            {isIncome ? 'Доходи' : 'Витрати'} · {v.periodLabel} · {v.transactions.length}
+            {isIncome ? 'Доходи' : 'Витрати'} · {v.periodLabel} · {shownCount}
           </Text>
         </View>
-        <GlassPressable onPress={onClose} style={styles.closeBtn}>
+        <GlassPressable onPress={close} style={styles.closeBtn}>
           <Text style={styles.closeText}>✕</Text>
         </GlassPressable>
       </View>
@@ -95,9 +156,14 @@ export default function CategoryTransactionsSheet({ view, cards, hidden, onClose
             tx={item}
             card={item.card_id ? cardsById[item.card_id] : undefined}
             hidden={hidden}
-            swipeEnabled={false}
             last={index === section.data.length - 1}
-            onPress={setOpenTx}
+            mode={refund.modeFor(item)}
+            wiggle={refund.wiggle}
+            wiggleDir={index % 2 ? 1 : -1}
+            onPress={tx => (actions.refundFor ? refund.pickRefund(tx) : setOpenTx(tx))}
+            onLongPress={openMenu}
+            onRefund={refund.startRefund}
+            onDelete={actions.handlers.onDeleteTx}
           />
         )}
         ListFooterComponent={<View style={{ height: 40 }} />}
@@ -113,12 +179,18 @@ export default function CategoryTransactionsSheet({ view, cards, hidden, onClose
           setOpenTx(null)
           onChanged()
         }}
+        onDeleted={deleted => handleChange('deleted', deleted)}
       />
+      {actions.sheets}
+      <RefundPickBar expense={actions.refundFor} currency={v.currency} hidden={hidden} onCancel={refund.cancelRefundPick} />
     </SheetModal>
   )
 }
 
 const styles = StyleSheet.create({
+  menuPreview: {
+    backgroundColor: '#141416',
+  },
   sheet: {
     backgroundColor: 'rgba(14, 14, 18, 0.97)',
     borderTopLeftRadius: 32,
