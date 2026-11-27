@@ -49,6 +49,20 @@ export async function getStoredPrimaryCurrency(): Promise<string> {
   return 'UAH'
 }
 
+/** The main currency from preferences already loaded (Home's /api/home); remembered on the phone */
+export async function primaryCurrencyFromPrefs(prefs: Record<string, any> | null | undefined): Promise<string> {
+  const fromPrefs = prefs?.primaryCurrency
+  if (fromPrefs && SUPPORTED_CURRENCIES.some(c => c.code === fromPrefs)) {
+    AsyncStorage.setItem(SETTINGS_CURRENCY_KEY, fromPrefs).catch(() => {})
+    return fromPrefs
+  }
+  try {
+    const stored = await AsyncStorage.getItem(SETTINGS_CURRENCY_KEY)
+    if (stored && SUPPORTED_CURRENCIES.some(c => c.code === stored)) return stored
+  } catch {}
+  return 'UAH'
+}
+
 export async function setStoredPrimaryCurrency(currency: string): Promise<void> {
   try {
     // 1. Save locally for instant UI update

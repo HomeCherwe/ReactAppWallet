@@ -15,6 +15,8 @@ import { installAppLogs, registerAppLogs } from './appLogs.js'
 import { describeOpenAIError } from './openaiStatus.js'
 import { registerAssistant } from './assistant.js'
 import { registerClaudeConnector, CLAUDE_PREF_KEY } from './claudeConnector.js'
+import { registerHome } from './home.js'
+import { isOwnBgUrl, registerCardBackgrounds, withBgLinks } from './cardBg.js'
 import { ACCOUNT_KINDS, cardBucket, withCardV2 } from './accountKind.js'
 import { cardLabelOf, makeTransferFromExisting } from './transfers.js'
 dotenv.config();
@@ -371,6 +373,8 @@ const isSyncCategory = (category) => /\bsync$/i.test(String(category || '').trim
 
 // Cards API
 const CARD_COLUMNS = 'id, bank_id, name, currency, initial_balance, bg_url, card_number, expiry_date, cvv, created_at, exclude_from_stats, banks(name, iban, bic, beneficiary, exclude_from_stats)'
+// Lists leave the background picture out (megabytes): each card gets a link to it (cardBg.js)
+const CARD_LIST_COLUMNS = CARD_COLUMNS.replace('bg_url, ', '')
 
 // kind / goal_amount / archived sent by the apps, checked; fields that aren't sent stay as they are
 function cardV2Fields(body) {
@@ -393,7 +397,7 @@ app.get('/api/cards', getUserFromToken, async (req, res) => {
     const { data, error } = await withCardV2(extra =>
       supabase
         .from('cards')
-        .select(CARD_COLUMNS + extra)
+        .select(CARD_LIST_COLUMNS + extra)
         .eq('user_id', req.user_id)
         .order('created_at', { ascending: false })
     )
@@ -410,7 +414,7 @@ app.get('/api/cards', getUserFromToken, async (req, res) => {
       bank_exclude_from_stats: card.banks?.exclude_from_stats || false
     }))
 
-    res.json(transformed)
+    res.json(await withBgLinks(supabase, req, req.user_id, transformed))
   } catch (error) {
     console.error('GET /api/cards error:', error)
     res.status(500).json({ error: error.message })
@@ -499,6 +503,8 @@ app.put('/api/cards/:id', getUserFromToken, async (req, res) => {
     const patch = { ...req.body }
     delete patch.id // Не дозволяємо змінювати id
     delete patch.user_id // Не дозволяємо змінювати user_id
+    // The link to the picture sent back unchanged: the picture stays as it is
+    if (isOwnBgUrl(patch.bg_url)) delete patch.bg_url
     // Обчислювані поля з GET — не колонки таблиці
     delete patch.banks
     delete patch.bank_exclude_from_stats
@@ -3865,6 +3871,10 @@ registerAppLogs(app, { supabase, getUserFromToken })
 // «AI-асистент»: a chat that reads the user's data through fixed functions
 registerAssistant(app, { supabase, getUserFromToken })
 registerClaudeConnector(app, { supabase, getUserFromToken })
+// Home in one request (cards, sums, cash, preferences, the months added up)
+registerHome(app, { supabase, getUserFromToken })
+// Card background pictures, by signed link (lists no longer carry them)
+registerCardBackgrounds(app, { supabase })
 
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err)

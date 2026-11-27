@@ -20,6 +20,16 @@ export function invalidateSumByCardCache() {
   sumByCardGeneration++
 }
 
+/** Home's /api/home brought the cards: other screens use them without a second download */
+export function primeCardsCache(data: any[]) {
+  cardsCache = { data, timestamp: Date.now() }
+}
+
+/** …and the sum of each card */
+export function primeSumByCardCache(data: Record<string, any>) {
+  sumByCardCache = { data, timestamp: Date.now() }
+}
+
 export async function getCachedCards(fetcher: () => Promise<any[]>): Promise<any[]> {
   const now = Date.now()
   if (cardsCache && (now - cardsCache.timestamp) < CACHE_TTL) return cardsCache.data

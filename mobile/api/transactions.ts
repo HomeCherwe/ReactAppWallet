@@ -736,6 +736,60 @@ export interface MonthStat {
   expenseDiffPercent: number;
 }
 
+/**
+ * Added-up months (income / spending by "YYYY-MM") → Home's month cards, newest first, each with
+ * its change against the month before.
+ */
+export function statsFromBuckets(
+  monthBuckets: Map<string, { income: number; expense: number }>,
+  numMonths: number
+): MonthStat[] {
+  const now = new Date()
+  const result: MonthStat[] = []
+  const formatter = new Intl.DateTimeFormat('uk-UA', { month: 'long', year: 'numeric' })
+
+  for (let i = 0; i < numMonths; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    
+    const stats = monthBuckets.get(mKey) || { income: 0, expense: 0 }
+    
+    // Calculate diffs with previous month
+    const prevD = new Date(now.getFullYear(), now.getMonth() - i - 1, 1)
+    const prevMKey = `${prevD.getFullYear()}-${String(prevD.getMonth() + 1).padStart(2, '0')}`
+    const prevStats = monthBuckets.get(prevMKey) || { income: 0, expense: 0 }
+
+    let incDiff = 0
+    if (prevStats.income > 0) {
+      incDiff = ((stats.income - prevStats.income) / prevStats.income) * 100
+    } else if (stats.income > 0) {
+      incDiff = 100 // From 0 to something is a 100% increase conceptually for UI
+    }
+
+    let expDiff = 0
+    if (prevStats.expense > 0) {
+      expDiff = ((stats.expense - prevStats.expense) / prevStats.expense) * 100
+    } else if (stats.expense > 0) {
+      expDiff = 100
+    }
+
+    // capitalize month name
+    let label = formatter.format(d)
+    label = label.charAt(0).toUpperCase() + label.slice(1)
+
+    result.push({
+      id: mKey,
+      label,
+      income: stats.income,
+      expense: stats.expense,
+      incomeDiffPercent: incDiff,
+      expenseDiffPercent: expDiff,
+    })
+  }
+
+  return result
+}
+
 export async function getRecentMonthsStats(
   targetCurrency: string = "UAH",
   cards: any[] = [],
@@ -807,49 +861,7 @@ export async function getRecentMonthsStats(
       }
     }
 
-    const result: MonthStat[] = []
-    const formatter = new Intl.DateTimeFormat('uk-UA', { month: 'long', year: 'numeric' })
-
-    for (let i = 0; i < numMonths; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-      
-      const stats = monthBuckets.get(mKey) || { income: 0, expense: 0 }
-      
-      // Calculate diffs with previous month
-      const prevD = new Date(now.getFullYear(), now.getMonth() - i - 1, 1)
-      const prevMKey = `${prevD.getFullYear()}-${String(prevD.getMonth() + 1).padStart(2, '0')}`
-      const prevStats = monthBuckets.get(prevMKey) || { income: 0, expense: 0 }
-
-      let incDiff = 0
-      if (prevStats.income > 0) {
-        incDiff = ((stats.income - prevStats.income) / prevStats.income) * 100
-      } else if (stats.income > 0) {
-        incDiff = 100 // From 0 to something is a 100% increase conceptually for UI
-      }
-
-      let expDiff = 0
-      if (prevStats.expense > 0) {
-        expDiff = ((stats.expense - prevStats.expense) / prevStats.expense) * 100
-      } else if (stats.expense > 0) {
-        expDiff = 100
-      }
-
-      // capitalize month name
-      let label = formatter.format(d)
-      label = label.charAt(0).toUpperCase() + label.slice(1)
-
-      result.push({
-        id: mKey,
-        label,
-        income: stats.income,
-        expense: stats.expense,
-        incomeDiffPercent: incDiff,
-        expenseDiffPercent: expDiff,
-      })
-    }
-
-    return result
+    return statsFromBuckets(monthBuckets, numMonths)
   } catch (err) {
     console.error('getRecentMonthsStats error:', err)
     return []

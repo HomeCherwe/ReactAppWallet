@@ -18,6 +18,7 @@ import { useMarkAppInstalled } from "./hooks/useMarkAppInstalled"
 import { useSubscriptionReminders } from './hooks/useSubscriptionReminders'
 import { installErrorReporter } from './utils/errorReporter'
 import { startAutoUpdates } from './utils/appUpdate'
+import { clearLaunchCache } from './utils/launchCache'
 import { toastConfig } from "./components/ToastConfig"
 import MenuOverlayHost from "./components/MenuOverlayHost"
 
@@ -77,7 +78,11 @@ export default function App() {
       setSession(session)
       setLoading(false)
       if (event === 'SIGNED_IN') useSettingsStore.getState().initialize()
-      if (event === 'SIGNED_OUT') useSettingsStore.getState().reset()
+      if (event === 'SIGNED_OUT') {
+        useSettingsStore.getState().reset()
+        // What the last account saw stays with it
+        clearLaunchCache()
+      }
     })
 
     return () => subscription.unsubscribe()
